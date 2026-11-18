@@ -767,6 +767,9 @@ void cmdThread(Level * level)
 					}
 				}
 				bool found = false;
+#ifndef ARRAYSIZE
+#define ARRAYSIZE(a) (sizeof(a) / sizeof((a)[0]))
+#endif
 				for (int i = 0; i < ARRAYSIZE(cmds); i++)
 				{
 					if (cmds[i].cmdName == strlower(tokenised[0].str))
@@ -896,7 +899,7 @@ public:
 
 extern mce::TextureGroup texgroup;
 
-void main()
+int main()
 {
 #ifdef UNSTABLE_THREADING
 	WorkerPool::workers.resize((unsigned int)WorkerRole::NumWorkerRoles);

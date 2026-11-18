@@ -1,5 +1,5 @@
 #define NOMINMAX
-#include "shader.h"
+#include "Shader.h"
 #include <Resource/ResourceHelper.h>
 
 #include "Debug/Log.h"

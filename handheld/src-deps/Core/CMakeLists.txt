@@ -26,11 +26,13 @@ Utility/UUID.cpp
 PUBLIC
 )
 
+if(WIN32)
 target_compile_definitions(Core
     PRIVATE
     MCPE_PLATFORM_WIN32
     MCPE_PLATFORM_WINDOWS_FAMILY
 )
+endif()
 
 target_precompile_headers(Core PRIVATE     
 "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/pch_core.h>")

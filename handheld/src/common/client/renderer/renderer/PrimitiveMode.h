@@ -1,3 +1,3 @@
 #pragma once
 
-#include "renderer/hal/enums/PrimitiveMode.h"
+#include "Renderer/hal/enums/PrimitiveMode.h"

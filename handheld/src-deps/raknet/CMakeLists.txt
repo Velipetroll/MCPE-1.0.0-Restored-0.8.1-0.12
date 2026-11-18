@@ -1,4 +1,6 @@
 FILE(GLOB raknetCPPSources *.cpp)
 add_library(raknet STATIC ${raknetCPPSources})
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}")
+if(WIN32)
 target_link_libraries(raknet PRIVATE ws2_32)
+endif()

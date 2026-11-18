@@ -17,6 +17,9 @@
 #include "util/StringUtils.h"
 
 #include <sys/stat.h>
+#ifndef _WIN32
+#include <dirent.h>
+#endif
 
 #if defined(ANDROID)
 #include "android/AppPlatform_android23.h"

@@ -5,7 +5,7 @@ add_library(json STATIC)
 
 target_include_directories(json
 PUBLIC
-${CMAKE_CURRENT_SOURCE_DIR}
+${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
 target_sources(json

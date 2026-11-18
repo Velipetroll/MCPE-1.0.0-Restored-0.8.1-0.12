@@ -10,7 +10,7 @@
 #include "CommonTypes.h"
 #include "Core/Math/Color.h"
 #include "client/renderer/renderer/PrimitiveMode.h"
-#include "Renderer/HAL/Enums/PrimitiveMode.h"
+#include "Renderer/hal/enums/PrimitiveMode.h"
 #include "Renderer/Mesh.h"
 #include "Renderer/VertexFormat.h"
 #include "world/phys/Vec2.h"

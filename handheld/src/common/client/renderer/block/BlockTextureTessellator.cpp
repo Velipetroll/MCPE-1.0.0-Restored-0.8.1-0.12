@@ -6,7 +6,7 @@
 #include "world/phys/Vec3.h"
 #include "client/renderer/texture/TextureData.h"
 #include "Renderer/TextureGroup.h"
-#include "Renderer/HAL/Enums/TextureFormat.h"
+#include "Renderer/hal/enums/TextureFormat.h"
 #include "client/renderer/texture/TextureData.h"
 
 const float BlockTextureTessellator::TEXTURE_OFFSET = 0.0001f;

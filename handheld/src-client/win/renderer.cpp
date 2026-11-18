@@ -8,10 +8,10 @@
 #include <renderer/game/RenderChunkRenderParameters.h>
 #include "renderer/chunks/RenderChunk.h"
 #include "renderer/renderer/Tessellator.h"
-#include "world/level/Chunk/ChunkSource.h"
+#include "world/level/chunk/ChunkSource.h"
 #include "world/level/chunk/LevelChunk.h"
 #include "renderer/texture/TextureAtlas.h"
-#include "shader.h"
+#include "Shader.h"
 #include <world/level/FoliageColor.h>
 #include "renderer/renderer/RenderMaterialGroup.h"
 
@@ -988,7 +988,8 @@ void renderThreadStuff()
 
 				for (auto sl : mptrs)
 				{
-					(*sl)->myShader->setVector4("CHUNK_ORIGIN_AND_SCALE", glm::vec4(position.x, position.y, position.z, 1));
+					glm::vec4 chunkOrigin(position.x, position.y, position.z, 1);
+				(*sl)->myShader->setVector4("CHUNK_ORIGIN_AND_SCALE", chunkOrigin);
 				}
 
 				RenderChunkRenderParameters renderParams;
@@ -1011,7 +1012,8 @@ void renderThreadStuff()
 
 				for (auto sl : mptrs)
 				{
-					(*sl)->myShader->setVector4("CHUNK_ORIGIN_AND_SCALE", glm::vec4(position.x, position.y, position.z, 1));
+					glm::vec4 chunkOrigin(position.x, position.y, position.z, 1);
+				(*sl)->myShader->setVector4("CHUNK_ORIGIN_AND_SCALE", chunkOrigin);
 				}
 
 				RenderChunkRenderParameters renderParams;

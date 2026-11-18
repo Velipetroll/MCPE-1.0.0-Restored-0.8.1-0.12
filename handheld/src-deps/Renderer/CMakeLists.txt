@@ -153,8 +153,10 @@ target_link_libraries(Renderer
 PUBLIC
 Core glfw glad)
 
+if(WIN32)
 target_compile_definitions(Renderer
     PRIVATE
     MCPE_PLATFORM_WIN32
     MCPE_PLATFORM_WINDOWS_FAMILY
 )
+endif()

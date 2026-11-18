@@ -42,7 +42,7 @@ namespace mce
 
 		}
 
-		void TexturePair::operator=(TexturePair&& other)
+		void operator=(TexturePair&& other)
 		{
 			dt = std::move(other.dt);
 			tex = std::move(other.tex);
@@ -107,7 +107,7 @@ namespace mce
 
 		optional_ref<TexturePair> getTexturePair(const ResourceLocation&loc)
 		{
-			auto &n = mlll.find(loc);
+			auto n = mlll.find(loc);
 			if (n != mlll.end())
 			{
 				return optional_ref<TexturePair>(n->second);

@@ -100,7 +100,7 @@ void BlockTessellator::setRenderLayer(int layer) {
 	mRenderingLayer = layer;
 }
 
-Color getBlockColour(BlockID id)
+static Color getBlockColour(BlockID id)
 {
 	switch (id)
 	{

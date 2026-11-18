@@ -1,4 +1,4 @@
-#include "Textureptr.h"
+#include "TexturePtr.h"
 #include "RenderContext.h"
 #include <glad/glad.h>
 namespace mce

@@ -15,11 +15,11 @@
 
 #if !defined(MCPE_HEADLESS)
 #include "client/renderer/renderer/Tessellator.h"
-#include "Renderer/HAL/Enums/RenderFeature.h"
-#include "Renderer/HAL/Enums/BindFlagsBit.h"
-#include "Renderer/HAL/Interface/RenderContextImmediate.h"
-#include "Renderer/HAL/Interface/RenderContext.h"
-#include "Renderer/HAL/Interface/RenderDevice.h"
+#include "Renderer/hal/enums/RenderFeature.h"
+#include "Renderer/hal/enums/BindFlagsBit.h"
+#include "Renderer/hal/interface/RenderContextImmediate.h"
+#include "Renderer/hal/interface/RenderContext.h"
+#include "Renderer/hal/interface/RenderDevice.h"
 #include "Renderer/TextureGroup.h"
 #endif
 

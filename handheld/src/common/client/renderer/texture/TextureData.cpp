@@ -3,7 +3,7 @@
 #include "TextureData.h"
 //#include "Core/Debug/DebugUtils.h"
 
-#include "Renderer/HAL/Enums/TextureFormat.h"
+#include "Renderer/hal/enums/TextureFormat.h"
 
 //TextureData::TextureData(UTexture2D* texture)
 //	: mTexture(texture)

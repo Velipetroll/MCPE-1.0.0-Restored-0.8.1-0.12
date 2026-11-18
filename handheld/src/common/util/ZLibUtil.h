@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../common_header.h"
-#include <ZLib/zlib.h>
+#include <zlib.h>
 #include <algorithm>
 
 class ZLibUtil  {

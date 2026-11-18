@@ -5,7 +5,11 @@ project(minecraftpe)
 option(ISPUB "Is public build?" 0)
 option(DEDICATED_SERVER "Is dedicated server?" 0)#Really all this means now is whether to compile client/renderer lol
 option(TEST_THREADING "Thread test build" 0)#Really all this means now is whether to compile client/renderer lol
-set(COMPILE_PLATFORM "WINDOWS" CACHE STRING "Target PLATFORM (WINDOWS/ANDROID/IOS)")
+if(WIN32)
+    set(COMPILE_PLATFORM "WINDOWS" CACHE STRING "Target PLATFORM (WINDOWS/ANDROID/IOS/LINUX)")
+else()
+    set(COMPILE_PLATFORM "LINUX" CACHE STRING "Target PLATFORM (WINDOWS/ANDROID/IOS/LINUX)")
+endif()
 set(USEGUI 1)
 
 #Nice function for adding all the directories to the project
@@ -79,6 +83,7 @@ set_property(TARGET minecraftpe PROPERTY
 target_compile_definitions(minecraftpe
 PRIVATE NOMINMAX=1)
 
+if(WIN32)
 target_link_libraries(minecraftpe PUBLIC 
 ws2_32
 kernel32
@@ -94,6 +99,7 @@ uuid
 odbc32
 odbccp32
 )
+endif()
 
 target_sources(minecraftpe
 PRIVATE
@@ -522,7 +528,7 @@ PUBLIC
 #common/appplatformlistener.h
 common/common_header.h
 common/CommonTypes.h
-common/entityuniqueid.h
+common/EntityUniqueID.h
 common/SharedConstants.h
 common/GameVersion.h
 
@@ -1072,7 +1078,7 @@ ZLIB::ZLIB)
 
 endif()
 
-include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../src-deps/gsl")
+# include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../src-deps/gsl")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../src-deps/")
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../src-deps/raknet" "${CMAKE_CURRENT_BINARY_DIR}/raknet")
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../src-deps/Core" "${CMAKE_CURRENT_BINARY_DIR}/core")

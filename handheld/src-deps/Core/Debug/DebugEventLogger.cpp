@@ -4,6 +4,7 @@
 *********************************************************/
 
 #include "pch_core.h"
+#include <cstdarg>
 #include "DebugEventLogger.h"
 #include "Core/Utility/Filepath.h"
 #include "Core/Debug/Log.h"

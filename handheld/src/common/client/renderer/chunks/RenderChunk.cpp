@@ -19,7 +19,7 @@
 #include "util/PerfTimer.h"
 #include "util/Math.h"
 #include "Core/Debug/Log.h"
-#include "Renderer/MaterialPtr.h"
+#include "Renderer/materialptr.h"
 #include <TextureGroup.h>
 
  mce::MaterialPtr RenderChunk::sFadingChunksMaterial;
@@ -221,6 +221,7 @@ void RenderChunk::rebuild(bool transparentLeaves, bool smoothLighting) {
 //Basically what it is in ghidra
 double getTimeS()
 {
+#ifdef _WIN32
 	LARGE_INTEGER frequency;
 	LARGE_INTEGER counter;
 
@@ -229,6 +230,10 @@ double getTimeS()
 
 	return static_cast<double>(counter.QuadPart) /
 		static_cast<double>(frequency.QuadPart);
+#else
+	using clock = std::chrono::steady_clock;
+	return std::chrono::duration<double>(clock::now().time_since_epoch()).count();
+#endif
 }
 
 const mce::TexturePtr mce::TexturePtr::NONE = mce::TexturePtr();

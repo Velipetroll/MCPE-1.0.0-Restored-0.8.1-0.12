@@ -35,7 +35,7 @@ db/write_batch.cc
 db/zlib_compressor.cc
 helpers/memenv/memenv.cc
 port/port_posix.cc
-port/port_win.cc
+# port/port_win.cc (added conditionally for WIN32)
 #port/port_wp8.cc
 table/block.cc
 table/block_builder.cc
@@ -54,14 +54,14 @@ util/comparator.cc
 util/crc32c.cc
 util/env.cc
 util/env_posix.cc
-util/env_winrt.cc
+# util/env_winrt.cc (added conditionally for WIN32)
 util/filter_policy.cc
 util/hash.cc
 util/histogram.cc
 util/logging.cc
 util/options.cc
 util/status.cc
-util/win_logger.cc
+# util/win_logger.cc (added conditionally for WIN32)
 PUBLIC
 db/builder.h
 db/dbformat.h
@@ -124,8 +124,20 @@ util/randomx.h
 util/win_logger.h
 )
 
+if(WIN32)
+target_sources(leveldb PRIVATE
+    port/port_win.cc
+    util/env_winrt.cc
+    util/win_logger.cc
+)
 target_compile_definitions(leveldb
     PRIVATE
     MCPE_PLATFORM_WIN32
     MCPE_PLATFORM_WINDOWS_FAMILY
 )
+else()
+target_compile_definitions(leveldb
+    PUBLIC
+    LEVELDB_PLATFORM_POSIX
+)
+endif()

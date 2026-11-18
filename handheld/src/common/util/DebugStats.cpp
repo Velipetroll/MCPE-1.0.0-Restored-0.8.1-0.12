@@ -6,7 +6,7 @@
 
 #if defined(DEBUG_STATS) 
 #if !defined(MCPE_HEADLESS)
-#include "Renderer/HAL/Interface/RenderDevice.h"
+#include "Renderer/hal/interface/RenderDevice.h"
 #endif
 
 template<typename T>

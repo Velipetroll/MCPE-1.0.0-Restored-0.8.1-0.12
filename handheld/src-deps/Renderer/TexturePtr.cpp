@@ -1,4 +1,4 @@
-#include "textureptr.h"
+#include "TexturePtr.h"
 #include "TextureGroup.h"
 namespace mce
 {

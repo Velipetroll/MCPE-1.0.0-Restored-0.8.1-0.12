@@ -15,7 +15,9 @@
 #include "util/randomx.h"
 
 
+#ifdef _MSC_VER
 #define ssize_t __int64
+#endif
 
 namespace leveldb {
 

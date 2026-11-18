@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 
 namespace mce {
 	// TODO: this was in common_header.h, need to remove the dup or remove this

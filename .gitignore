@@ -2,3 +2,8 @@ handheld/build/win32/*
 handheld/data/*
 !handheld/data/restore/shaders/*
 .vscode/*
+
+build/
+assets/
+mcpe-engine/
+MCPE-0.8.1/

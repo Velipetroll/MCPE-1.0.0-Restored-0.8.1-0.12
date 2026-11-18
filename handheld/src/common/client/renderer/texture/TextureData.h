@@ -1,6 +1,6 @@
 #pragma once
-#include "Renderer/HAL/Enums/TextureFormat.h"
-#include "renderer/HAL/interface/Texture.h"
+#include "Renderer/hal/enums/TextureFormat.h"
+#include "Renderer/hal/interface/Texture.h"
 #include <vector>
 //theaperturecat
 

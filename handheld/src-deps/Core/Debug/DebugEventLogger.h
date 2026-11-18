@@ -4,6 +4,7 @@
 *********************************************************/
 
 #pragma once
+#include <memory>
 
 #define LOG_PRIORITY_VERBOSE 1 << 0
 #define LOG_PRIORITY_INFO    1 << 1
