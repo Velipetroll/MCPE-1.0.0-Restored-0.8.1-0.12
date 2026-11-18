@@ -899,7 +899,7 @@ public:
 
 extern mce::TextureGroup texgroup;
 
-int main()
+int main(int argc, char** argv)
 {
 #ifdef UNSTABLE_THREADING
 	WorkerPool::workers.resize((unsigned int)WorkerRole::NumWorkerRoles);
@@ -941,7 +941,23 @@ int main()
 	{ 1, 1 }
 	};*/
 
-	cmdThread(level);
+	bool useConsole = false;
+	for (int i = 1; i < argc; ++i) {
+		if (std::string(argv[i]) == "--console") {
+			useConsole = true;
+			break;
+		}
+	}
+
+	if (useConsole) {
+		cmdThread(level);
+	} else {
+		commandContext.level = level;
+		commandContext.dim = &level->createDimension(Overworld);
+		commandContext.running = true;
+		std::vector<std::string> emptyOpts, emptyParams;
+		mcmd_render(&commandContext, emptyOpts, emptyParams);
+	}
 
 
     //while (true)
