@@ -70,6 +70,7 @@ void GuiContext::resetSurvivalStats() {
 	exhaustion = 0.0f;
 	healTimer = 0.0f;
 	starveTimer = 0.0f;
+	hurtFlashTimer = 0.0f;
 }
 
 int GuiContext::applyDamage(int rawDamage, bool ignoreArmor) {
@@ -99,6 +100,7 @@ int GuiContext::applyDamage(int rawDamage, bool ignoreArmor) {
 	}
 
 	health = std::max(0, health - finalDamage);
+	hurtFlashTimer = 0.40f;
 	exhaustion = std::min(40.0f, exhaustion + 0.1f);
 	return finalDamage;
 }

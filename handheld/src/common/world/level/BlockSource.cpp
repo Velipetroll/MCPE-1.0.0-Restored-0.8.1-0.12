@@ -354,26 +354,23 @@ Height BlockSource::getAllocatedHeightAt(const BlockPos& xzPos) {
 }
 
 BrightnessPair BlockSource::getLightColor(const BlockPos& pos, Brightness minBlockLight) {
-// 	auto brightness = BrightnessPair{
-// 		mDimension.getSkyLight(),
-// 		LightLayer::BLOCK.getSurrounding()
-// 	};
-// 
-// 	if (pos.y >= 0 && pos.y < mMaxHeight) {
-// 		if (auto chunk = getChunk(pos)) {
-// 			//TODO //OPTIMIZE expose a getBrightnessPair in LevelChunk for efficiency
-// 			//this might be the most called brightness method because it's used in tessellating
-// 			ChunkBlockPos cp(pos);
-// 			brightness.sky = chunk->getBrightness(mDimension.getSkyLightLayer(), cp);
-// 			brightness.block = chunk->getBrightness(LightLayer::BLOCK, cp);
-// 		}
-// 	}
-// 
-// 	brightness.block = std::max(brightness.block, minBlockLight);
-// 
-// 	return brightness;
+	auto brightness = BrightnessPair{
+		mDimension.getSkyLight(),
+		LightLayer::BLOCK.getSurrounding()
+	};
 
-	return BrightnessPair();
+	if (pos.y >= 0 && pos.y < mMaxHeight) {
+		if (auto chunk = getChunk(pos)) {
+			ChunkBlockPos cp(pos);
+			brightness.sky = chunk->getBrightness(mDimension.getSkyLightLayer(), cp);
+			brightness.block = chunk->getBrightness(LightLayer::BLOCK, cp);
+		}
+	} else if (pos.y < 0) {
+		brightness.sky = Brightness::MIN;
+	}
+
+	brightness.block = std::max(brightness.block, minBlockLight);
+	return brightness;
 }
 
  Brightness BlockSource::getBrightness(const LightLayer& layer, const BlockPos& pos){
@@ -624,21 +621,21 @@ bool BlockSource::setBlockAndData(int x, int y, int z, BlockID id, DataID data, 
 	return setBlockAndData(x, y, z, FullBlock(id, data), updateFlags);
 }
 
-// void BlockSource::setBrightness(const LightLayer& layer, const BlockPos& pos, Brightness brightness) {
-// 	//@bounds-check
-// 	if (pos.y < 0 || pos.y >= mMaxHeight) {
-// 		return;
-// 	}
-// 
-// 	LevelChunk* c = getWritableChunk(pos);
-// 	if (!c) {
-// 		return;
-// 	}
-// 
-// 	if (c->setBrightness(layer, (ChunkBlockPos)pos, brightness) && shouldFireEvents(*c)) {
-// 		fireBrightnessChanged(pos);
-// 	}
-// }
+void BlockSource::setBrightness(const LightLayer& layer, const BlockPos& pos, Brightness brightness) {
+	//@bounds-check
+	if (pos.y < 0 || pos.y >= mMaxHeight) {
+		return;
+	}
+
+	LevelChunk* c = getWritableChunk(pos);
+	if (!c) {
+		return;
+	}
+
+	if (c->setBrightness(layer, (ChunkBlockPos)pos, brightness) && shouldFireEvents(*c)) {
+		fireBrightnessChanged(pos);
+	}
+}
 
 bool BlockSource::setBlockNoUpdate(int x, int y, int z, BlockID block) {
 	return setBlockAndData(BlockPos(x, y, z), FullBlock(block, 0), Block::UPDATE_NONE);

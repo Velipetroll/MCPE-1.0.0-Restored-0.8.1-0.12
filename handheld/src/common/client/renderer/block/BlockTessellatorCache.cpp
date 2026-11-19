@@ -47,6 +47,7 @@ BrightnessPair BlockTessellatorCache::getLightColor(const BlockPos& p) {
 		}
 	}
 
+	mLightColors[index] = light;
 	return light;
 }
 

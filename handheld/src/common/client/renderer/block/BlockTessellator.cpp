@@ -2092,9 +2092,6 @@ bool BlockTessellator::tessellateFenceGateInWorld(const FenceGateBlock& block, c
 }
 
 bool BlockTessellator::tessellateBedInWorld(const Block& block, const BlockPos& p, DataID data) {
-#ifdef DISABLEN
-	return false;
-#endif
 	int direction = Block::mBed->getBlockState(BlockState::Direction).get<int>(data);
 	bool isHead = BedBlock::isHeadPiece(data);
 
@@ -2203,28 +2200,61 @@ bool BlockTessellator::tessellateBedInWorld(const Block& block, const BlockPos& 
 	if (!mUseFixedTexture) {
 		BlockOccluder occluder(mBlockCache, block, p, mCurrentShape, Facing::ALL_EXCEPT_AXIS_Y[skipEdge], mRenderingGUI);
 
+		auto drawBedSideQuad = [&](float ax, float az, float bx, float bz, const TextureUVCoordinateSet& sideTex, bool flipU) {
+			float su0 = flipU ? sideTex._u1 : sideTex._u0;
+			float su1 = flipU ? sideTex._u0 : sideTex._u1;
+			float vTop = sideTex._v0 + (sideTex._v1 - sideTex._v0) * (7.0f / 16.0f);
+			float vMid = sideTex._v0 + (sideTex._v1 - sideTex._v0) * (13.0f / 16.0f);
+			float vBot = sideTex._v1;
+			float yBot = static_cast<float>(p.y);
+			float yMid = yBot + 3.0f / 16.0f;
+			float yTop = yBot + 9.0f / 16.0f;
+
+			// Upper mattress band (y = 3/16 .. 9/16)
+			mTessellator.vertexUV(ax, yTop, az, su0, vTop);
+			mTessellator.vertexUV(ax, yMid, az, su0, vMid);
+			mTessellator.vertexUV(bx, yMid, bz, su1, vMid);
+			mTessellator.vertexUV(bx, yTop, bz, su1, vTop);
+
+			// Two corner legs (0..3/16 and 13/16..1)
+			auto drawLeg = [&](float t0, float t1) {
+				float lx0 = ax + (bx - ax) * t0;
+				float lz0 = az + (bz - az) * t0;
+				float lx1 = ax + (bx - ax) * t1;
+				float lz1 = az + (bz - az) * t1;
+				float lu0 = su0 + (su1 - su0) * t0;
+				float lu1 = su0 + (su1 - su0) * t1;
+				mTessellator.vertexUV(lx0, yMid, lz0, lu0, vMid);
+				mTessellator.vertexUV(lx0, yBot, lz0, lu0, vBot);
+				mTessellator.vertexUV(lx1, yBot, lz1, lu1, vBot);
+				mTessellator.vertexUV(lx1, yMid, lz1, lu1, vMid);
+			};
+			drawLeg(0.0f, 3.0f / 16.0f);
+			drawLeg(13.0f / 16.0f, 1.0f);
+		};
+
 		if (!occluder.occludes(Facing::NORTH)) {
 			_tex1(toUV(mCurrentShape.min.z > 0 ? centerColor : getLightColor(p.north())));
 			mTessellator.color(Color::SHADE_NORTH_SOUTH);
-			BlockTextureTessellator::render(mTessellator, Vec3((float)p.x, (float)p.y, (float)p.z - 0.5f), _getTexture(block, 2, data), true, tex.pixelWidth(), flipEdge == Facing::NORTH ? 180.0f : 0.0f);
+			drawBedSideQuad(x1, z0, x0, z0, _getTexture(block, Facing::NORTH, data), flipEdge == Facing::NORTH);
 		}
 
 		if (!occluder.occludes(Facing::SOUTH)) {
 			_tex1(toUV(mCurrentShape.max.z < 1 ? centerColor : getLightColor(p.south())));
 			mTessellator.color(Color::SHADE_NORTH_SOUTH);
-			BlockTextureTessellator::render(mTessellator, Vec3((float)p.x, (float)p.y, (float)p.z + 0.5f), _getTexture(block, 3, data), true, tex.pixelWidth(), flipEdge == Facing::SOUTH ? 0.0f : 180.0f);
+			drawBedSideQuad(x0, z1, x1, z1, _getTexture(block, Facing::SOUTH, data), flipEdge == Facing::SOUTH);
 		}
 
 		if (!occluder.occludes(Facing::WEST)) {
 			_tex1(toUV(mCurrentShape.min.x > 0 ? centerColor : getLightColor(p.west())));
 			mTessellator.color(Color::SHADE_WEST_EAST);
-			BlockTextureTessellator::render(mTessellator, Vec3((float)p.x - 0.5f, (float)p.y, (float)p.z), _getTexture(block, 4, data), true, tex.pixelWidth(), flipEdge == Facing::WEST ? 270.0f : 90.0f);
+			drawBedSideQuad(x0, z0, x0, z1, _getTexture(block, Facing::WEST, data), flipEdge == Facing::WEST);
 		}
 
 		if (!occluder.occludes(Facing::EAST)) {
 			_tex1(toUV(mCurrentShape.max.x < 1 ? centerColor : getLightColor(p.east())));
 			mTessellator.color(Color::SHADE_WEST_EAST);
-			BlockTextureTessellator::render(mTessellator, Vec3((float)p.x + 0.5f, (float)p.y, (float)p.z), _getTexture(block, 5, data), true, tex.pixelWidth(), flipEdge == Facing::EAST ? 90.0f : 270.0f);
+			drawBedSideQuad(x1, z1, x1, z0, _getTexture(block, Facing::EAST, data), flipEdge == Facing::EAST);
 		}
 	}
 

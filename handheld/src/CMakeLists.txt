@@ -1022,6 +1022,8 @@ target_compile_definitions(minecraftpe
 target_sources(minecraftpe 
 PRIVATE
 common/client/game/ExternalServersFile.cpp
+common/client/game/MobSystem.cpp
+common/client/game/WorldLighting.cpp
 common/client/gui/AddExternalServerScreen.cpp
 common/client/gui/Button.cpp
 common/client/gui/ChatScreen.cpp
@@ -1072,8 +1074,10 @@ common/client/renderer/texture/TextureTessellator.cpp
 common/client/renderer/texture/TextureUVCoordinateSet.cpp
 PUBLIC
 common/client/game/ExternalServersFile.h
+common/client/game/MobSystem.h
 common/client/game/NullVibration.h
 common/client/game/Vibration.h
+common/client/game/WorldLighting.h
 common/client/renderer/block/AmbientOcclusionCalculator.h
 common/client/renderer/block/BlockGraphics.h
 common/client/renderer/block/BlockOccluder.h

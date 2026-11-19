@@ -21,6 +21,12 @@ void Gui::render(float partialTicks, int guiW, int guiH, Options* options, Font*
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+	if (ctx && ctx->hurtFlashTimer > 0.0f) {
+		float t = std::min(1.0f, ctx->hurtFlashTimer / 0.40f);
+		uint32_t alpha = static_cast<uint32_t>(t * 96.0f);
+		fill(0, 0, guiW, guiH, (alpha << 24) | 0x00CC1010);
+	}
+
 	renderCrosshair(guiW, guiH);
 	renderHotbar(guiW, guiH, font, ctx);
 	if (!ctx || !ctx->isCreative) {
@@ -29,6 +35,11 @@ void Gui::render(float partialTicks, int guiW, int guiH, Options* options, Font*
 		if (armor > 0) {
 			renderArmor(guiW, guiH);
 		}
+	}
+	if (ctx && ctx->statusBannerTimer > 0.0f && !ctx->statusBannerText.empty() && font) {
+		float fade = std::min(1.0f, ctx->statusBannerTimer * 2.0f);
+		uint32_t alpha = static_cast<uint32_t>(fade * 255.0f);
+		drawCenteredString(font, ctx->statusBannerText, guiW / 2, guiH - 58, (alpha << 24) | 0x00FFFFFF);
 	}
 	if (options && options->useTouchUI) {
 		renderTouchButtons(guiW, guiH, font);

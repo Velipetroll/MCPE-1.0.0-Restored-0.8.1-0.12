@@ -401,6 +401,9 @@ void RenderChunk::makeReadyAsEmpty(bool hasNoSkyLight) {
  	}
  
  	auto& materialSet = forceFog ? sFogMaterialMap : sMaterialMap;
+ 	if (forceFog && (!materialSet[(int)layer].operator->() || !materialSet[(int)layer]->myShader)) {
+ 		return sMaterialMap[(int)layer];
+ 	}
  	return materialSet[(int)layer];
  }
 

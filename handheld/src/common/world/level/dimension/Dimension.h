@@ -143,8 +143,7 @@ public:
 	}
 
 	Brightness getSkyLight() const {
-		//return getSkyLightLayer().getSurrounding();
-		return Brightness();
+		return getSkyLightLayer().getSurrounding();
 	}
 
 	bool hasWeather() const {

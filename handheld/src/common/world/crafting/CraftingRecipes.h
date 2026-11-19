@@ -130,6 +130,7 @@ struct ToolInfo {
 	int harvestLevel = 0; // 0=wood/gold, 1=stone, 2=iron, 3=diamond
 	float speedMultiplier = 1.0f;
 	int maxDurability = 0;
+	int attackDamage = 1;
 };
 
 struct FoodInfo {

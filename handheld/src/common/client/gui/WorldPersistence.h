@@ -9,6 +9,12 @@ struct WorldMetadata {
 	int64_t seed = 0;
 	bool isCreative = false;
 
+	int64_t worldTime = 1000;
+	bool hasBedSpawn = false;
+	int bedSpawnX = 0;
+	int bedSpawnY = 80;
+	int bedSpawnZ = 0;
+
 	bool hasPlayerPos = false;
 	float playerX = 0.5f;
 	float playerY = 80.0f;

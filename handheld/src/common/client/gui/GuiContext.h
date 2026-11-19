@@ -73,8 +73,19 @@ struct GuiContext {
 	float exhaustion = 0.0f;
 	float healTimer = 0.0f;
 	float starveTimer = 0.0f;
+	float hurtFlashTimer = 0.0f;
 	bool respawnRequested = false;
+	bool sleepCompleteRequested = false;
 	std::vector<ItemInstance> pendingWorldDrops;
+
+	int64_t worldTime = 1000;
+	float worldTimeSubTick = 0.0f;
+	bool hasBedSpawn = false;
+	int bedSpawnX = 0;
+	int bedSpawnY = 80;
+	int bedSpawnZ = 0;
+	std::string statusBannerText;
+	float statusBannerTimer = 0.0f;
 
 	std::string activeWorldDir = "./restore";
 	std::string activeWorldName = "My World";

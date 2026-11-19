@@ -22,14 +22,20 @@
 #include "client/gui/InventoryScreens.h"
 #include "client/gui/StartMenuScreen.h"
 #include "client/gui/DeathScreen.h"
+#include "client/gui/InBedScreen.h"
 #include "client/gui/GuiComponent.h"
 #include "client/gui/WorldPersistence.h"
+#include "client/game/WorldLighting.h"
+#include "client/game/MobSystem.h"
 #include "world/crafting/CraftingRecipes.h"
 #include "world/level/storage/DBStorage.h"
 #include "platform/threading/WorkerPool.h"
 #include "world/phys/HitResult.h"
 #include "world/Facing.h"
+#include "world/item/Item.h"
 #include "world/level/block/Block.h"
+#include "world/level/block/BedBlock.h"
+#include "world/level/block/TorchBlock.h"
 #include "world/level/material/Material.h"
 #include "util/Random.h"
 #include "stb_image.h"
@@ -347,9 +353,6 @@ public:
 				int damage = static_cast<int>(std::ceil(mFallDistance - 3.0f));
 				if (damage > 0) {
 					gGuiContext.applyDamage(damage, false);
-					if (gGuiContext.health <= 0 && !gGuiContext.currentScreen) {
-						gGuiContext.setScreen(new DeathScreen());
-					}
 				}
 				mFallDistance = 0.0f;
 			}
@@ -528,9 +531,8 @@ public:
 			}
 		}
 
-		if (mBB.min.y < -16.0f && !gGuiContext.isCreative && gGuiContext.health > 0 && !gGuiContext.currentScreen) {
+		if (mBB.min.y < -16.0f && !gGuiContext.isCreative && gGuiContext.health > 0) {
 			gGuiContext.health = 0;
-			gGuiContext.setScreen(new DeathScreen());
 		}
 	}
 };
@@ -1036,6 +1038,29 @@ void rebuildChunksForBlock(const BlockPos& pos,
 	if (ly == 15 && subY < 7) rebuildSubChunkAt(baseCp, subY + 1, rc, chunkBuilder, camPos);
 }
 
+void updateLightingAndRebuildChunks(BlockSource& region,
+                                    const BlockPos& pos,
+                                    std::unordered_map<ChunkPos, RenderChunk*[8]>& rc,
+                                    std::unique_ptr<RenderChunkBuilder>& chunkBuilder,
+                                    const Vec3& camPos) {
+	std::unordered_set<ChunkPos> touchedChunks;
+	WorldLighting::updateLocalLighting(region, pos, 15, &touchedChunks);
+
+	// Always rebuild the block's own subchunk & immediate touching subchunks
+	rebuildChunksForBlock(pos, rc, chunkBuilder, camPos);
+
+	ChunkPos baseCp(pos);
+	int baseSubY = pos.y >> 4;
+	int minSubY = std::max(0, (pos.y - 15) >> 4);
+	int maxSubY = std::min(7, (pos.y + 15) >> 4);
+	for (const ChunkPos& cp : touchedChunks) {
+		for (int sy = minSubY; sy <= maxSubY; ++sy) {
+			if (cp == baseCp && sy == baseSubY) continue;
+			rebuildSubChunkAt(cp, sy, rc, chunkBuilder, camPos);
+		}
+	}
+}
+
 void drawBlockSelectionOutline(const BlockPos& pos, const AABB& localShape,
                                const glm::mat4& projection, const glm::mat4& view) {
 	const float eps = 0.0025f;
@@ -1232,10 +1257,10 @@ void syncFurnaceBlockStates(BlockSource& region, GuiContext& ctx,
 		bool isBurning = kv.second.burnTime > 0.0f;
 		if (fb.id == Block::mFurnace->mID && isBurning) {
 			region.setBlockAndData(pos, FullBlock(Block::mLitFurnace->mID, fb.data), Block::UPDATE_ALL);
-			rebuildChunksForBlock(pos, rc, chunkBuilder, camPos);
+			updateLightingAndRebuildChunks(region, pos, rc, chunkBuilder, camPos);
 		} else if (fb.id == Block::mLitFurnace->mID && !isBurning) {
 			region.setBlockAndData(pos, FullBlock(Block::mFurnace->mID, fb.data), Block::UPDATE_ALL);
-			rebuildChunksForBlock(pos, rc, chunkBuilder, camPos);
+			updateLightingAndRebuildChunks(region, pos, rc, chunkBuilder, camPos);
 		}
 	}
 }
@@ -1279,6 +1304,37 @@ bool openInteractiveBlockScreen(BlockSource& region, const BlockPos& pos, BlockI
 	}
 	if (block == Block::mEnderChest) {
 		guiCtx.setScreen(new ChestScreen(BlockCoordKey{ pos.x, pos.y, pos.z }, false));
+		return true;
+	}
+	if (block == Block::mBed) {
+		BlockPos headPos = pos;
+		FullBlock fb = region.getBlockAndData(pos);
+		if (!BedBlock::isHeadPiece(fb.data)) {
+			int dir = Block::mBed->getBlockState(BlockState::Direction).get<int>(fb.data);
+			BlockPos candidate(pos.x + BedBlock::HEAD_DIRECTION_OFFSETS[dir][0],
+			                   pos.y,
+			                   pos.z + BedBlock::HEAD_DIRECTION_OFFSETS[dir][1]);
+			if (region.getBlockID(candidate) == Block::mBed->mID) {
+				headPos = candidate;
+			}
+		}
+		BlockPos standPos = headPos.above();
+		BlockPos foundStand;
+		if (BedBlock::findStandUpPosition(region, headPos, 0, foundStand)) {
+			standPos = foundStand;
+		}
+		guiCtx.hasBedSpawn = true;
+		guiCtx.bedSpawnX = standPos.x;
+		guiCtx.bedSpawnY = standPos.y;
+		guiCtx.bedSpawnZ = standPos.z;
+
+		int64_t dayTime = guiCtx.worldTime % 24000;
+		if (dayTime >= 12541 && dayTime < 23458) {
+			guiCtx.setScreen(new InBedScreen());
+		} else {
+			guiCtx.statusBannerText = "You can only sleep at night";
+			guiCtx.statusBannerTimer = 2.5f;
+		}
 		return true;
 	}
 	return false;
@@ -1386,6 +1442,8 @@ void updateWorldItemEntities(std::vector<WorldItemEntity>& items,
 }
 
 void renderWorldItemEntities(const std::vector<WorldItemEntity>& items,
+                             BlockSource& region,
+                             float sunFactor,
                              const glm::mat4& projection,
                              const glm::mat4& view) {
 	if (items.empty()) return;
@@ -1423,6 +1481,8 @@ void renderWorldItemEntities(const std::vector<WorldItemEntity>& items,
 
 	for (const auto& e : items) {
 		if (e.item.isNull()) continue;
+		float itemLight = WorldLighting::sampleWorldBrightness(
+			region, BlockPos(Math::floor(e.pos.x), Math::floor(e.pos.y + 0.25f), Math::floor(e.pos.z)), sunFactor);
 		float bob = std::sin(e.age * 3.0f + e.spinPhase) * 0.07f;
 		float yawDeg = e.age * 70.0f + e.spinPhase * 57.29578f;
 
@@ -1445,20 +1505,20 @@ void renderWorldItemEntities(const std::vector<WorldItemEntity>& items,
 			}
 
 			// Top (+Y) & Bottom (-Y)
-			drawCubeQuad(blockInfo.topTex, 1.0f, -0.5f, y1, 0.5f, 0.5f, y1, 0.5f, 0.5f, y1, -0.5f, -0.5f, y1, -0.5f, 0.0f, 1.0f);
-			drawCubeQuad(blockInfo.topTex, 0.5f, -0.5f, y0, -0.5f, 0.5f, y0, -0.5f, 0.5f, y0, 0.5f, -0.5f, y0, 0.5f, 0.0f, 1.0f);
+			drawCubeQuad(blockInfo.topTex, 1.0f * itemLight, -0.5f, y1, 0.5f, 0.5f, y1, 0.5f, 0.5f, y1, -0.5f, -0.5f, y1, -0.5f, 0.0f, 1.0f);
+			drawCubeQuad(blockInfo.topTex, 0.5f * itemLight, -0.5f, y0, -0.5f, 0.5f, y0, -0.5f, 0.5f, y0, 0.5f, -0.5f, y0, 0.5f, 0.0f, 1.0f);
 			// Front (+Z) & Back (-Z)
-			drawCubeQuad(blockInfo.frontTex, 0.8f, -0.5f, y0, 0.5f, 0.5f, y0, 0.5f, 0.5f, y1, 0.5f, -0.5f, y1, 0.5f, vTop, 1.0f);
-			drawCubeQuad(blockInfo.frontTex, 0.8f, 0.5f, y0, -0.5f, -0.5f, y0, -0.5f, -0.5f, y1, -0.5f, 0.5f, y1, -0.5f, vTop, 1.0f);
+			drawCubeQuad(blockInfo.frontTex, 0.8f * itemLight, -0.5f, y0, 0.5f, 0.5f, y0, 0.5f, 0.5f, y1, 0.5f, -0.5f, y1, 0.5f, vTop, 1.0f);
+			drawCubeQuad(blockInfo.frontTex, 0.8f * itemLight, 0.5f, y0, -0.5f, -0.5f, y0, -0.5f, -0.5f, y1, -0.5f, 0.5f, y1, -0.5f, vTop, 1.0f);
 			// Right (+X) & Left (-X)
-			drawCubeQuad(blockInfo.sideTex, 0.65f, 0.5f, y0, 0.5f, 0.5f, y0, -0.5f, 0.5f, y1, -0.5f, 0.5f, y1, 0.5f, vTop, 1.0f);
-			drawCubeQuad(blockInfo.sideTex, 0.65f, -0.5f, y0, -0.5f, -0.5f, y0, 0.5f, -0.5f, y1, 0.5f, -0.5f, y1, -0.5f, vTop, 1.0f);
+			drawCubeQuad(blockInfo.sideTex, 0.65f * itemLight, 0.5f, y0, 0.5f, 0.5f, y0, -0.5f, 0.5f, y1, -0.5f, 0.5f, y1, 0.5f, vTop, 1.0f);
+			drawCubeQuad(blockInfo.sideTex, 0.65f * itemLight, -0.5f, y0, -0.5f, -0.5f, y0, 0.5f, -0.5f, y1, 0.5f, -0.5f, y1, -0.5f, vTop, 1.0f);
 		} else {
 			std::string tex = getItemTexturePath(e.item);
 			glDisable(GL_BLEND);
 			glScalef(0.36f, 0.36f, 0.36f);
 			if (!tex.empty() && GuiComponent::bindTexture(tex)) {
-				glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+				glColor4f(itemLight, itemLight, itemLight, 1.0f);
 				glBegin(GL_QUADS);
 				glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, -0.5f, 0.0f);
 				glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, -0.5f, 0.0f);
@@ -1489,16 +1549,70 @@ void renderWorldItemEntities(const std::vector<WorldItemEntity>& items,
 	glMatrixMode(GL_MODELVIEW);
 }
 
-GLuint createLightmapTexture() {
+struct CelestialInfo {
+	float timeOfDay = 0.0f;   // 0=noon, 0.25=sunset, 0.5=midnight, 0.75=sunrise
+	float sunHeight = 1.0f;   // cos(timeOfDay * 2pi)
+	float sunFactor = 1.0f;   // 0.16..1.0 used for lightmap & entity shading
+	float dayBright = 1.0f;   // 0..1 sky brightness
+	float sunriseAlpha = 0.0f;
+	glm::vec3 sunriseRgb = glm::vec3(0.95f, 0.42f, 0.15f);
+	glm::vec3 skyColor = glm::vec3(0.48f, 0.68f, 1.0f);
+	glm::vec3 fogColor = glm::vec3(0.67f, 0.82f, 1.0f);
+};
+
+CelestialInfo computeCelestialInfo(int64_t worldTime, float subTick) {
+	CelestialInfo info;
+	int dayStep = static_cast<int>(worldTime % 24000);
+	float td = (static_cast<float>(dayStep) + subTick) / 24000.0f - 0.25f;
+	if (td < 0.0f) td += 1.0f;
+	if (td > 1.0f) td -= 1.0f;
+	float tdo = td;
+	td = 1.0f - (std::cos(td * 3.14159265f) + 1.0f) * 0.5f;
+	td = tdo + (td - tdo) / 3.0f;
+
+	info.timeOfDay = td;
+	info.sunHeight = std::cos(td * 6.2831853f);
+	info.dayBright = std::max(0.0f, std::min(1.0f, info.sunHeight * 2.0f + 0.5f));
+	float skyScale = std::max(0.0f, std::min(1.0f, info.sunHeight * 2.0f + 0.2f));
+	info.sunFactor = 0.16f + 0.84f * skyScale;
+
+	glm::vec3 daySky(0.47f, 0.67f, 1.00f);
+	glm::vec3 nightSky(0.015f, 0.020f, 0.055f);
+	info.skyColor = glm::mix(nightSky, daySky, info.dayBright);
+
+	glm::vec3 dayFog(0.67f, 0.82f, 1.00f);
+	glm::vec3 nightFog(0.025f, 0.032f, 0.080f);
+	info.fogColor = glm::mix(nightFog, dayFog, info.dayBright);
+
+	const float span = 0.4f;
+	if (info.sunHeight >= -span && info.sunHeight <= span) {
+		float aa = (info.sunHeight / span) * 0.5f + 0.5f;
+		float mixVal = 1.0f - (1.0f - std::sin(aa * 3.14159265f)) * 0.99f;
+		mixVal = mixVal * mixVal;
+		info.sunriseAlpha = mixVal;
+		info.sunriseRgb = glm::vec3(aa * 0.3f + 0.7f, aa * aa * 0.7f + 0.2f, aa * aa * 0.05f + 0.15f);
+		info.fogColor = glm::mix(info.fogColor, info.sunriseRgb, mixVal * 0.55f);
+		info.skyColor = glm::mix(info.skyColor, info.sunriseRgb, mixVal * 0.25f);
+	}
+	return info;
+}
+
+void updateLightmapTexture(GLuint tex, float sunFactor) {
 	unsigned char pixels[16 * 16 * 4];
 	for (int sky = 0; sky < 16; ++sky) {
-		float skyBright = std::pow(0.82f, static_cast<float>(15 - sky));
+		float skyEff = (sky == 0 ? 0.0f : std::pow(0.82f, static_cast<float>(15 - sky))) * sunFactor;
+		float skyR = skyEff * (0.72f + 0.28f * sunFactor);
+		float skyG = skyEff * (0.78f + 0.22f * sunFactor);
+		float skyB = skyEff;
 		for (int blk = 0; blk < 16; ++blk) {
-			float blkBright = std::pow(0.80f, static_cast<float>(15 - blk));
-			float base = std::max(skyBright, blkBright);
-			float r = std::min(1.0f, std::max(0.18f, base * 0.96f + blkBright * 0.12f));
-			float g = std::min(1.0f, std::max(0.18f, base * 0.96f + blkBright * 0.05f));
-			float b = std::min(1.0f, std::max(0.20f, base * 0.98f));
+			float blkEff = (blk == 0 ? 0.0f : std::pow(0.80f, static_cast<float>(15 - blk)));
+			float blkR = blkEff * 1.00f;
+			float blkG = blkEff * 0.88f;
+			float blkB = blkEff * 0.70f;
+			const float amb = 0.06f;
+			float r = std::min(1.0f, std::max({ amb, skyR, blkR }) + std::min(skyR, blkR) * 0.15f);
+			float g = std::min(1.0f, std::max({ amb, skyG, blkG }) + std::min(skyG, blkG) * 0.12f);
+			float b = std::min(1.0f, std::max({ amb, skyB, blkB }) + std::min(skyB, blkB) * 0.10f);
 			int idx = (sky * 16 + blk) * 4;
 			pixels[idx + 0] = static_cast<unsigned char>(r * 255.0f);
 			pixels[idx + 1] = static_cast<unsigned char>(g * 255.0f);
@@ -1506,6 +1620,12 @@ GLuint createLightmapTexture() {
 			pixels[idx + 3] = 255;
 		}
 	}
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 16, 16, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+GLuint createLightmapTexture() {
 	GLuint tex = 0;
 	glGenTextures(1, &tex);
 	glBindTexture(GL_TEXTURE_2D, tex);
@@ -1513,9 +1633,154 @@ GLuint createLightmapTexture() {
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 16, 16, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	unsigned char blank[16 * 16 * 4] = {};
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 16, 16, 0, GL_RGBA, GL_UNSIGNED_BYTE, blank);
 	glBindTexture(GL_TEXTURE_2D, 0);
+	updateLightmapTexture(tex, 1.0f);
 	return tex;
+}
+
+void renderSkyAndCelestials(const glm::mat4& projection,
+                            const glm::mat4& camRelView,
+                            const CelestialInfo& sky,
+                            int64_t worldTime) {
+	glUseProgram(0);
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_ALPHA_TEST);
+
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glLoadMatrixf(glm::value_ptr(projection));
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+	glLoadMatrixf(glm::value_ptr(camRelView));
+
+	// Sky dome disc above horizon
+	glDisable(GL_TEXTURE_2D);
+	glDisable(GL_BLEND);
+	glBegin(GL_TRIANGLE_FAN);
+	glColor3f(sky.skyColor.r, sky.skyColor.g, sky.skyColor.b);
+	glVertex3f(0.0f, 16.0f, 0.0f);
+	for (int i = 0; i <= 16; ++i) {
+		float ang = static_cast<float>(i) * (6.2831853f / 16.0f);
+		glVertex3f(std::cos(ang) * 200.0f, 16.0f, std::sin(ang) * 200.0f);
+	}
+	glEnd();
+
+	// Horizon mist gradient band (fog color at horizon -> sky color up high)
+	glBegin(GL_QUAD_STRIP);
+	for (int i = 0; i <= 24; ++i) {
+		float ang = static_cast<float>(i) * (6.2831853f / 24.0f);
+		float cx = std::cos(ang) * 180.0f;
+		float cz = std::sin(ang) * 180.0f;
+		glColor3f(sky.fogColor.r, sky.fogColor.g, sky.fogColor.b);
+		glVertex3f(cx, -12.0f, cz);
+		glColor3f(sky.skyColor.r, sky.skyColor.g, sky.skyColor.b);
+		glVertex3f(cx, 28.0f, cz);
+	}
+	glEnd();
+
+	// Sunrise / Sunset directional glow
+	if (sky.sunriseAlpha > 0.01f) {
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		glPushMatrix();
+		// Sunset (td ~ 0.25) is -X, Sunrise (td ~ 0.75) is +X
+		bool isSunrise = (sky.timeOfDay > 0.5f);
+		glRotatef(isSunrise ? -90.0f : 90.0f, 0.0f, 0.0f, 1.0f);
+		glBegin(GL_TRIANGLE_FAN);
+		glColor4f(sky.sunriseRgb.r, sky.sunriseRgb.g, sky.sunriseRgb.b, sky.sunriseAlpha * 0.85f);
+		glVertex3f(0.0f, 100.0f, 0.0f);
+		for (int i = 0; i <= 16; ++i) {
+			float a = static_cast<float>(i) * (6.2831853f / 16.0f);
+			glColor4f(sky.sunriseRgb.r, sky.sunriseRgb.g, sky.sunriseRgb.b, 0.0f);
+			glVertex3f(std::sin(a) * 120.0f, std::cos(a) * 120.0f, 0.0f);
+		}
+		glEnd();
+		glPopMatrix();
+	}
+
+	// Celestial rotation: rotates +Y (Sun) from Noon -> West (-X) -> Midnight (-Y) -> East (+X)
+	glPushMatrix();
+	glRotatef(sky.timeOfDay * 360.0f, 0.0f, 0.0f, 1.0f);
+
+	// Twinkling stars at night
+	if (sky.dayBright < 0.45f) {
+		float starAlpha = std::min(1.0f, (0.45f - sky.dayBright) / 0.40f) * 0.85f;
+		glDisable(GL_TEXTURE_2D);
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+		static std::vector<Vec3> starPts;
+		if (starPts.empty()) {
+			Random starRng(10842);
+			for (int i = 0; i < 320; ++i) {
+				float sx = starRng.nextFloat() * 2.0f - 1.0f;
+				float sy = starRng.nextFloat() * 2.0f - 1.0f;
+				float sz = starRng.nextFloat() * 2.0f - 1.0f;
+				float len2 = sx * sx + sy * sy + sz * sz;
+				if (len2 > 0.01f && len2 < 1.0f) {
+					float inv = 100.0f / std::sqrt(len2);
+					starPts.emplace_back(sx * inv, sy * inv, sz * inv);
+				}
+			}
+		}
+		glPointSize(2.0f);
+		glColor4f(0.95f, 0.97f, 1.0f, starAlpha);
+		glBegin(GL_POINTS);
+		for (const auto& sp : starPts) {
+			glVertex3f(sp.x, sp.y, sp.z);
+		}
+		glEnd();
+	}
+
+	glEnable(GL_TEXTURE_2D);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE);
+
+	// Sun (+Y)
+	if (GuiComponent::bindTexture("textures/environment/sun.png")) {
+		const float s = 26.0f;
+		glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+		glBegin(GL_QUADS);
+		glTexCoord2f(0.0f, 0.0f); glVertex3f(-s, 100.0f, -s);
+		glTexCoord2f(1.0f, 0.0f); glVertex3f( s, 100.0f, -s);
+		glTexCoord2f(1.0f, 1.0f); glVertex3f( s, 100.0f,  s);
+		glTexCoord2f(0.0f, 1.0f); glVertex3f(-s, 100.0f,  s);
+		glEnd();
+	}
+
+	// Moon (-Y) with 8 phases from 4x2 atlas
+	if (GuiComponent::bindTexture("textures/environment/moon_phases.png")) {
+		int phase = static_cast<int>((worldTime / 24000) % 8);
+		int col = phase % 4;
+		int row = phase / 4;
+		float u0 = col * 0.25f;
+		float u1 = (col + 1) * 0.25f;
+		float v0 = row * 0.5f;
+		float v1 = (row + 1) * 0.5f;
+		const float m = 18.0f;
+		glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+		glBegin(GL_QUADS);
+		glTexCoord2f(u0, v0); glVertex3f(-m, -100.0f,  m);
+		glTexCoord2f(u1, v0); glVertex3f( m, -100.0f,  m);
+		glTexCoord2f(u1, v1); glVertex3f( m, -100.0f, -m);
+		glTexCoord2f(u0, v1); glVertex3f(-m, -100.0f, -m);
+		glEnd();
+	}
+
+	glPopMatrix(); // end celestial rotation
+
+	glDisable(GL_BLEND);
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	glMatrixMode(GL_MODELVIEW);
+	glPopMatrix();
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glMatrixMode(GL_MODELVIEW);
+	glDepthMask(GL_TRUE);
+	glEnable(GL_DEPTH_TEST);
 }
 
 GLuint createWhiteTexture() {
@@ -1724,7 +1989,7 @@ std::string getArmorTexturePath(const ItemInstance& item, bool layer2) {
 	return "";
 }
 
-void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspect, bool viewBobbing) {
+void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspect, bool viewBobbing, float lightShade) {
 	glUseProgram(0);
 	glEnable(GL_DEPTH_TEST);
 	glDepthMask(GL_TRUE);
@@ -1772,7 +2037,7 @@ void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspe
 			glScalef(0.0625f, 0.0625f, 0.0625f);
 			glTranslatef(-1.0f, 4.0f, 0.0f);
 			glRotatef(180.0f, 1.0f, 0.0f, 0.0f);
-			drawPlayerBox3D(-2.0f, -6.0f, -2.0f, 4.0f, 12.0f, 4.0f, 40, 16, 4, 12, 4, 64.0f, 64.0f, 1.0f);
+			drawPlayerBox3D(-2.0f, -6.0f, -2.0f, 4.0f, 12.0f, 4.0f, 40, 16, 4, 12, 4, 64.0f, 64.0f, lightShade);
 		}
 	} else {
 		glTranslatef(-swSqrtSin * 0.40f, swDoubleSin * 0.20f, -swSin * 0.20f);
@@ -1785,7 +2050,7 @@ void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspe
 
 		BlockRenderInfo blockInfo = getBlockRenderInfo(held);
 		if (blockInfo.is3D) {
-			drawTexturedCube3D(blockInfo, 1.0f);
+			drawTexturedCube3D(blockInfo, lightShade);
 		} else {
 			std::string tex = getItemTexturePath(held);
 			if (held.getItem() && held.getItem()->isMirroredArt()) {
@@ -1806,7 +2071,7 @@ void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspe
 			glTranslatef(8.0f, 0.5f, 8.0f);
 			glScalef(16.0f, 16.0f, -16.0f);
 			glRotatef(90.0f, 1.0f, 0.0f, 0.0f);
-			drawTexturedSprite3D(tex, 1.0f);
+			drawTexturedSprite3D(tex, lightShade);
 		}
 	}
 
@@ -2090,20 +2355,33 @@ void renderThreadStuff()
 	mce::MaterialPtr chunk2BelowMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_water_below");
 	mce::MaterialPtr chunk3Material = mce::RenderMaterialGroup::switchable.getMaterial("terrain_blend");
 	mce::MaterialPtr chunk3BelowMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_blend_below");
+
+	mce::MaterialPtr chunkFogMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_opaque_fog");
+	mce::MaterialPtr chunkFogNoCullMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_opaque_fog_no_cull");
+	mce::MaterialPtr chunkAlphaFogMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_alpha_fog");
+	mce::MaterialPtr chunkAlphaSingleFogMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_alpha_single_side_fog");
+	mce::MaterialPtr chunkDoubleSideFogMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_doubleside_fog");
+	mce::MaterialPtr chunkWaterFogMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_water_fog");
+	mce::MaterialPtr chunkWaterBelowFogMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_water_below_fog");
+	mce::MaterialPtr chunkBlendFogMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_blend_fog");
+	mce::MaterialPtr chunkBlendBelowFogMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_blend_below_fog");
 	
 	std::vector<mce::MaterialPtr*> mptrs = {
 		&chunkMaterial, &chunkSeasonsMaterial,
 		&chunkAlphaMaterial, &chunkAlphaSingleMaterial, &chunkAlphaSeasonsMaterial,
 		&chunkDoubleSideMaterial,
 		&chunk2Material, &chunk2BelowMaterial,
-		&chunk3Material, &chunk3BelowMaterial
+		&chunk3Material, &chunk3BelowMaterial,
+		&chunkFogMaterial, &chunkFogNoCullMaterial,
+		&chunkAlphaFogMaterial, &chunkAlphaSingleFogMaterial,
+		&chunkDoubleSideFogMaterial,
+		&chunkWaterFogMaterial, &chunkWaterBelowFogMaterial,
+		&chunkBlendFogMaterial, &chunkBlendBelowFogMaterial
 	};
 
 	glm::mat4 projection = glm::perspective(glm::radians(85.0f),
 		(float)screenx / (float)screeny,
 		0.1f, 1000.0f);
-
-
 
 	for (auto sl : mptrs)
 	{
@@ -2112,8 +2390,8 @@ void renderThreadStuff()
 		(*sl)->myShader->setInt("TEXTURE_0", 0);
 		(*sl)->myShader->setInt("TEXTURE_1", 1);
 		(*sl)->myShader->setInt("TEXTURE_2", 2);
-		(*sl)->myShader->setFloat("FAR_CHUNKS_DISTANCE", 80.0f);
-		(*sl)->myShader->setFloat("RENDER_DISTANCE", 80.0f);
+		(*sl)->myShader->setFloat("FAR_CHUNKS_DISTANCE", 48.0f);
+		(*sl)->myShader->setFloat("RENDER_DISTANCE", 48.0f);
 	}
 
 	std::unordered_map<ChunkPos,RenderChunk*[8]> rc;
@@ -2121,12 +2399,15 @@ void renderThreadStuff()
 	std::unordered_set<ChunkPos> needsReRendering;
 	std::unordered_set<ChunkPos> needsReRendering2;
 	std::unordered_set<ChunkPos> loadedChunkSet;
+	std::unordered_set<ChunkPos> litChunks;
 
 	std::unique_ptr<RenderChunkBuilder> chunkBuilder;
 
 	Recipes::getInstance()->init();
 
 	std::vector<WorldItemEntity> worldItems;
+	MobManager mobManager;
+	float lastLightmapSun = -1.0f;
 	bool hasInitialSpawn = false;
 	bool isMining = false;
 	BlockPos miningPos(0, -1, 0);
@@ -2173,7 +2454,10 @@ void renderThreadStuff()
 		needsReRendering.clear();
 		needsReRendering2.clear();
 		loadedChunkSet.clear();
+		litChunks.clear();
 		worldItems.clear();
+		mobManager.clear();
+		lastLightmapSun = -1.0f;
 		isMining = false;
 		miningProgress = 0.0f;
 		hazardDamageCooldown = 0.0f;
@@ -2204,6 +2488,7 @@ void renderThreadStuff()
 		Level* level = new Level(std::make_unique<DBStorage>(meta.name, dbPath));
 		level->getLevelData().setLevelName(meta.name);
 		level->getLevelData().setSeed(static_cast<RandomSeed>(meta.seed));
+		level->setTime(static_cast<int>(gGuiContext.worldTime));
 		commandContext.level = level;
 		commandContext.dim = &level->createDimension(Overworld);
 		c.setWorld(commandContext.level, commandContext.dim);
@@ -2253,24 +2538,127 @@ void renderThreadStuff()
 			glfwSetWindowShouldClose(window, true);
 			continue;
 		}
-		glDepthMask(GL_TRUE);
-		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);//Set clear color to be brown with 0 alpha 
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);//Actually clears screen + depth buffer 
+
+		float clampedFrameDt = std::min(std::max(deltaTime, 0.0001f), 0.1f);
+		if (gGuiContext.hurtFlashTimer > 0.0f) {
+			gGuiContext.hurtFlashTimer = std::max(0.0f, gGuiContext.hurtFlashTimer - clampedFrameDt);
+		}
+		if (gGuiContext.statusBannerTimer > 0.0f) {
+			gGuiContext.statusBannerTimer = std::max(0.0f, gGuiContext.statusBannerTimer - clampedFrameDt);
+		}
 
 		bool renderWorld = ((gGuiContext.state == GameState::InGame) ||
 		                    (gGuiContext.currentScreen && gGuiContext.currentScreen->renderGameBehind())) &&
 		                   commandContext.level != nullptr && commandContext.dim != nullptr;
 
+		if (gGuiContext.sleepCompleteRequested && commandContext.level) {
+			gGuiContext.sleepCompleteRequested = false;
+			int64_t nextDay = (gGuiContext.worldTime / 24000) + 1;
+			gGuiContext.worldTime = nextDay * 24000;
+			gGuiContext.worldTimeSubTick = 0.0f;
+			commandContext.level->setTime(static_cast<int>(gGuiContext.worldTime));
+			gGuiContext.statusBannerText = "Good morning!";
+			gGuiContext.statusBannerTimer = 2.0f;
+		}
+
+		if (gGuiContext.state == GameState::InGame && !gGuiContext.loadingChunks &&
+		    !gGuiContext.currentScreen && commandContext.level) {
+			gGuiContext.worldTimeSubTick += clampedFrameDt * 20.0f;
+			if (gGuiContext.worldTimeSubTick >= 1.0f) {
+				int64_t addTicks = static_cast<int64_t>(gGuiContext.worldTimeSubTick);
+				gGuiContext.worldTime += addTicks;
+				gGuiContext.worldTimeSubTick -= static_cast<float>(addTicks);
+				commandContext.level->setTime(static_cast<int>(gGuiContext.worldTime));
+			}
+		}
+
+		CelestialInfo skyInfo = computeCelestialInfo(gGuiContext.worldTime, gGuiContext.worldTimeSubTick);
+		if (std::abs(skyInfo.sunFactor - lastLightmapSun) > 0.005f) {
+			updateLightmapTexture(gLightmapTex, skyInfo.sunFactor);
+			lastLightmapSun = skyInfo.sunFactor;
+		}
+
+		glDepthMask(GL_TRUE);
+		if (renderWorld) {
+			glClearColor(skyInfo.fogColor.r, skyInfo.fogColor.g, skyInfo.fogColor.b, 1.0f);
+		} else {
+			glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+		}
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
 		if ((renderWorld || gGuiContext.loadingChunks) && commandContext.level != nullptr && commandContext.dim != nullptr) {
 			if (gGuiContext.state == GameState::InGame && !gGuiContext.loadingChunks &&
 			    (!hasInitialSpawn || gGuiContext.respawnRequested)) {
-				auto* spawnChunk = commandContext.dim->getChunkSource().getOrLoadChunk(ChunkPos(0, 0), ChunkSource::LoadMode::None);
-				if (spawnChunk && spawnChunk->getState() == ChunkState::Loaded) {
-					c.spawnAtSurface();
-					hasInitialSpawn = true;
-					gGuiContext.respawnRequested = false;
+				if (gGuiContext.respawnRequested && gGuiContext.hasBedSpawn) {
+					ChunkPos bedCp(gGuiContext.bedSpawnX >> 4, gGuiContext.bedSpawnZ >> 4);
+					auto* bedChunk = commandContext.dim->getChunkSource().getOrLoadChunk(bedCp, ChunkSource::LoadMode::None);
+					if (bedChunk && bedChunk->getState() == ChunkState::Loaded) {
+						bool bedFound = false;
+						BlockSource& reg = c.getRegion();
+						for (int ox = -2; ox <= 2 && !bedFound; ++ox) {
+							for (int oz = -2; oz <= 2 && !bedFound; ++oz) {
+								for (int oy = -1; oy <= 1 && !bedFound; ++oy) {
+									if (Block::mBed && reg.getBlockID(gGuiContext.bedSpawnX + ox, gGuiContext.bedSpawnY + oy, gGuiContext.bedSpawnZ + oz) == Block::mBed->mID) {
+										bedFound = true;
+									}
+								}
+							}
+						}
+						if (bedFound) {
+							c.setPositionAndLook(gGuiContext.bedSpawnX + 0.5f,
+							                     static_cast<float>(gGuiContext.bedSpawnY) + 0.05f,
+							                     gGuiContext.bedSpawnZ + 0.5f, c.yaw, 0.0);
+						} else {
+							gGuiContext.hasBedSpawn = false;
+							c.spawnAtSurface();
+						}
+						hasInitialSpawn = true;
+						gGuiContext.respawnRequested = false;
+					}
+				} else {
+					auto* spawnChunk = commandContext.dim->getChunkSource().getOrLoadChunk(ChunkPos(0, 0), ChunkSource::LoadMode::None);
+					if (spawnChunk && spawnChunk->getState() == ChunkState::Loaded) {
+						c.spawnAtSurface();
+						hasInitialSpawn = true;
+						gGuiContext.respawnRequested = false;
+					}
 				}
 			}
+
+			auto triggerPlayerDeath = [&]() {
+				if (gGuiContext.currentScreen) return;
+				if (!gGuiContext.isCreative) {
+					static Random deathDropRng;
+					Vec3 deathPos(c.mPos.x, c.mBB.min.y + 0.5f, c.mPos.z);
+					auto dropOnDeath = [&](ItemInstance& slot) {
+						if (slot.isNull() || slot.getStackSize() <= 0) return;
+						Vec3 vel((deathDropRng.nextFloat() - 0.5f) * 4.5f,
+						         2.8f + deathDropRng.nextFloat() * 1.5f,
+						         (deathDropRng.nextFloat() - 0.5f) * 4.5f);
+						spawnWorldItem(worldItems, slot, deathPos, vel, 0.5f);
+						slot.setNull();
+					};
+					for (auto& s : gGuiContext.inventorySlots) dropOnDeath(s);
+					for (auto& a : gGuiContext.armorSlots) dropOnDeath(a);
+				}
+				gGuiContext.setScreen(new DeathScreen());
+			};
+
+			auto damagePlayer = [&](int rawDmg, const Vec3& knockDir) {
+				if (gGuiContext.isCreative || gGuiContext.health <= 0) return;
+				int dealt = gGuiContext.applyDamage(rawDmg, false);
+				if (dealt > 0) {
+					float kLen = std::sqrt(knockDir.x * knockDir.x + knockDir.z * knockDir.z);
+					if (kLen > 0.001f) {
+						c.mPosDelta.x += (knockDir.x / kLen) * 0.34f;
+						c.mPosDelta.z += (knockDir.z / kLen) * 0.34f;
+					}
+					c.mPosDelta.y = std::max(c.mPosDelta.y, 0.24f);
+				}
+				if (gGuiContext.health <= 0) {
+					triggerPlayerDeath();
+				}
+			};
 
 			// Drain drops created outside inventory UI
 			if (!gGuiContext.pendingWorldDrops.empty()) {
@@ -2288,6 +2676,7 @@ void renderThreadStuff()
 
 			HitResult targetHit;
 			bool hasTargetHit = false;
+			bool mobInFront = false;
 			if (gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
 				c.UpdateCam(deltaTime);
 
@@ -2349,13 +2738,13 @@ void renderThreadStuff()
 							}
 						}
 						if (hazDmg > 0) {
-							gGuiContext.applyDamage(hazDmg, false);
+							damagePlayer(hazDmg, Vec3::ZERO);
 							hazardDamageCooldown = 0.5f;
-							if (gGuiContext.health <= 0 && !gGuiContext.currentScreen) {
-								gGuiContext.setScreen(new DeathScreen());
-							}
 						}
 					}
+				}
+				if (!gGuiContext.isCreative && gGuiContext.health <= 0 && !gGuiContext.currentScreen) {
+					triggerPlayerDeath();
 				}
 
 				if (glinput.NewKeyDown(GLFW_KEY_Q)) {
@@ -2390,13 +2779,57 @@ void renderThreadStuff()
 				targetHit = region.clip(rayStart, rayEnd, false, false, 200, false);
 				hasTargetHit = targetHit.isHit() && targetHit.isTile();
 
-				if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
-					c.triggerSwing();
-				}
-
 				gGuiContext.ensureInventoryInitialized();
 				int heldSlotIdx = std::max(0, std::min(8, gGuiContext.selectedHotbarSlot));
 				ItemInstance& held = gGuiContext.inventorySlots[heldSlotIdx];
+
+				float mobHitDist = 999.0f;
+				int targetMobIdx = mobManager.raycastMob(
+					rayStart,
+					Vec3(c.cameraFront.x, c.cameraFront.y, c.cameraFront.z),
+					3.8f,
+					mobHitDist);
+				float blockHitDist = hasTargetHit ? (targetHit.getPos() - rayStart).length() : 999.0f;
+				mobInFront = (targetMobIdx >= 0 && (!hasTargetHit || mobHitDist <= blockHitDist));
+
+				bool attackedMobThisClick = false;
+				if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
+					c.triggerSwing();
+					if (mobInFront) {
+						ToolInfo ti = getToolInfo(held);
+						int atkDmg = ti.attackDamage;
+						if (!c.mOnGround && c.mPosDelta.y < -0.04f) {
+							atkDmg = static_cast<int>(std::ceil(static_cast<float>(atkDmg) * 1.5f));
+						}
+						static Random mobDropRng;
+						bool landed = mobManager.damageMob(
+							targetMobIdx,
+							atkDmg,
+							Vec3(c.cameraFront.x, 0.0f, c.cameraFront.z),
+							[&](const ItemInstance& dropItem, const Vec3& dropPos) {
+								Vec3 vel((mobDropRng.nextFloat() - 0.5f) * 2.4f,
+								         3.2f + mobDropRng.nextFloat() * 1.0f,
+								         (mobDropRng.nextFloat() - 0.5f) * 2.4f);
+								spawnWorldItem(worldItems, dropItem, dropPos, vel, 0.25f);
+							});
+						if (landed && !gGuiContext.isCreative) {
+							gGuiContext.exhaustion += 0.3f;
+							int maxDur = getItemMaxDurability(held);
+							if (maxDur > 0 && !held.isNull()) {
+								int wear = (ti.type == ToolType::Sword) ? 1 : 2;
+								int nextAux = static_cast<int>(held.getAuxValue()) + wear;
+								if (nextAux > maxDur) {
+									held.setNull();
+								} else {
+									held.setAuxValue(static_cast<short>(nextAux));
+								}
+							}
+						}
+						attackedMobThisClick = true;
+						isMining = false;
+						miningProgress = 0.0f;
+					}
+				}
 
 				auto performBreakBlock = [&](const BlockPos& hitPos, const FullBlock& fb, const Block* block, bool canHarvest) {
 					static Random dropRng;
@@ -2404,7 +2837,16 @@ void renderThreadStuff()
 					int dropCount = block->getResourceCount(dropRng, fb.data, 0);
 					DataID dropData = (dropId == fb.id && block != Block::mFurnace && block != Block::mLitFurnace &&
 					                   block != Block::mChest && block != Block::mTrappedChest) ? fb.data : 0;
+
+					BlockPos bedSecondPos;
+					bool hasBedSecond = (Block::mBed && block == Block::mBed &&
+					                     Block::mBed->getSecondPart(region, hitPos, bedSecondPos) &&
+					                     region.getBlockID(bedSecondPos) == Block::mBed->mID);
+
 					if (region.removeBlock(hitPos)) {
+						if (hasBedSecond) {
+							region.removeBlock(bedSecondPos);
+						}
 						BlockCoordKey bkey{ hitPos.x, hitPos.y, hitPos.z };
 						auto dropContainerItem = [&](const ItemInstance& ci) {
 							if (ci.isNull() || ci.getStackSize() <= 0) return;
@@ -2448,13 +2890,16 @@ void renderThreadStuff()
 								}
 							}
 						}
-						rebuildChunksForBlock(hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+						updateLightingAndRebuildChunks(region, hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+						if (hasBedSecond) {
+							rebuildChunksForBlock(bedSecondPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+						}
 						targetHit = region.clip(rayStart, rayEnd, false, false, 200, false);
 						hasTargetHit = targetHit.isHit() && targetHit.isTile();
 					}
 				};
 
-				if (hasTargetHit && glinput.MouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
+				if (!attackedMobThisClick && !mobInFront && hasTargetHit && glinput.MouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
 					BlockPos hitPos = targetHit.getBlock();
 					FullBlock fb = region.getBlockAndData(hitPos);
 					const Block* block = fb.id > 0 ? Block::mBlocks[fb.id] : nullptr;
@@ -2536,6 +2981,51 @@ void renderThreadStuff()
 						}
 					}
 
+					if (!handledRightClick && hasTargetHit && !held.isNull() && held.getStackSize() > 0 &&
+					    Item::mBed && Block::mBed && held.getId() == Item::mBed->getId()) {
+						BlockPos hitPos = targetHit.getBlock();
+						FacingID face = targetHit.getFacing();
+						if (face < Facing::MAX) {
+							BlockPos footPos = hitPos + Facing::DIRECTION[face];
+							int dir = 0;
+							if (std::abs(c.cameraMoveFront.z) >= std::abs(c.cameraMoveFront.x)) {
+								dir = (c.cameraMoveFront.z >= 0.0f) ? 0 : 2;
+							} else {
+								dir = (c.cameraMoveFront.x >= 0.0f) ? 3 : 1;
+							}
+							BlockPos headPos(footPos.x + BedBlock::HEAD_DIRECTION_OFFSETS[dir][0],
+							                 footPos.y,
+							                 footPos.z + BedBlock::HEAD_DIRECTION_OFFSETS[dir][1]);
+							auto isRepl = [&](const BlockPos& bp) {
+								if (bp.y < 0 || bp.y >= 128) return false;
+								BlockID eid = region.getBlockID(bp);
+								const Block* eb = Block::mBlocks[eid];
+								return eid == 0 || (eb && eb->getMaterial().isReplaceable());
+							};
+							if (isRepl(footPos) && isRepl(headPos)) {
+								AABB footBB(footPos.x, footPos.y, footPos.z, footPos.x + 1.0f, footPos.y + 0.5625f, footPos.z + 1.0f);
+								AABB headBB(headPos.x, headPos.y, headPos.z, headPos.x + 1.0f, headPos.y + 0.5625f, headPos.z + 1.0f);
+								if (!footBB.intersects(c.mBB) && !headBB.intersects(c.mBB)) {
+									DataID footData = 0;
+									Block::mBed->getBlockState(BlockState::Direction).set(footData, dir);
+									DataID headData = footData;
+									Block::mBed->getBlockState(BlockState::HeadPieceBit).set(headData, 1);
+									if (region.setBlockAndData(footPos, FullBlock(Block::mBed->mID, footData), Block::UPDATE_ALL) &&
+									    region.setBlockAndData(headPos, FullBlock(Block::mBed->mID, headData), Block::UPDATE_ALL)) {
+										c.triggerSwing();
+										if (!gGuiContext.isCreative) {
+											held.remove(1);
+											if (held.getStackSize() <= 0) held.setNull();
+										}
+										updateLightingAndRebuildChunks(region, footPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+										rebuildChunksForBlock(headPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+										handledRightClick = true;
+									}
+								}
+							}
+						}
+					}
+
 					if (!handledRightClick && hasTargetHit && !held.isNull() && held.getStackSize() > 0 && held.isBlock()) {
 						BlockPos hitPos = targetHit.getBlock();
 						FacingID face = targetHit.getFacing();
@@ -2556,7 +3046,22 @@ void renderThreadStuff()
 									}
 									if (!overlapsPlayer) {
 										DataID placeData = static_cast<DataID>(held.getAuxValue() & 0xF);
-										if (region.setBlockAndData(placePos, FullBlock(placeBlock->mID, placeData), Block::UPDATE_ALL)) {
+										bool allowPlace = true;
+										if (Block::mTorch && placeBlock == Block::mTorch) {
+											static const DataID torchDataFromFacing[6] = {
+												TorchBlock::TORCH_TOP, TorchBlock::TORCH_TOP,
+												TorchBlock::TORCH_SOUTH, TorchBlock::TORCH_NORTH,
+												TorchBlock::TORCH_EAST, TorchBlock::TORCH_WEST
+											};
+											if (face != Facing::DOWN && region.isSolidBlockingBlock(hitPos)) {
+												placeData = torchDataFromFacing[face];
+											} else if (region.isSolidBlockingBlock(placePos.below())) {
+												placeData = TorchBlock::TORCH_TOP;
+											} else {
+												allowPlace = false;
+											}
+										}
+										if (allowPlace && region.setBlockAndData(placePos, FullBlock(placeBlock->mID, placeData), Block::UPDATE_ALL)) {
 											c.triggerSwing();
 											if (!gGuiContext.isCreative) {
 												held.remove(1);
@@ -2564,7 +3069,7 @@ void renderThreadStuff()
 													held.setNull();
 												}
 											}
-											rebuildChunksForBlock(placePos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+											updateLightingAndRebuildChunks(region, placePos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
 										}
 									}
 								}
@@ -2583,6 +3088,52 @@ void renderThreadStuff()
 				syncFurnaceBlockStates(c.getRegion(), gGuiContext, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
 				bool allowPickup = (gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen);
 				updateWorldItemEntities(worldItems, deltaTime, c.getRegion(), c.mBB, gGuiContext, allowPickup);
+
+				mobManager.update(
+					clampedDt,
+					c.getRegion(),
+					Vec3(c.mPos.x, c.mPos.y, c.mPos.z),
+					c.mBB,
+					skyInfo.sunFactor,
+					gGuiContext.isCreative,
+					allowPickup,
+					damagePlayer,
+					[&](const Vec3& expPos, float radius) {
+						static Random expRng;
+						BlockSource& reg = c.getRegion();
+						int r = static_cast<int>(std::ceil(radius));
+						int cx = Math::floor(expPos.x);
+						int cy = Math::floor(expPos.y);
+						int cz = Math::floor(expPos.z);
+						for (int dx = -r; dx <= r; ++dx) {
+							for (int dy = -r; dy <= r; ++dy) {
+								for (int dz = -r; dz <= r; ++dz) {
+									if (dx * dx + dy * dy + dz * dz > radius * radius) continue;
+									BlockPos bp(cx + dx, cy + dy, cz + dz);
+									if (bp.y <= 0 || bp.y >= 127) continue;
+									FullBlock fb = reg.getBlockAndData(bp);
+									if (fb.id == 0) continue;
+									const Block* blk = Block::mBlocks[fb.id];
+									if (!blk || blk == Block::mBedrock || blk == Block::mObsidian || blk->getMaterial().isLiquid()) continue;
+									if (reg.removeBlock(bp) && !gGuiContext.isCreative && expRng.nextFloat() < 0.38f) {
+										int dropId = blk->getResource(expRng, fb.data, 0);
+										if (dropId > 0) {
+											ItemInstance dropItem(dropId, 1, 0);
+											Vec3 dpos(bp.x + 0.5f, bp.y + 0.5f, bp.z + 0.5f);
+											Vec3 dvel((expRng.nextFloat() - 0.5f) * 3.0f, 3.5f, (expRng.nextFloat() - 0.5f) * 3.0f);
+											spawnWorldItem(worldItems, dropItem, dpos, dvel, 0.35f);
+										}
+									}
+								}
+							}
+						}
+						updateLightingAndRebuildChunks(reg, BlockPos(cx, cy, cz), rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+					},
+					[&](const ItemInstance& dropItem, const Vec3& dropPos) {
+						static Random mobDropRng2;
+						Vec3 dvel((mobDropRng2.nextFloat() - 0.5f) * 2.4f, 3.0f, (mobDropRng2.nextFloat() - 0.5f) * 2.4f);
+						spawnWorldItem(worldItems, dropItem, dropPos, dvel, 0.25f);
+					});
 			}
 			float aspect = static_cast<float>(screenx) / static_cast<float>(std::max(1, screeny));
 			projection = glm::perspective(glm::radians(85.0f), aspect, 0.1f, 1000.0f);
@@ -2690,6 +3241,9 @@ void renderThreadStuff()
 					it = needsReRendering2.erase(it);
 					continue;
 				}
+				if (litChunks.insert(pos).second) {
+					WorldLighting::propagateChunkLighting(c.getRegion(), pos);
+				}
 				for (int i = 0; i < 8; i++) {
 					BlockPos cp(pos.x * 16, i * 16, pos.z * 16);
 					if (rc[pos][i] == nullptr)
@@ -2715,9 +3269,35 @@ void renderThreadStuff()
 
 			BlockPos camBlockPos(Math::floor(renderCamPos.x), Math::floor(renderCamPos.y), Math::floor(renderCamPos.z));
 			const Material& camMat = c.getRegion().getMaterial(camBlockPos);
-			RenderChunk::setMaterialsBasedOnCameraUnderLiquid(
-				camMat.isType(MaterialType::Water),
-				camMat.isType(MaterialType::Lava));
+			bool camUnderwater = camMat.isType(MaterialType::Water);
+			bool camUnderlava = camMat.isType(MaterialType::Lava);
+			RenderChunk::setMaterialsBasedOnCameraUnderLiquid(camUnderwater, camUnderlava);
+
+			glm::vec4 fogCol(skyInfo.fogColor.r, skyInfo.fogColor.g, skyInfo.fogColor.b, 1.0f);
+			glm::vec2 fogCtrl(0.55f, 1.0f);
+			if (camUnderwater) {
+				fogCol = glm::vec4(0.05f * skyInfo.sunFactor, 0.14f * skyInfo.sunFactor, 0.36f * skyInfo.sunFactor, 1.0f);
+				fogCtrl = glm::vec2(0.05f, 0.48f);
+			} else if (camUnderlava) {
+				fogCol = glm::vec4(0.60f, 0.12f, 0.02f, 1.0f);
+				fogCtrl = glm::vec2(0.02f, 0.15f);
+			}
+			for (auto sl : mptrs) {
+				if (!sl || !(*sl).operator->() || !(*sl)->myShader) continue;
+				(*sl)->myShader->setVector4("FOG_COLOR", fogCol);
+				(*sl)->myShader->setVector2("FOG_CONTROL", fogCtrl);
+			}
+
+			if (!camUnderwater && !camUnderlava) {
+				renderSkyAndCelestials(projection, camRelView, skyInfo, gGuiContext.worldTime);
+			}
+
+			// Rebind lightmap/atlas after sky rendering
+			glActiveTexture(GL_TEXTURE1);
+			glBindTexture(GL_TEXTURE_2D, gLightmapTex);
+			glActiveTexture(GL_TEXTURE2);
+			glBindTexture(GL_TEXTURE_2D, gWhiteTex);
+			glActiveTexture(GL_TEXTURE0);
 
 			auto setChunkOrigin = [&](const BlockPos& position) {
 				glm::vec4 chunkOrigin(
@@ -2790,7 +3370,7 @@ void renderThreadStuff()
 							RenderChunkRenderParameters renderParams;
 							renderParams.layer = layer;
 							renderParams.forceUnsorted = false;
-							renderParams.forceFog = false;
+							renderParams.forceFog = true;
 							chunkPart->render(renderParams, currentFrame);
 						}
 					}
@@ -2811,14 +3391,14 @@ void renderThreadStuff()
 					RenderChunkRenderParameters renderParams;
 					renderParams.layer = TerrainLayer::Blend;
 					renderParams.forceUnsorted = false;
-					renderParams.forceFog = false;
+					renderParams.forceFog = true;
 					chunkPart->render(renderParams, currentFrame);
 				}
 				if (chunkPart->hasLayer(TerrainLayer::Water)) {
 					RenderChunkRenderParameters renderParams;
 					renderParams.layer = TerrainLayer::Water;
 					renderParams.forceUnsorted = false;
-					renderParams.forceFog = false;
+					renderParams.forceFog = true;
 					chunkPart->render(renderParams, currentFrame);
 				}
 			}
@@ -2827,13 +3407,15 @@ void renderThreadStuff()
 
 			glActiveTexture(GL_TEXTURE0);
 
-			renderWorldItemEntities(worldItems, projection, view);
+			renderWorldItemEntities(worldItems, c.getRegion(), skyInfo.sunFactor, projection, view);
+
+			mobManager.render(c.getRegion(), projection, view, skyInfo.sunFactor);
 
 			if (gGuiOptions.thirdPerson && !gGuiContext.loadingChunks) {
 				renderWorldSteve3D(c, gGuiContext, projection, view);
 			}
 
-			if (hasTargetHit && gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
+			if (hasTargetHit && !mobInFront && gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
 				BlockPos hitPos = targetHit.getBlock();
 				BlockID hitId = c.getRegion().getBlockID(hitPos);
 				const Block* hitBlock = hitId > 0 ? Block::mBlocks[hitId] : nullptr;
@@ -2853,7 +3435,11 @@ void renderThreadStuff()
 			if (!gGuiOptions.thirdPerson && gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
 				gGuiContext.ensureInventoryInitialized();
 				int slotIdx = std::max(0, std::min(8, gGuiContext.selectedHotbarSlot));
-				renderFirstPersonHand(c, gGuiContext.inventorySlots[static_cast<size_t>(slotIdx)], aspect, gGuiOptions.viewBobbing);
+				float handLight = WorldLighting::sampleWorldBrightness(
+					c.getRegion(),
+					BlockPos(Math::floor(c.mPos.x), Math::floor(c.mPos.y), Math::floor(c.mPos.z)),
+					skyInfo.sunFactor);
+				renderFirstPersonHand(c, gGuiContext.inventorySlots[static_cast<size_t>(slotIdx)], aspect, gGuiOptions.viewBobbing, handLight);
 			}
 		} // end if (renderWorld || gGuiContext.loadingChunks)
 

@@ -228,6 +228,7 @@ namespace {
 		}
 
 		// Register items that are commented out in Item::registerItems()
+		ensureItem(Item::mArrow, "arrow", 6);
 		ensureItem(Item::mCoal, "coal", 7);
 		ensureItem(Item::mDiamond, "diamond", 8);
 		ensureItem(Item::mIronIngot, "iron_ingot", 9);
@@ -248,6 +249,7 @@ namespace {
 		ensureItem(Item::mDye_powder, "dye", 95);
 		ensureItem(Item::mBone, "bone", 96, 64, true, false);
 		ensureItem(Item::mSugar, "sugar", 97);
+		ensureItem(Item::mBed, "bed", 99, 1);
 		ensureItem(Item::mShears, "shears", 103, 1)->setMaxDamage(238);
 		ensureItem(Item::mEmerald, "emerald", 132);
 		ensureItem(Item::mNetherbrick, "netherbrick", 149);
@@ -449,6 +451,13 @@ void Recipes::init() {
 	// Bread (3x1)
 	addShaped(3, 1, { wheat, wheat, wheat }, ItemInstance(Item::mBread, 1, 0), ItemCategory::FoodArmor);
 
+	// Bed (3x2)
+	ItemInstance woolAny(Block::mWool, 1, -1);
+	addShaped(3, 2, {
+		woolAny,   woolAny,   woolAny,
+		planksAny, planksAny, planksAny
+	}, ItemInstance(Item::mBed, 1, 0), ItemCategory::Structures);
+
 	// Decorative & Stonecutter Blocks
 	addShaped(2, 2, { stone, stone, stone, stone }, ItemInstance(Block::mStoneBrick, 4, 0), ItemCategory::Structures, true);
 	addShaped(2, 2, { sand, sand, sand, sand }, ItemInstance(Block::mSandStone, 1, 0), ItemCategory::Structures, true);
@@ -542,8 +551,11 @@ namespace {
 			regBlock(Block::mCoalBlock, "Block of Coal", "textures/blocks/coal_block.png");
 			regBlock(Block::mStonecutterBench, "Stonecutter", "textures/blocks/stonecutter_top.png");
 			regBlock(Block::mBrick, "Bricks", "textures/blocks/brick.png");
+			regBlock(Block::mBed, "Bed", "textures/items/bed.png");
 
 			// Materials & misc items
+			regItem(Item::mArrow, "Arrow", "textures/items/arrow.png");
+			regItem(Item::mBed, "Bed", "textures/items/bed.png");
 			regItem(Item::mStick, "Stick", "textures/items/stick.png");
 			regItem(Item::mBowl, "Bowl", "textures/items/bowl.png");
 			regItem(Item::mCoal, "Coal", "textures/items/coal.png");
@@ -891,33 +903,34 @@ ToolInfo getToolInfo(const ItemInstance& item) {
 		int harvestLevel;
 		float speed;
 		int maxDurability;
+		int attackDamage;
 	};
 	static const ToolEntry tools[] = {
-		{ Item::mPickAxe_wood, ToolType::Pickaxe, 0, 2.0f, 59 },
-		{ Item::mPickAxe_stone, ToolType::Pickaxe, 1, 4.0f, 131 },
-		{ Item::mPickAxe_iron, ToolType::Pickaxe, 2, 6.0f, 250 },
-		{ Item::mPickAxe_diamond, ToolType::Pickaxe, 3, 8.0f, 1561 },
-		{ Item::mPickAxe_gold, ToolType::Pickaxe, 0, 12.0f, 32 },
+		{ Item::mPickAxe_wood, ToolType::Pickaxe, 0, 2.0f, 59, 2 },
+		{ Item::mPickAxe_stone, ToolType::Pickaxe, 1, 4.0f, 131, 3 },
+		{ Item::mPickAxe_iron, ToolType::Pickaxe, 2, 6.0f, 250, 4 },
+		{ Item::mPickAxe_diamond, ToolType::Pickaxe, 3, 8.0f, 1561, 5 },
+		{ Item::mPickAxe_gold, ToolType::Pickaxe, 0, 12.0f, 32, 2 },
 
-		{ Item::mHatchet_wood, ToolType::Axe, 0, 2.0f, 59 },
-		{ Item::mHatchet_stone, ToolType::Axe, 1, 4.0f, 131 },
-		{ Item::mHatchet_iron, ToolType::Axe, 2, 6.0f, 250 },
-		{ Item::mHatchet_diamond, ToolType::Axe, 3, 8.0f, 1561 },
-		{ Item::mHatchet_gold, ToolType::Axe, 0, 12.0f, 32 },
+		{ Item::mHatchet_wood, ToolType::Axe, 0, 2.0f, 59, 3 },
+		{ Item::mHatchet_stone, ToolType::Axe, 1, 4.0f, 131, 4 },
+		{ Item::mHatchet_iron, ToolType::Axe, 2, 6.0f, 250, 5 },
+		{ Item::mHatchet_diamond, ToolType::Axe, 3, 8.0f, 1561, 6 },
+		{ Item::mHatchet_gold, ToolType::Axe, 0, 12.0f, 32, 3 },
 
-		{ Item::mShovel_wood, ToolType::Shovel, 0, 2.0f, 59 },
-		{ Item::mShovel_stone, ToolType::Shovel, 1, 4.0f, 131 },
-		{ Item::mShovel_iron, ToolType::Shovel, 2, 6.0f, 250 },
-		{ Item::mShovel_diamond, ToolType::Shovel, 3, 8.0f, 1561 },
-		{ Item::mShovel_gold, ToolType::Shovel, 0, 12.0f, 32 },
+		{ Item::mShovel_wood, ToolType::Shovel, 0, 2.0f, 59, 1 },
+		{ Item::mShovel_stone, ToolType::Shovel, 1, 4.0f, 131, 2 },
+		{ Item::mShovel_iron, ToolType::Shovel, 2, 6.0f, 250, 3 },
+		{ Item::mShovel_diamond, ToolType::Shovel, 3, 8.0f, 1561, 4 },
+		{ Item::mShovel_gold, ToolType::Shovel, 0, 12.0f, 32, 1 },
 
-		{ Item::mSword_wood, ToolType::Sword, 0, 1.5f, 59 },
-		{ Item::mSword_stone, ToolType::Sword, 1, 1.5f, 131 },
-		{ Item::mSword_iron, ToolType::Sword, 2, 1.5f, 250 },
-		{ Item::mSword_diamond, ToolType::Sword, 3, 1.5f, 1561 },
-		{ Item::mSword_gold, ToolType::Sword, 0, 1.5f, 32 },
+		{ Item::mSword_wood, ToolType::Sword, 0, 1.5f, 59, 4 },
+		{ Item::mSword_stone, ToolType::Sword, 1, 1.5f, 131, 5 },
+		{ Item::mSword_iron, ToolType::Sword, 2, 1.5f, 250, 6 },
+		{ Item::mSword_diamond, ToolType::Sword, 3, 1.5f, 1561, 7 },
+		{ Item::mSword_gold, ToolType::Sword, 0, 1.5f, 32, 4 },
 
-		{ Item::mShears, ToolType::Shears, 0, 5.0f, 238 },
+		{ Item::mShears, ToolType::Shears, 0, 5.0f, 238, 1 },
 	};
 	for (const auto& t : tools) {
 		if (t.item && id == t.item->getId()) {
@@ -925,6 +938,7 @@ ToolInfo getToolInfo(const ItemInstance& item) {
 			info.harvestLevel = t.harvestLevel;
 			info.speedMultiplier = t.speed;
 			info.maxDurability = t.maxDurability;
+			info.attackDamage = t.attackDamage;
 			return info;
 		}
 	}

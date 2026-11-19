@@ -139,6 +139,14 @@ bool loadWorldMetadata(const std::string& worldDir, WorldMetadata& outMeta) {
 	outMeta.hunger = std::max(0, std::min(20, root.get("hunger", 20).asInt()));
 	outMeta.saturation = std::max(0.0f, std::min(20.0f, root.get("saturation", 5.0f).asFloat()));
 	outMeta.selectedHotbarSlot = std::max(0, std::min(8, root.get("selectedHotbarSlot", 0).asInt()));
+	outMeta.worldTime = std::max<int64_t>(0, root.get("worldTime", 1000).asInt64());
+	const Json::Value& bedSpawn = root["bedSpawn"];
+	if (bedSpawn.isObject()) {
+		outMeta.hasBedSpawn = bedSpawn.get("hasSpawn", false).asBool();
+		outMeta.bedSpawnX = bedSpawn.get("x", 0).asInt();
+		outMeta.bedSpawnY = bedSpawn.get("y", 80).asInt();
+		outMeta.bedSpawnZ = bedSpawn.get("z", 0).asInt();
+	}
 
 	const Json::Value& player = root["player"];
 	if (player.isObject()) {
@@ -231,6 +239,14 @@ bool saveWorldMetadata(const std::string& worldDir, const WorldMetadata& meta) {
 	root["hunger"] = meta.hunger;
 	root["saturation"] = meta.saturation;
 	root["selectedHotbarSlot"] = meta.selectedHotbarSlot;
+	root["worldTime"] = static_cast<Json::Int64>(meta.worldTime);
+
+	Json::Value bedSpawn(Json::objectValue);
+	bedSpawn["hasSpawn"] = meta.hasBedSpawn;
+	bedSpawn["x"] = meta.bedSpawnX;
+	bedSpawn["y"] = meta.bedSpawnY;
+	bedSpawn["z"] = meta.bedSpawnZ;
+	root["bedSpawn"] = bedSpawn;
 
 	Json::Value player(Json::objectValue);
 	player["hasPos"] = meta.hasPlayerPos;
@@ -341,7 +357,17 @@ void applyMetadataToContext(const WorldMetadata& meta, GuiContext& ctx) {
 	ctx.exhaustion = 0.0f;
 	ctx.healTimer = 0.0f;
 	ctx.starveTimer = 0.0f;
+	ctx.hurtFlashTimer = 0.0f;
+	ctx.sleepCompleteRequested = false;
+	ctx.statusBannerText.clear();
+	ctx.statusBannerTimer = 0.0f;
 	ctx.selectedHotbarSlot = std::max(0, std::min(8, meta.selectedHotbarSlot));
+	ctx.worldTime = std::max<int64_t>(0, meta.worldTime);
+	ctx.worldTimeSubTick = 0.0f;
+	ctx.hasBedSpawn = meta.hasBedSpawn;
+	ctx.bedSpawnX = meta.bedSpawnX;
+	ctx.bedSpawnY = meta.bedSpawnY;
+	ctx.bedSpawnZ = meta.bedSpawnZ;
 
 	ctx.hasPlayerTransform = meta.hasPlayerPos;
 	ctx.playerX = meta.playerX;
@@ -374,6 +400,11 @@ void captureMetadataFromContext(const GuiContext& ctx, WorldMetadata& outMeta) {
 	outMeta.hunger = ctx.hunger;
 	outMeta.saturation = ctx.saturation;
 	outMeta.selectedHotbarSlot = ctx.selectedHotbarSlot;
+	outMeta.worldTime = ctx.worldTime;
+	outMeta.hasBedSpawn = ctx.hasBedSpawn;
+	outMeta.bedSpawnX = ctx.bedSpawnX;
+	outMeta.bedSpawnY = ctx.bedSpawnY;
+	outMeta.bedSpawnZ = ctx.bedSpawnZ;
 
 	outMeta.hasPlayerPos = ctx.hasPlayerTransform;
 	outMeta.playerX = ctx.playerX;
