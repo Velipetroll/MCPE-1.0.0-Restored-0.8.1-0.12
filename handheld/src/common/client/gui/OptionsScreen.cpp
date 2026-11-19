@@ -163,6 +163,11 @@ void OptionsScreen::init() {
 	mFancyGraphicsButton = new Button(12, "Fancy Graphics");
 	mUiStyleButton = new Button(13, "UI Style");
 	mThirdPersonButton = new Button(14, "Third Person");
+	mServerVisibleButton = new Button(15, "Local Server Multiplayer");
+	mLeftHandedButton = new Button(16, "Lefty");
+	mFancySkiesButton = new Button(17, "Beautiful Skies");
+	mAnimateTexturesButton = new Button(18, "Animated Water");
+	mHideGuiButton = new Button(19, "Hide GUI");
 	mBackButton = new Button(1, "Done");
 
 	buttons.push_back(mInvertMouseButton);
@@ -170,6 +175,11 @@ void OptionsScreen::init() {
 	buttons.push_back(mFancyGraphicsButton);
 	buttons.push_back(mUiStyleButton);
 	buttons.push_back(mThirdPersonButton);
+	buttons.push_back(mServerVisibleButton);
+	buttons.push_back(mLeftHandedButton);
+	buttons.push_back(mFancySkiesButton);
+	buttons.push_back(mAnimateTexturesButton);
+	buttons.push_back(mHideGuiButton);
 	buttons.push_back(mBackButton);
 
 	updateButtonLabels();
@@ -183,6 +193,11 @@ void OptionsScreen::updateButtonLabels() {
 	if (mFancyGraphicsButton) mFancyGraphicsButton->msg = opts->getMessage(Options::Option::FANCY_GRAPHICS);
 	if (mUiStyleButton) mUiStyleButton->msg = opts->getMessage(Options::Option::USE_TOUCH_UI);
 	if (mThirdPersonButton) mThirdPersonButton->msg = opts->getMessage(Options::Option::THIRD_PERSON);
+	if (mServerVisibleButton) mServerVisibleButton->msg = opts->getMessage(Options::Option::SERVER_VISIBLE);
+	if (mLeftHandedButton) mLeftHandedButton->msg = opts->getMessage(Options::Option::LEFT_HANDED);
+	if (mFancySkiesButton) mFancySkiesButton->msg = opts->getMessage(Options::Option::FANCY_SKIES);
+	if (mAnimateTexturesButton) mAnimateTexturesButton->msg = opts->getMessage(Options::Option::ANIMATE_TEXTURES);
+	if (mHideGuiButton) mHideGuiButton->msg = opts->getMessage(Options::Option::HIDE_GUI);
 }
 
 void OptionsScreen::setupPositions() {
@@ -232,8 +247,8 @@ void OptionsScreen::setupPositions() {
 	int gap = 10;
 	int leftX = width / 2 - colW - gap / 2;
 	int rightX = width / 2 + gap / 2;
-	int startY = 38;
-	int rowH = 24;
+	int startY = 30;
+	int rowH = 21;
 
 	if (mMusicSlider) { mMusicSlider->posX = leftX; mMusicSlider->posY = startY; mMusicSlider->width = colW; mMusicSlider->height = 20; }
 	if (mSoundSlider) { mSoundSlider->posX = rightX; mSoundSlider->posY = startY; mSoundSlider->width = colW; mSoundSlider->height = 20; }
@@ -245,8 +260,13 @@ void OptionsScreen::setupPositions() {
 	if (mInvertMouseButton) { mInvertMouseButton->posX = leftX; mInvertMouseButton->posY = startY + rowH * 3; mInvertMouseButton->width = colW; mInvertMouseButton->height = 20; }
 	if (mViewBobbingButton) { mViewBobbingButton->posX = rightX; mViewBobbingButton->posY = startY + rowH * 3; mViewBobbingButton->width = colW; mViewBobbingButton->height = 20; }
 	if (mFancyGraphicsButton) { mFancyGraphicsButton->posX = leftX; mFancyGraphicsButton->posY = startY + rowH * 4; mFancyGraphicsButton->width = colW; mFancyGraphicsButton->height = 20; }
-	if (mUiStyleButton) { mUiStyleButton->posX = rightX; mUiStyleButton->posY = startY + rowH * 4; mUiStyleButton->width = colW; mUiStyleButton->height = 20; }
-	if (mThirdPersonButton) { mThirdPersonButton->visible = false; }
+	if (mFancySkiesButton) { mFancySkiesButton->posX = rightX; mFancySkiesButton->posY = startY + rowH * 4; mFancySkiesButton->width = colW; mFancySkiesButton->height = 20; }
+	if (mAnimateTexturesButton) { mAnimateTexturesButton->posX = leftX; mAnimateTexturesButton->posY = startY + rowH * 5; mAnimateTexturesButton->width = colW; mAnimateTexturesButton->height = 20; }
+	if (mThirdPersonButton) { mThirdPersonButton->visible = true; mThirdPersonButton->posX = rightX; mThirdPersonButton->posY = startY + rowH * 5; mThirdPersonButton->width = colW; mThirdPersonButton->height = 20; }
+	if (mServerVisibleButton) { mServerVisibleButton->posX = leftX; mServerVisibleButton->posY = startY + rowH * 6; mServerVisibleButton->width = colW; mServerVisibleButton->height = 20; }
+	if (mLeftHandedButton) { mLeftHandedButton->posX = rightX; mLeftHandedButton->posY = startY + rowH * 6; mLeftHandedButton->width = colW; mLeftHandedButton->height = 20; }
+	if (mHideGuiButton) { mHideGuiButton->posX = leftX; mHideGuiButton->posY = startY + rowH * 7; mHideGuiButton->width = colW; mHideGuiButton->height = 20; }
+	if (mUiStyleButton) { mUiStyleButton->posX = rightX; mUiStyleButton->posY = startY + rowH * 7; mUiStyleButton->width = colW; mUiStyleButton->height = 20; }
 
 	if (mBackButton) {
 		mBackButton->posX = width / 2 - 100;
@@ -304,6 +324,11 @@ void OptionsScreen::buttonClicked(Button* button) {
 		if (button->id == 11) opts->toggle(Options::Option::VIEW_BOBBING);
 		if (button->id == 12) opts->toggle(Options::Option::FANCY_GRAPHICS);
 		if (button->id == 14) opts->toggle(Options::Option::THIRD_PERSON);
+		if (button->id == 15) opts->toggle(Options::Option::SERVER_VISIBLE);
+		if (button->id == 16) opts->toggle(Options::Option::LEFT_HANDED);
+		if (button->id == 17) opts->toggle(Options::Option::FANCY_SKIES);
+		if (button->id == 18) opts->toggle(Options::Option::ANIMATE_TEXTURES);
+		if (button->id == 19) opts->toggle(Options::Option::HIDE_GUI);
 		if (button->id == 13) {
 			opts->toggle(Options::Option::USE_TOUCH_UI);
 			context->setScreen(new OptionsScreen(mFromPause));

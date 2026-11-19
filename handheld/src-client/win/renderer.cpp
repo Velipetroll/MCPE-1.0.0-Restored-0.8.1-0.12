@@ -1243,7 +1243,7 @@ void rebuildSubChunkAt(const ChunkPos& cp, int subY,
 	RenderChunk* chunkPart = it->second[subY];
 	chunkPart->setDirty(Tick(0), true);
 	chunkPart->startRebuild(std::move(chunkBuilder));
-	chunkPart->rebuild(false, true);
+	chunkPart->rebuild(gGuiOptions.fancyGraphics, gGuiOptions.fancyGraphics);
 	chunkBuilder = chunkPart->endRebuild(camPos);
 }
 
@@ -2026,6 +2026,185 @@ void renderSkyAndCelestials(const glm::mat4& projection,
 
 	glPopMatrix(); // end celestial rotation
 
+	glDisable(GL_BLEND);
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	glMatrixMode(GL_MODELVIEW);
+	glPopMatrix();
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glMatrixMode(GL_MODELVIEW);
+	glDepthMask(GL_TRUE);
+	glEnable(GL_DEPTH_TEST);
+}
+
+void renderClouds(const glm::mat4& projection,
+                  const glm::mat4& camRelView,
+                  const glm::vec3& renderCamPos,
+                  const CelestialInfo& sky,
+                  int64_t worldTime,
+                  bool fancy) {
+	if (!GuiComponent::bindTexture("textures/environment/clouds.png")) {
+		return;
+	}
+
+	glUseProgram(0);
+	glEnable(GL_TEXTURE_2D);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glEnable(GL_ALPHA_TEST);
+	glAlphaFunc(GL_GREATER, 0.1f);
+	glDisable(GL_CULL_FACE);
+
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glLoadMatrixf(glm::value_ptr(projection));
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+	glLoadMatrixf(glm::value_ptr(camRelView));
+
+	const float cloudHeight = 128.0f;
+	const float cloudY = cloudHeight - renderCamPos.y;
+	const float cellSize = 12.0f;
+	const float cloudThick = 4.0f;
+	const float cloudTime = static_cast<float>(worldTime) * 0.03f + static_cast<float>(glfwGetTime()) * 0.25f;
+
+	static bool sCloudMaskLoaded = false;
+	static int sCloudW = 0;
+	static int sCloudH = 0;
+	static std::vector<uint8_t> sCloudMask;
+	if (!sCloudMaskLoaded) {
+		GLint tw = 0, th = 0;
+		glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &tw);
+		glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &th);
+		if (tw > 0 && th > 0) {
+			sCloudW = tw;
+			sCloudH = th;
+			std::vector<uint8_t> rgba(static_cast<size_t>(tw) * th * 4);
+			glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+			sCloudMask.resize(static_cast<size_t>(tw) * th);
+			for (size_t i = 0; i < sCloudMask.size(); ++i) {
+				sCloudMask[i] = (rgba[i * 4 + 3] > 127) ? 1 : 0;
+			}
+			sCloudMaskLoaded = true;
+		}
+	}
+
+	const float scaleW = (sCloudW > 0 ? static_cast<float>(sCloudW) : 256.0f) * cellSize;
+	const float scaleH = (sCloudH > 0 ? static_cast<float>(sCloudH) : 256.0f) * cellSize;
+
+	float cr = std::min(1.0f, 0.90f * sky.sunFactor + 0.12f * sky.skyColor.r);
+	float cg = std::min(1.0f, 0.90f * sky.sunFactor + 0.12f * sky.skyColor.g);
+	float cb = std::min(1.0f, 0.92f * sky.sunFactor + 0.14f * sky.skyColor.b);
+
+	glEnable(GL_DEPTH_TEST);
+
+	if (!fancy || !sCloudMaskLoaded) {
+		glDepthMask(GL_FALSE);
+		const float extent = 384.0f;
+		float u0 = (renderCamPos.x - extent + cloudTime) / scaleW;
+		float u1 = (renderCamPos.x + extent + cloudTime) / scaleW;
+		float v0 = (renderCamPos.z - extent) / scaleH;
+		float v1 = (renderCamPos.z + extent) / scaleH;
+
+		glColor4f(cr, cg, cb, 0.8f);
+		glBegin(GL_QUADS);
+		glTexCoord2f(u0, v0); glVertex3f(-extent, cloudY, -extent);
+		glTexCoord2f(u1, v0); glVertex3f( extent, cloudY, -extent);
+		glTexCoord2f(u1, v1); glVertex3f( extent, cloudY,  extent);
+		glTexCoord2f(u0, v1); glVertex3f(-extent, cloudY,  extent);
+		glEnd();
+	} else {
+		glDepthMask(GL_TRUE);
+		glDisable(GL_ALPHA_TEST);
+		glEnable(GL_CULL_FACE);
+		glCullFace(GL_BACK);
+
+		auto isCloud = [&](int cx, int cz) -> bool {
+			int wx = ((cx % sCloudW) + sCloudW) % sCloudW;
+			int wz = ((cz % sCloudH) + sCloudH) % sCloudH;
+			return sCloudMask[static_cast<size_t>(wz) * sCloudW + wx] != 0;
+		};
+
+		const int radius = 24;
+		double scrollX = static_cast<double>(renderCamPos.x) + static_cast<double>(cloudTime);
+		double scrollZ = static_cast<double>(renderCamPos.z);
+		int baseCellX = static_cast<int>(std::floor(scrollX / cellSize));
+		int baseCellZ = static_cast<int>(std::floor(scrollZ / cellSize));
+		float fracX = static_cast<float>(scrollX - static_cast<double>(baseCellX) * cellSize);
+		float fracZ = static_cast<float>(scrollZ - static_cast<double>(baseCellZ) * cellSize);
+
+		float y0 = cloudY;
+		float y1 = cloudY + cloudThick;
+
+		glBegin(GL_QUADS);
+		for (int gx = -radius; gx < radius; ++gx) {
+			for (int gz = -radius; gz < radius; ++gz) {
+				int cx = baseCellX + gx;
+				int cz = baseCellZ + gz;
+				if (!isCloud(cx, cz)) {
+					continue;
+				}
+
+				float x0 = static_cast<float>(gx) * cellSize - fracX;
+				float x1 = x0 + cellSize;
+				float z0 = static_cast<float>(gz) * cellSize - fracZ;
+				float z1 = z0 + cellSize;
+
+				float u = (static_cast<float>(((cx % sCloudW) + sCloudW) % sCloudW) + 0.5f) / static_cast<float>(sCloudW);
+				float v = (static_cast<float>(((cz % sCloudH) + sCloudH) % sCloudH) + 0.5f) / static_cast<float>(sCloudH);
+
+				// Top face (+Y)
+				glColor4f(cr, cg, cb, 0.85f);
+				glTexCoord2f(u, v); glVertex3f(x0, y1, z0);
+				glTexCoord2f(u, v); glVertex3f(x0, y1, z1);
+				glTexCoord2f(u, v); glVertex3f(x1, y1, z1);
+				glTexCoord2f(u, v); glVertex3f(x1, y1, z0);
+
+				// Bottom face (-Y)
+				glColor4f(cr * 0.7f, cg * 0.7f, cb * 0.7f, 0.85f);
+				glTexCoord2f(u, v); glVertex3f(x0, y0, z0);
+				glTexCoord2f(u, v); glVertex3f(x1, y0, z0);
+				glTexCoord2f(u, v); glVertex3f(x1, y0, z1);
+				glTexCoord2f(u, v); glVertex3f(x0, y0, z1);
+
+				// West face (-X)
+				if (!isCloud(cx - 1, cz)) {
+					glColor4f(cr * 0.9f, cg * 0.9f, cb * 0.9f, 0.85f);
+					glTexCoord2f(u, v); glVertex3f(x0, y0, z0);
+					glTexCoord2f(u, v); glVertex3f(x0, y0, z1);
+					glTexCoord2f(u, v); glVertex3f(x0, y1, z1);
+					glTexCoord2f(u, v); glVertex3f(x0, y1, z0);
+				}
+				// East face (+X)
+				if (!isCloud(cx + 1, cz)) {
+					glColor4f(cr * 0.9f, cg * 0.9f, cb * 0.9f, 0.85f);
+					glTexCoord2f(u, v); glVertex3f(x1, y0, z0);
+					glTexCoord2f(u, v); glVertex3f(x1, y1, z0);
+					glTexCoord2f(u, v); glVertex3f(x1, y1, z1);
+					glTexCoord2f(u, v); glVertex3f(x1, y0, z1);
+				}
+				// North face (-Z)
+				if (!isCloud(cx, cz - 1)) {
+					glColor4f(cr * 0.8f, cg * 0.8f, cb * 0.8f, 0.85f);
+					glTexCoord2f(u, v); glVertex3f(x0, y0, z0);
+					glTexCoord2f(u, v); glVertex3f(x0, y1, z0);
+					glTexCoord2f(u, v); glVertex3f(x1, y1, z0);
+					glTexCoord2f(u, v); glVertex3f(x1, y0, z0);
+				}
+				// South face (+Z)
+				if (!isCloud(cx, cz + 1)) {
+					glColor4f(cr * 0.8f, cg * 0.8f, cb * 0.8f, 0.85f);
+					glTexCoord2f(u, v); glVertex3f(x0, y0, z1);
+					glTexCoord2f(u, v); glVertex3f(x1, y0, z1);
+					glTexCoord2f(u, v); glVertex3f(x1, y1, z1);
+					glTexCoord2f(u, v); glVertex3f(x0, y1, z1);
+				}
+			}
+		}
+		glEnd();
+	}
+
+	glDisable(GL_ALPHA_TEST);
 	glDisable(GL_BLEND);
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 	glMatrixMode(GL_MODELVIEW);
@@ -2997,6 +3176,25 @@ void renderThreadStuff()
 	float eatCooldown = 0.0f;
 	currentFrame = static_cast<float>(glfwGetTime());
 
+	auto applyFancyGraphicsMode = [&](bool fancy) {
+		Block::DEPRECATEDcallOnGraphicsModeChanged(fancy, false, fancy);
+		for (size_t i = 0; i < sizeof(BlockGraphics::mBlocks) / sizeof(BlockGraphics::mBlocks[0]); ++i) {
+			if (BlockGraphics::mBlocks[i]) {
+				BlockGraphics::mBlocks[i]->onGraphicsModeChanged(fancy, false);
+			}
+		}
+		for (auto& kv : rc) {
+			for (int i = 0; i < 8; ++i) {
+				if (kv.second[i]) {
+					kv.second[i]->setDirty(Tick(0), true);
+				}
+			}
+			needsReRendering2.insert(kv.first);
+		}
+	};
+	applyFancyGraphicsMode(gGuiOptions.fancyGraphics);
+	bool lastFancyGraphics = gGuiOptions.fancyGraphics;
+
 	auto saveActiveWorld = [&]() {
 		if (!gGuiContext.hasWorldLoaded) return;
 		gGuiContext.hasPlayerTransform = true;
@@ -3111,6 +3309,10 @@ void renderThreadStuff()
 			if (gGuiContext.currentScreen) {
 				gGuiContext.currentScreen->init(&gGuiContext, gGuiContext.guiWidth, gGuiContext.guiHeight);
 			}
+		}
+		if (gGuiOptions.fancyGraphics != lastFancyGraphics) {
+			lastFancyGraphics = gGuiOptions.fancyGraphics;
+			applyFancyGraphicsMode(gGuiOptions.fancyGraphics);
 		}
 		if (gGuiContext.worldSaveAndCloseRequested) {
 			saveActiveWorld();
@@ -3463,7 +3665,7 @@ void renderThreadStuff()
 					                     Block::mBed->getSecondPart(region, hitPos, bedSecondPos) &&
 					                     region.getBlockID(bedSecondPos) == Block::mBed->mID);
 
-					int blockTintCol = block->getColor(region, hitPos, fb.data);
+					int blockTintCol = (block == Block::mGrass) ? 0xFFFFFF : block->getColor(region, hitPos, fb.data);
 					if (region.removeBlock(hitPos)) {
 						SoundEngine::play(SoundEngine::SND_DIG, 0.85f, 0.9f + (std::rand() % 20) * 0.01f);
 						float pr = ((blockTintCol >> 16) & 0xFF) / 255.0f;
@@ -3574,7 +3776,7 @@ void renderThreadStuff()
 								crackParticleAccum += survDt;
 								if (crackParticleAccum >= 0.09f) {
 									crackParticleAccum = 0.0f;
-									int blockTintCol = block->getColor(region, hitPos, fb.data);
+									int blockTintCol = (block == Block::mGrass && targetHit.getFacing() != 1) ? 0xFFFFFF : block->getColor(region, hitPos, fb.data);
 									float pr = ((blockTintCol >> 16) & 0xFF) / 255.0f;
 									float pg = ((blockTintCol >> 8) & 0xFF) / 255.0f;
 									float pb = (blockTintCol & 0xFF) / 255.0f;
@@ -4597,7 +4799,7 @@ void renderThreadStuff()
 					RenderChunk* chunkPart = rc[pos][i];
 					chunkPart->setDirty(Tick(0), true);
 					chunkPart->startRebuild(std::move(chunkBuilder));
-					chunkPart->rebuild(false, true);
+					chunkPart->rebuild(gGuiOptions.fancyGraphics, gGuiOptions.fancyGraphics);
 					chunkBuilder = chunkPart->endRebuild(Vec3(renderCamPos.x, renderCamPos.y, renderCamPos.z));
 				}
 				it = needsReRendering2.erase(it);
@@ -4633,6 +4835,7 @@ void renderThreadStuff()
 
 			if (!camUnderwater && !camUnderlava) {
 				renderSkyAndCelestials(projection, camRelView, skyInfo, gGuiContext.worldTime);
+				renderClouds(projection, camRelView, renderCamPos, skyInfo, gGuiContext.worldTime, gGuiOptions.fancyGraphics);
 			}
 
 			// Rebind lightmap/atlas after sky rendering

@@ -25,6 +25,11 @@ private:
 	Button* mFancyGraphicsButton = nullptr;
 	Button* mUiStyleButton = nullptr;
 	Button* mThirdPersonButton = nullptr;
+	Button* mServerVisibleButton = nullptr;
+	Button* mLeftHandedButton = nullptr;
+	Button* mFancySkiesButton = nullptr;
+	Button* mAnimateTexturesButton = nullptr;
+	Button* mHideGuiButton = nullptr;
 
 	Slider* mMusicSlider = nullptr;
 	Slider* mSoundSlider = nullptr;
