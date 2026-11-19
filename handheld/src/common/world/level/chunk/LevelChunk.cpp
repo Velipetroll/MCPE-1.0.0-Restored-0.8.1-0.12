@@ -2010,10 +2010,24 @@ void LevelChunk::updateCachedData(BlockSource& region) {
 
 		//try again because it might have been acquired since
 		if (mCachedDataState == ChunkCachedDataState::NotGenerated) {
+			bool allNeighborsReady = true;
+			for (int dx = -1; dx <= 1 && allNeighborsReady; ++dx) {
+				for (int dz = -1; dz <= 1; ++dz) {
+					if (dx == 0 && dz == 0) continue;
+					auto* nc = region.getChunk(ChunkPos(mPosition.x + dx, mPosition.z + dz));
+					if (!nc || nc->getState() != ChunkState::Loaded) {
+						allNeighborsReady = false;
+						break;
+					}
+				}
+			}
+
 			Random random(getMin().hashCode());
 			FoliageColor::buildGrassColor(getMin(), getMax() + 1, region, random);
 
-			mCachedDataState = ChunkCachedDataState::Generated;
+			if (allNeighborsReady) {
+				mCachedDataState = ChunkCachedDataState::Generated;
+			}
 		}
 	}
 }

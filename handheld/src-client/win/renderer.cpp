@@ -32,6 +32,7 @@
 #include "world/level/block/Block.h"
 #include "world/level/material/Material.h"
 #include "util/Random.h"
+#include "stb_image.h"
 
 
 int screenx = 1600;
@@ -180,6 +181,9 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 		} else if (key == GLFW_KEY_E) {
 			gGuiContext.setScreen(new InventoryScreen());
 			return;
+		} else if (key == GLFW_KEY_F5) {
+			gGuiOptions.thirdPerson = !gGuiOptions.thirdPerson;
+			return;
 		}
 	}
 	if (action == GLFW_PRESS && gGuiContext.currentScreen) {
@@ -242,7 +246,14 @@ public:
 	bool mNoGravity = false;
 	bool mIsFlying = false;
 	float mFallDistance = 0.0f;
+	float mWalkDist = 0.0f;
+	float mSmoothBob = 0.0f;
+	float mSwingProgress = 0.0f;
 	double mLastSpacePressTime = -1.0;
+
+	void triggerSwing() {
+		mSwingProgress = 0.001f;
+	}
 	//AABB* mLastHitBB;
 	AABB mBB;
 	std::vector<AABB> mSubBBs;
@@ -476,7 +487,24 @@ public:
 			mPosDelta += Vec3(mmPos.x, mmPos.y, mmPos.z) * dt;
 		}
 
+		float prevX = mPos.x;
+		float prevZ = mPos.z;
 		move(mPosDelta * dt * 20.0f);
+
+		float stepDx = mPos.x - prevX;
+		float stepDz = mPos.z - prevZ;
+		float horizStep = std::sqrt(stepDx * stepDx + stepDz * stepDz);
+		if (mOnGround && !mIsFlying) {
+			mWalkDist += horizStep * 0.6f;
+		}
+		float targetBob = (mOnGround && !mIsFlying && horizStep > 0.001f) ? 1.0f : 0.0f;
+		mSmoothBob += (targetBob - mSmoothBob) * std::min(1.0f, dt * 10.0f);
+		if (mSwingProgress > 0.0f) {
+			mSwingProgress += dt * 4.2f;
+			if (mSwingProgress >= 1.0f) {
+				mSwingProgress = 0.0f;
+			}
+		}
 
 		mPosDelta.x *= friction;
 		mPosDelta.z *= friction;
@@ -1299,6 +1327,512 @@ void renderWorldItemEntities(const std::vector<WorldItemEntity>& items,
 	glMatrixMode(GL_MODELVIEW);
 }
 
+GLuint createLightmapTexture() {
+	unsigned char pixels[16 * 16 * 4];
+	for (int sky = 0; sky < 16; ++sky) {
+		float skyBright = std::pow(0.82f, static_cast<float>(15 - sky));
+		for (int blk = 0; blk < 16; ++blk) {
+			float blkBright = std::pow(0.80f, static_cast<float>(15 - blk));
+			float base = std::max(skyBright, blkBright);
+			float r = std::min(1.0f, std::max(0.18f, base * 0.96f + blkBright * 0.12f));
+			float g = std::min(1.0f, std::max(0.18f, base * 0.96f + blkBright * 0.05f));
+			float b = std::min(1.0f, std::max(0.20f, base * 0.98f));
+			int idx = (sky * 16 + blk) * 4;
+			pixels[idx + 0] = static_cast<unsigned char>(r * 255.0f);
+			pixels[idx + 1] = static_cast<unsigned char>(g * 255.0f);
+			pixels[idx + 2] = static_cast<unsigned char>(b * 255.0f);
+			pixels[idx + 3] = 255;
+		}
+	}
+	GLuint tex = 0;
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 16, 16, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	return tex;
+}
+
+GLuint createWhiteTexture() {
+	unsigned char px[4] = { 255, 255, 255, 255 };
+	GLuint tex = 0;
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	return tex;
+}
+
+void drawPlayerBox3D(float x0, float y0, float z0,
+                     float w, float h, float d,
+                     int u, int v, int iw, int ih, int id,
+                     float texW, float texH, float shade = 1.0f) {
+	float x1 = x0 + w;
+	float y1 = y0 + h;
+	float z1 = z0 + d;
+
+	auto quad = [&](float ax, float ay, float az,
+	                float bx, float by, float bz,
+	                float cx, float cy, float cz,
+	                float dx, float dy, float dz,
+	                int su, int sv, int sw, int sh, float faceShade) {
+		float u0 = static_cast<float>(su) / texW;
+		float v0 = static_cast<float>(sv) / texH;
+		float u1 = static_cast<float>(su + sw) / texW;
+		float v1 = static_cast<float>(sv + sh) / texH;
+		float c = shade * faceShade;
+		glColor4f(c, c, c, 1.0f);
+		glTexCoord2f(u0, v1); glVertex3f(ax, ay, az);
+		glTexCoord2f(u1, v1); glVertex3f(bx, by, bz);
+		glTexCoord2f(u1, v0); glVertex3f(cx, cy, cz);
+		glTexCoord2f(u0, v0); glVertex3f(dx, dy, dz);
+	};
+
+	glBegin(GL_QUADS);
+	// Front (+Z)
+	quad(x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1, u + id, v + id, iw, ih, 0.95f);
+	// Back (-Z)
+	quad(x1, y0, z0, x0, y0, z0, x0, y1, z0, x1, y1, z0, u + id + iw + id, v + id, iw, ih, 0.85f);
+	// Right (-X)
+	quad(x0, y0, z0, x0, y0, z1, x0, y1, z1, x0, y1, z0, u, v + id, id, ih, 0.80f);
+	// Left (+X)
+	quad(x1, y0, z1, x1, y0, z0, x1, y1, z0, x1, y1, z1, u + id + iw, v + id, id, ih, 0.80f);
+	// Top (+Y)
+	quad(x0, y1, z1, x1, y1, z1, x1, y1, z0, x0, y1, z0, u + id, v, iw, id, 1.0f);
+	// Bottom (-Y)
+	quad(x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1, u + id + iw, v, iw, id, 0.65f);
+	glEnd();
+}
+
+void drawTexturedCube3D(const BlockRenderInfo& blockInfo, float shade = 1.0f) {
+	float y0 = -0.5f;
+	float y1 = blockInfo.isSlab ? 0.0f : 0.5f;
+	float vTop = blockInfo.isSlab ? 0.5f : 0.0f;
+
+	auto drawQuad = [&](const std::string& tex, float faceShade,
+	                    float ax, float ay, float az,
+	                    float bx, float by, float bz,
+	                    float cx, float cy, float cz,
+	                    float dx, float dy, float dz,
+	                    float v0, float v1) {
+		if (tex.empty() || !GuiComponent::bindTexture(tex)) return;
+		float c = shade * faceShade;
+		glColor4f(c, c, c, 1.0f);
+		glBegin(GL_QUADS);
+		glTexCoord2f(0.0f, v1); glVertex3f(ax, ay, az);
+		glTexCoord2f(1.0f, v1); glVertex3f(bx, by, bz);
+		glTexCoord2f(1.0f, v0); glVertex3f(cx, cy, cz);
+		glTexCoord2f(0.0f, v0); glVertex3f(dx, dy, dz);
+		glEnd();
+	};
+
+	if (blockInfo.isTransparent) {
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	}
+	drawQuad(blockInfo.topTex, 1.0f, -0.5f, y1, 0.5f, 0.5f, y1, 0.5f, 0.5f, y1, -0.5f, -0.5f, y1, -0.5f, 0.0f, 1.0f);
+	drawQuad(blockInfo.topTex, 0.55f, -0.5f, y0, -0.5f, 0.5f, y0, -0.5f, 0.5f, y0, 0.5f, -0.5f, y0, 0.5f, 0.0f, 1.0f);
+	drawQuad(blockInfo.frontTex, 0.85f, -0.5f, y0, 0.5f, 0.5f, y0, 0.5f, 0.5f, y1, 0.5f, -0.5f, y1, 0.5f, vTop, 1.0f);
+	drawQuad(blockInfo.frontTex, 0.85f, 0.5f, y0, -0.5f, -0.5f, y0, -0.5f, -0.5f, y1, -0.5f, 0.5f, y1, -0.5f, vTop, 1.0f);
+	drawQuad(blockInfo.sideTex, 0.70f, 0.5f, y0, 0.5f, 0.5f, y0, -0.5f, 0.5f, y1, -0.5f, 0.5f, y1, 0.5f, vTop, 1.0f);
+	drawQuad(blockInfo.sideTex, 0.70f, -0.5f, y0, -0.5f, -0.5f, y0, 0.5f, -0.5f, y1, 0.5f, -0.5f, y1, -0.5f, vTop, 1.0f);
+	if (blockInfo.isTransparent) {
+		glDisable(GL_BLEND);
+	}
+}
+
+struct ExtrudedEdgeQuad {
+	float x0, y0, x1, y1, z0, z1;
+	float u, v, shade;
+	int axis; // 0 = X-facing (left/right), 1 = Y-facing (top/bottom)
+};
+
+const std::vector<ExtrudedEdgeQuad>& getExtrudedEdges(const std::string& texPath) {
+	static std::unordered_map<std::string, std::vector<ExtrudedEdgeQuad>> cache;
+	auto it = cache.find(texPath);
+	if (it != cache.end()) return it->second;
+
+	std::vector<ExtrudedEdgeQuad> edges;
+	std::string fullPath = GuiComponent::resolveAssetPath(texPath);
+	int w = 0, h = 0, ch = 0;
+	stbi_set_flip_vertically_on_load(0);
+	unsigned char* data = stbi_load(fullPath.c_str(), &w, &h, &ch, 4);
+	if (data && w > 0 && h > 0 && w <= 64 && h <= 64) {
+		auto isOpaque = [&](int px, int py) -> bool {
+			if (px < 0 || py < 0 || px >= w || py >= h) return false;
+			return data[(py * w + px) * 4 + 3] >= 128;
+		};
+		const float halfZ = 0.03125f;
+		const float fw = static_cast<float>(w);
+		const float fh = static_cast<float>(h);
+		for (int py = 0; py < h; ++py) {
+			float y1 = 0.5f - static_cast<float>(py) / fh;
+			float y0 = 0.5f - static_cast<float>(py + 1) / fh;
+			float v = (static_cast<float>(py) + 0.5f) / fh;
+			for (int px = 0; px < w; ++px) {
+				if (!isOpaque(px, py)) continue;
+				float x0 = -0.5f + static_cast<float>(px) / fw;
+				float x1 = -0.5f + static_cast<float>(px + 1) / fw;
+				float u = (static_cast<float>(px) + 0.5f) / fw;
+
+				if (!isOpaque(px - 1, py)) {
+					edges.push_back({ x0, y0, x0, y1, -halfZ, halfZ, u, v, 0.72f, 0 });
+				}
+				if (!isOpaque(px + 1, py)) {
+					edges.push_back({ x1, y0, x1, y1, -halfZ, halfZ, u, v, 0.72f, 0 });
+				}
+				if (!isOpaque(px, py - 1)) {
+					edges.push_back({ x0, y1, x1, y1, -halfZ, halfZ, u, v, 0.92f, 1 });
+				}
+				if (!isOpaque(px, py + 1)) {
+					edges.push_back({ x0, y0, x1, y0, -halfZ, halfZ, u, v, 0.62f, 1 });
+				}
+			}
+		}
+	}
+	if (data) stbi_image_free(data);
+	auto res = cache.emplace(texPath, std::move(edges));
+	return res.first->second;
+}
+
+void drawTexturedSprite3D(const std::string& tex, float shade = 1.0f) {
+	if (tex.empty() || !GuiComponent::bindTexture(tex)) return;
+	const float halfZ = 0.03125f;
+
+	glBegin(GL_QUADS);
+	// Front face (+Z)
+	glColor4f(shade, shade, shade, 1.0f);
+	glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, -0.5f, halfZ);
+	glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, -0.5f, halfZ);
+	glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, 0.5f, halfZ);
+	glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, halfZ);
+
+	// Back face (-Z)
+	glColor4f(shade * 0.85f, shade * 0.85f, shade * 0.85f, 1.0f);
+	glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, -0.5f, -halfZ);
+	glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, -halfZ);
+	glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, 0.5f, -halfZ);
+	glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, -0.5f, -halfZ);
+
+	// Extruded pixel edges
+	const auto& edges = getExtrudedEdges(tex);
+	for (const auto& q : edges) {
+		float c = shade * q.shade;
+		glColor4f(c, c, c, 1.0f);
+		glTexCoord2f(q.u, q.v);
+		if (q.axis == 0) {
+			glVertex3f(q.x0, q.y0, q.z0);
+			glVertex3f(q.x0, q.y0, q.z1);
+			glVertex3f(q.x0, q.y1, q.z1);
+			glVertex3f(q.x0, q.y1, q.z0);
+		} else {
+			glVertex3f(q.x0, q.y0, q.z0);
+			glVertex3f(q.x1, q.y0, q.z0);
+			glVertex3f(q.x1, q.y0, q.z1);
+			glVertex3f(q.x0, q.y0, q.z1);
+		}
+	}
+	glEnd();
+}
+
+std::string getArmorTexturePath(const ItemInstance& item, bool layer2) {
+	if (item.isNull()) return "";
+	int id = item.getId();
+	auto eq = [&](const Item* it) { return it && id == it->getId(); };
+	if (eq(Item::mHelmet_cloth) || eq(Item::mChestplate_cloth) || eq(Item::mLeggings_cloth) || eq(Item::mBoots_cloth)) {
+		return layer2 ? "textures/models/armor/cloth_2.png" : "textures/models/armor/cloth_1.png";
+	}
+	if (eq(Item::mHelmet_chain) || eq(Item::mChestplate_chain) || eq(Item::mLeggings_chain) || eq(Item::mBoots_chain)) {
+		return layer2 ? "textures/models/armor/chain_2.png" : "textures/models/armor/chain_1.png";
+	}
+	if (eq(Item::mHelmet_iron) || eq(Item::mChestplate_iron) || eq(Item::mLeggings_iron) || eq(Item::mBoots_iron)) {
+		return layer2 ? "textures/models/armor/iron_2.png" : "textures/models/armor/iron_1.png";
+	}
+	if (eq(Item::mHelmet_gold) || eq(Item::mChestplate_gold) || eq(Item::mLeggings_gold) || eq(Item::mBoots_gold)) {
+		return layer2 ? "textures/models/armor/gold_2.png" : "textures/models/armor/gold_1.png";
+	}
+	if (eq(Item::mHelmet_diamond) || eq(Item::mChestplate_diamond) || eq(Item::mLeggings_diamond) || eq(Item::mBoots_diamond)) {
+		return layer2 ? "textures/models/armor/diamond_2.png" : "textures/models/armor/diamond_1.png";
+	}
+	return "";
+}
+
+void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspect, bool viewBobbing) {
+	glUseProgram(0);
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+	glClear(GL_DEPTH_BUFFER_BIT);
+	glDisable(GL_CULL_FACE);
+	glEnable(GL_TEXTURE_2D);
+	glEnable(GL_ALPHA_TEST);
+	glAlphaFunc(GL_GREATER, 0.1f);
+
+	glm::mat4 handProj = glm::perspective(glm::radians(70.0f), aspect, 0.05f, 20.0f);
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glLoadMatrixf(glm::value_ptr(handProj));
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+	glLoadIdentity();
+
+	float bobX = 0.0f;
+	float bobY = 0.0f;
+	if (viewBobbing) {
+		float phase = c.mWalkDist * 3.14159265f * 1.15f;
+		bobX = -std::cos(phase) * 0.045f * c.mSmoothBob;
+		bobY = std::abs(std::sin(phase)) * 0.045f * c.mSmoothBob;
+	}
+
+	float sw = c.mSwingProgress;
+	float swSqSin = std::sin(sw * sw * 3.14159265f);
+	float swSin = std::sin(sw * 3.14159265f);
+	float swSqrtSin = std::sin(std::sqrt(sw) * 3.14159265f);
+	float swDoubleSin = std::sin(std::sqrt(sw) * 2.0f * 3.14159265f);
+
+	if (held.isNull() || held.getStackSize() <= 0) {
+		if (GuiComponent::bindTexture("textures/entity/steve.png")) {
+			glTranslatef(-swSqrtSin * 0.30f, swDoubleSin * 0.40f, -swSin * 0.40f);
+			glTranslatef(0.64f + bobX, -0.60f - bobY, -0.72f);
+			glRotatef(45.0f + swSqrtSin * 70.0f, 0.0f, 1.0f, 0.0f);
+			glRotatef(-swSqSin * 20.0f, 0.0f, 0.0f, 1.0f);
+			// Match MCPE 0.8.1 ItemInHandRenderer::render() empty arm pose
+			glTranslatef(-1.0f, 3.6f, 3.5f);
+			glRotatef(120.0f, 0.0f, 0.0f, 1.0f);
+			glRotatef(200.0f, 1.0f, 0.0f, 0.0f);
+			glRotatef(-135.0f, 0.0f, 1.0f, 0.0f);
+			glTranslatef(5.6f, 0.0f, 0.0f);
+			glTranslatef(-5.0f * 0.0625f, 2.0f * 0.0625f, 0.0f);
+			glScalef(0.0625f, 0.0625f, 0.0625f);
+			glTranslatef(-1.0f, 4.0f, 0.0f);
+			glRotatef(180.0f, 1.0f, 0.0f, 0.0f);
+			drawPlayerBox3D(-2.0f, -6.0f, -2.0f, 4.0f, 12.0f, 4.0f, 40, 16, 4, 12, 4, 64.0f, 64.0f, 1.0f);
+		}
+	} else {
+		glTranslatef(-swSqrtSin * 0.40f, swDoubleSin * 0.20f, -swSin * 0.20f);
+		glTranslatef(0.56f + bobX, -0.52f - bobY, -0.72f);
+		glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
+		glRotatef(-swSqSin * 20.0f, 0.0f, 1.0f, 0.0f);
+		glRotatef(-swSqrtSin * 20.0f, 0.0f, 0.0f, 1.0f);
+		glRotatef(-swSqrtSin * 80.0f, 1.0f, 0.0f, 0.0f);
+		glScalef(0.40f, 0.40f, 0.40f);
+
+		BlockRenderInfo blockInfo = getBlockRenderInfo(held);
+		if (blockInfo.is3D) {
+			drawTexturedCube3D(blockInfo, 1.0f);
+		} else {
+			std::string tex = getItemTexturePath(held);
+			if (held.getItem() && held.getItem()->isMirroredArt()) {
+				glRotatef(180.0f, 0.0f, 1.0f, 0.0f);
+			}
+			// Exact MCPE 0.8.1 ItemInHandRenderer::renderItem() 2D sprite chain
+			glScalef(1.5f, 1.5f, 1.5f);
+			glRotatef(50.0f, 0.0f, 1.0f, 0.0f);
+			glRotatef(335.0f, 0.0f, 0.0f, 1.0f);
+			glTranslatef(0.075f, -0.245f, -0.1f);
+			glScalef(0.0625f, 0.0625f, 0.0625f);
+			glRotatef(90.0f, 0.0f, 0.0f, 1.0f);
+			glRotatef(90.0f, 1.0f, 0.0f, 0.0f);
+			glRotatef(-180.0f, 1.0f, 0.0f, 0.0f);
+			glRotatef(-90.0f, 0.0f, 1.0f, 0.0f);
+			glTranslatef(0.0f, 0.0f, -16.0f);
+			// Map drawTexturedSprite3D [-0.5..0.5, -0.5..0.5, -0.03125..0.03125] -> TextureTesselator [0..16, 0..1, 0..16]
+			glTranslatef(8.0f, 0.5f, 8.0f);
+			glScalef(16.0f, 16.0f, -16.0f);
+			glRotatef(90.0f, 1.0f, 0.0f, 0.0f);
+			drawTexturedSprite3D(tex, 1.0f);
+		}
+	}
+
+	glDisable(GL_ALPHA_TEST);
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	glMatrixMode(GL_MODELVIEW);
+	glPopMatrix();
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glMatrixMode(GL_MODELVIEW);
+}
+
+void renderWorldSteve3D(const Camera& c,
+                        const GuiContext& guiCtx,
+                        const glm::mat4& projection,
+                        const glm::mat4& view) {
+	if (!GuiComponent::bindTexture("textures/entity/steve.png")) return;
+
+	glUseProgram(0);
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+	glDisable(GL_CULL_FACE);
+	glEnable(GL_TEXTURE_2D);
+	glEnable(GL_ALPHA_TEST);
+	glAlphaFunc(GL_GREATER, 0.1f);
+
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glLoadMatrixf(glm::value_ptr(projection));
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+	glLoadMatrixf(glm::value_ptr(view));
+
+	const float scale = 1.8f / 32.0f;
+	float limbSwing = std::sin(c.mWalkDist * 3.14159265f * 1.15f) * 45.0f * c.mSmoothBob;
+	float sw = c.mSwingProgress;
+	float swingAngle = (sw > 0.0f) ? (-std::sin(std::sqrt(sw) * 3.14159265f) * 85.0f) : 0.0f;
+	bool sneaking = !c.mIsFlying && (glinput.KeyDown(GLFW_KEY_LEFT_SHIFT) || glinput.KeyDown(GLFW_KEY_RIGHT_SHIFT));
+
+	glTranslatef(c.mPos.x, c.mBB.min.y, c.mPos.z);
+	glRotatef(90.0f - static_cast<float>(c.yaw), 0.0f, 1.0f, 0.0f);
+	glScalef(scale, scale, scale);
+	if (sneaking) {
+		glTranslatef(0.0f, -1.5f, 0.0f);
+	}
+
+	// Right Leg (x = -2, hip y = 12)
+	glPushMatrix();
+	glTranslatef(-2.0f, 12.0f, 0.0f);
+	glRotatef(limbSwing, 1.0f, 0.0f, 0.0f);
+	drawPlayerBox3D(-2.0f, -12.0f, -2.0f, 4.0f, 12.0f, 4.0f, 0, 16, 4, 12, 4, 64.0f, 64.0f);
+	glPopMatrix();
+
+	// Left Leg (x = +2, hip y = 12)
+	glPushMatrix();
+	glTranslatef(2.0f, 12.0f, 0.0f);
+	glRotatef(-limbSwing, 1.0f, 0.0f, 0.0f);
+	drawPlayerBox3D(-2.0f, -12.0f, -2.0f, 4.0f, 12.0f, 4.0f, 16, 48, 4, 12, 4, 64.0f, 64.0f);
+	glPopMatrix();
+
+	// Torso
+	glPushMatrix();
+	if (sneaking) glRotatef(18.0f, 1.0f, 0.0f, 0.0f);
+	drawPlayerBox3D(-4.0f, 12.0f, -2.0f, 8.0f, 12.0f, 4.0f, 16, 16, 8, 12, 4, 64.0f, 64.0f);
+
+	// Right Arm + Held Item
+	int slotIdx = std::max(0, std::min(8, guiCtx.selectedHotbarSlot));
+	const ItemInstance& held = guiCtx.inventorySlots[static_cast<size_t>(slotIdx)];
+	bool hasHeld = !held.isNull() && held.getStackSize() > 0;
+	glPushMatrix();
+	glTranslatef(-6.0f, 22.0f, 0.0f);
+	glRotatef((hasHeld ? (-limbSwing * 0.5f - 18.0f) : -limbSwing) + swingAngle, 1.0f, 0.0f, 0.0f);
+	glRotatef(4.0f, 0.0f, 0.0f, -1.0f);
+	drawPlayerBox3D(-2.0f, -10.0f, -2.0f, 4.0f, 12.0f, 4.0f, 40, 16, 4, 12, 4, 64.0f, 64.0f);
+
+	if (hasHeld) {
+		glPushMatrix();
+		BlockRenderInfo blockInfo = getBlockRenderInfo(held);
+		if (blockInfo.is3D) {
+			glTranslatef(0.0f, -10.0f, 3.0f);
+			glRotatef(20.0f, 1.0f, 0.0f, 0.0f);
+			glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
+			glScalef(6.0f, 6.0f, 6.0f);
+			drawTexturedCube3D(blockInfo, 1.0f);
+		} else {
+			std::string tex = getItemTexturePath(held);
+			bool isTool = held.getItem() && (held.getItem()->isHandEquipped() || held.getItem()->isMirroredArt());
+			glTranslatef(0.0f, -9.5f, 2.5f);
+			if (isTool) {
+				glScalef(10.0f, 10.0f, 10.0f);
+				glRotatef(90.0f, 0.0f, 1.0f, 0.0f);
+				glRotatef(-45.0f, 0.0f, 0.0f, 1.0f);
+				glTranslatef(0.30f, 0.30f, 0.0f);
+			} else {
+				glScalef(6.0f, 6.0f, 6.0f);
+				glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
+			}
+			drawTexturedSprite3D(tex, 1.0f);
+		}
+		glPopMatrix();
+	}
+	glPopMatrix();
+
+	// Left Arm
+	glPushMatrix();
+	glTranslatef(6.0f, 22.0f, 0.0f);
+	glRotatef(limbSwing, 1.0f, 0.0f, 0.0f);
+	glRotatef(4.0f, 0.0f, 0.0f, 1.0f);
+	drawPlayerBox3D(-2.0f, -10.0f, -2.0f, 4.0f, 12.0f, 4.0f, 32, 48, 4, 12, 4, 64.0f, 64.0f);
+	glPopMatrix();
+
+	// Head
+	glPushMatrix();
+	glTranslatef(0.0f, 24.0f, 0.0f);
+	glRotatef(static_cast<float>(-c.pitch), 1.0f, 0.0f, 0.0f);
+	drawPlayerBox3D(-4.0f, 0.0f, -4.0f, 8.0f, 8.0f, 8.0f, 0, 0, 8, 8, 8, 64.0f, 64.0f);
+
+	// Armor slot 0: Helmet
+	std::string helmTex = getArmorTexturePath(guiCtx.armorSlots[0], false);
+	if (!helmTex.empty() && GuiComponent::bindTexture(helmTex)) {
+		drawPlayerBox3D(-4.5f, -0.5f, -4.5f, 9.0f, 9.0f, 9.0f, 0, 0, 8, 8, 8, 64.0f, 32.0f);
+	}
+	glPopMatrix();
+
+	// Armor slot 1: Chestplate
+	std::string chestTex = getArmorTexturePath(guiCtx.armorSlots[1], false);
+	if (!chestTex.empty() && GuiComponent::bindTexture(chestTex)) {
+		drawPlayerBox3D(-4.5f, 11.5f, -2.5f, 9.0f, 13.0f, 5.0f, 16, 16, 8, 12, 4, 64.0f, 32.0f);
+
+		glPushMatrix();
+		glTranslatef(-6.0f, 22.0f, 0.0f);
+		glRotatef(-limbSwing + swingAngle, 1.0f, 0.0f, 0.0f);
+		glRotatef(4.0f, 0.0f, 0.0f, -1.0f);
+		drawPlayerBox3D(-2.5f, -10.5f, -2.5f, 5.0f, 13.0f, 5.0f, 40, 16, 4, 12, 4, 64.0f, 32.0f);
+		glPopMatrix();
+
+		glPushMatrix();
+		glTranslatef(6.0f, 22.0f, 0.0f);
+		glRotatef(limbSwing, 1.0f, 0.0f, 0.0f);
+		glRotatef(4.0f, 0.0f, 0.0f, 1.0f);
+		drawPlayerBox3D(-2.5f, -10.5f, -2.5f, 5.0f, 13.0f, 5.0f, 40, 16, 4, 12, 4, 64.0f, 32.0f);
+		glPopMatrix();
+	}
+	glPopMatrix(); // end torso tilt
+
+	// Armor slot 2: Leggings
+	std::string legsTex = getArmorTexturePath(guiCtx.armorSlots[2], true);
+	if (!legsTex.empty() && GuiComponent::bindTexture(legsTex)) {
+		drawPlayerBox3D(-4.25f, 11.75f, -2.25f, 8.5f, 12.5f, 4.5f, 16, 16, 8, 12, 4, 64.0f, 32.0f);
+
+		glPushMatrix();
+		glTranslatef(-2.0f, 12.0f, 0.0f);
+		glRotatef(limbSwing, 1.0f, 0.0f, 0.0f);
+		drawPlayerBox3D(-2.25f, -12.25f, -2.25f, 4.5f, 12.5f, 4.5f, 0, 16, 4, 12, 4, 64.0f, 32.0f);
+		glPopMatrix();
+
+		glPushMatrix();
+		glTranslatef(2.0f, 12.0f, 0.0f);
+		glRotatef(-limbSwing, 1.0f, 0.0f, 0.0f);
+		drawPlayerBox3D(-2.25f, -12.25f, -2.25f, 4.5f, 12.5f, 4.5f, 0, 16, 4, 12, 4, 64.0f, 32.0f);
+		glPopMatrix();
+	}
+
+	// Armor slot 3: Boots
+	std::string bootsTex = getArmorTexturePath(guiCtx.armorSlots[3], false);
+	if (!bootsTex.empty() && GuiComponent::bindTexture(bootsTex)) {
+		glPushMatrix();
+		glTranslatef(-2.0f, 12.0f, 0.0f);
+		glRotatef(limbSwing, 1.0f, 0.0f, 0.0f);
+		drawPlayerBox3D(-2.5f, -12.4f, -2.5f, 5.0f, 12.8f, 5.0f, 0, 16, 4, 12, 4, 64.0f, 32.0f);
+		glPopMatrix();
+
+		glPushMatrix();
+		glTranslatef(2.0f, 12.0f, 0.0f);
+		glRotatef(-limbSwing, 1.0f, 0.0f, 0.0f);
+		drawPlayerBox3D(-2.5f, -12.4f, -2.5f, 5.0f, 12.8f, 5.0f, 0, 16, 4, 12, 4, 64.0f, 32.0f);
+		glPopMatrix();
+	}
+
+	glDisable(GL_ALPHA_TEST);
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	glMatrixMode(GL_MODELVIEW);
+	glPopMatrix();
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glMatrixMode(GL_MODELVIEW);
+}
+
 } // namespace
 
 void renderThreadStuff()
@@ -1381,11 +1915,27 @@ void renderThreadStuff()
 	{ 1, 1 }
 	};
 
+	GLuint gLightmapTex = createLightmapTexture();
+	GLuint gWhiteTex = createWhiteTexture();
+
 	mce::MaterialPtr chunkMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_opaque");
+	mce::MaterialPtr chunkSeasonsMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_opaque_seasons");
+	mce::MaterialPtr chunkAlphaMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_alpha");
+	mce::MaterialPtr chunkAlphaSingleMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_alpha_single_side");
+	mce::MaterialPtr chunkAlphaSeasonsMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_alpha_seasons");
+	mce::MaterialPtr chunkDoubleSideMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_doubleside");
 	mce::MaterialPtr chunk2Material = mce::RenderMaterialGroup::switchable.getMaterial("terrain_water");
+	mce::MaterialPtr chunk2BelowMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_water_below");
 	mce::MaterialPtr chunk3Material = mce::RenderMaterialGroup::switchable.getMaterial("terrain_blend");
+	mce::MaterialPtr chunk3BelowMaterial = mce::RenderMaterialGroup::switchable.getMaterial("terrain_blend_below");
 	
-	std::vector<mce::MaterialPtr*> mptrs = { &chunkMaterial, &chunk2Material, &chunk3Material };
+	std::vector<mce::MaterialPtr*> mptrs = {
+		&chunkMaterial, &chunkSeasonsMaterial,
+		&chunkAlphaMaterial, &chunkAlphaSingleMaterial, &chunkAlphaSeasonsMaterial,
+		&chunkDoubleSideMaterial,
+		&chunk2Material, &chunk2BelowMaterial,
+		&chunk3Material, &chunk3BelowMaterial
+	};
 
 	glm::mat4 projection = glm::perspective(glm::radians(85.0f),
 		(float)screenx / (float)screeny,
@@ -1395,18 +1945,20 @@ void renderThreadStuff()
 
 	for (auto sl : mptrs)
 	{
+		if (!sl || !(*sl).operator->() || !(*sl)->myShader) continue;
 		(*sl)->myShader->setMatrix4("PROJ", glm::value_ptr(projection));
 		(*sl)->myShader->setInt("TEXTURE_0", 0);
-		(*sl)->myShader->setFloat("FAR_CHUNKS_DISTANCE", 100);
-		(*sl)->myShader->setFloat("RENDER_DISTANCE", 100);
+		(*sl)->myShader->setInt("TEXTURE_1", 1);
+		(*sl)->myShader->setInt("TEXTURE_2", 2);
+		(*sl)->myShader->setFloat("FAR_CHUNKS_DISTANCE", 80.0f);
+		(*sl)->myShader->setFloat("RENDER_DISTANCE", 80.0f);
 	}
 
 	std::unordered_map<ChunkPos,RenderChunk*[8]> rc;
 
-	//std::unordered_set<ChunkPos> renderChunkMap;
-
 	std::unordered_set<ChunkPos> needsReRendering;
 	std::unordered_set<ChunkPos> needsReRendering2;
+	std::unordered_set<ChunkPos> loadedChunkSet;
 
 	std::unique_ptr<RenderChunkBuilder> chunkBuilder;
 
@@ -1453,6 +2005,7 @@ void renderThreadStuff()
 		rc.clear();
 		needsReRendering.clear();
 		needsReRendering2.clear();
+		loadedChunkSet.clear();
 		worldItems.clear();
 		chunkBuilder.reset();
 		c.setWorld(nullptr, nullptr);
@@ -1598,6 +2151,10 @@ void renderThreadStuff()
 				targetHit = region.clip(rayStart, rayEnd, false, false, 200, false);
 				hasTargetHit = targetHit.isHit() && targetHit.isTile();
 
+				if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
+					c.triggerSwing();
+				}
+
 				if (hasTargetHit) {
 					BlockPos hitPos = targetHit.getBlock();
 					if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
@@ -1647,7 +2204,7 @@ void renderThreadStuff()
 					} else if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_RIGHT)) {
 						FullBlock fb = region.getBlockAndData(hitPos);
 						if (!c.isSneaking() && openInteractiveBlockScreen(region, hitPos, fb.id, gGuiContext)) {
-							// Interactive screen opened
+							c.triggerSwing();
 						} else {
 							gGuiContext.ensureInventoryInitialized();
 							int slotIdx = std::max(0, std::min(8, gGuiContext.selectedHotbarSlot));
@@ -1671,6 +2228,7 @@ void renderThreadStuff()
 										if (!overlapsPlayer) {
 											DataID placeData = static_cast<DataID>(held.getAuxValue() & 0xF);
 											if (region.setBlockAndData(placePos, FullBlock(placeBlock->mID, placeData), Block::UPDATE_ALL)) {
+												c.triggerSwing();
 												if (!gGuiContext.isCreative) {
 													held.remove(1);
 													if (held.getStackSize() <= 0) {
@@ -1694,199 +2252,266 @@ void renderThreadStuff()
 				bool allowPickup = (gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen);
 				updateWorldItemEntities(worldItems, deltaTime, c.getRegion(), c.mBB, gGuiContext, allowPickup);
 			}
-			projection = glm::perspective(glm::radians(85.0f),
-			                              static_cast<float>(screenx) / static_cast<float>(std::max(1, screeny)),
-			                              0.1f, 1000.0f);
+			float aspect = static_cast<float>(screenx) / static_cast<float>(std::max(1, screeny));
+			projection = glm::perspective(glm::radians(85.0f), aspect, 0.1f, 1000.0f);
 			for (auto sl : mptrs) {
+				if (!sl || !(*sl).operator->() || !(*sl)->myShader) continue;
 				(*sl)->myShader->setMatrix4("PROJ", glm::value_ptr(projection));
 			}
-			glm::mat4 view = glm::lookAt(c.mPos, c.mPos + c.cameraFront, c.cameraUp);
-		
-		//chunkMaterial->myShader->setVector4("CHUNK_ORIGIN_AND_SCALE", glm::vec4(0, 0, 0, 1));
-		for (auto sl : mptrs)
-		{
-			(*sl)->myShader->setMatrix4("WORLDVIEW", glm::value_ptr(view));
-		}
 
-		ChunkPos camChunkPos(c.mPos.x/16,c.mPos.z/16);
-		int renderDistance = 3;
-		int loadDistance = renderDistance+1;//account for post-processing requiring chunks around it to be loaded
+			// Compute camera position & view (first-person with viewBobbing vs third-person with collision)
+			glm::vec3 eyePos = c.mPos;
+			glm::vec3 renderCamPos = eyePos;
+			glm::vec3 lookTarget = eyePos + c.cameraFront;
 
-		
+			if (gGuiOptions.thirdPerson) {
+				const float thirdPersonDist = 4.0f;
+				glm::vec3 desiredCam = eyePos - c.cameraFront * thirdPersonDist;
+				HitResult camHit = c.getRegion().clip(
+					Vec3(eyePos.x, eyePos.y, eyePos.z),
+					Vec3(desiredCam.x, desiredCam.y, desiredCam.z),
+					false, true, 50, false);
+				if (camHit.isHit() && camHit.isTile()) {
+					const Vec3& hp = camHit.getPos();
+					glm::vec3 hitVec(hp.x, hp.y, hp.z);
+					float hitDist = glm::length(hitVec - eyePos);
+					float clampedDist = std::max(0.45f, hitDist - 0.25f);
+					renderCamPos = eyePos - c.cameraFront * clampedDist;
+				} else {
+					renderCamPos = desiredCam;
+				}
+				lookTarget = eyePos;
+			} else if (gGuiOptions.viewBobbing) {
+				float phase = c.mWalkDist * 3.14159265f * 1.15f;
+				float bobVert = -std::abs(std::cos(phase)) * 0.045f * c.mSmoothBob;
+				float bobHoriz = std::sin(phase) * 0.035f * c.mSmoothBob;
+				glm::vec3 rightVec = glm::normalize(glm::cross(c.cameraFront, c.cameraUp));
+				renderCamPos += rightVec * bobHoriz + c.cameraUp * bobVert;
+				lookTarget = renderCamPos + c.cameraFront;
+			}
 
-		for (int x = -loadDistance; x <= loadDistance; x++)
-		{
-			for (int z = -loadDistance; z <= loadDistance; z++)
-			{
-				ChunkPos cp(camChunkPos.x+x, camChunkPos.z+z);
+			glm::mat4 view = glm::lookAt(renderCamPos, lookTarget, c.cameraUp);
+			glm::mat4 camRelView = glm::lookAt(glm::vec3(0.0f), lookTarget - renderCamPos, c.cameraUp);
 
-				if (rc.find(cp) == rc.end())
-				{
-					commandContext.dim->getChunkSource().getOrLoadChunk(cp, ChunkSource::LoadMode::Deferred);
-					needsReRendering.insert(cp);
-					
+			for (auto sl : mptrs) {
+				if (!sl || !(*sl).operator->() || !(*sl)->myShader) continue;
+				(*sl)->myShader->setMatrix4("WORLDVIEW", glm::value_ptr(camRelView));
+			}
+
+			ChunkPos camChunkPos(Math::floor(c.mPos.x / 16.0f), Math::floor(c.mPos.z / 16.0f));
+			int renderDistance = 3;
+			int loadDistance = renderDistance + 1;
+
+			for (int x = -loadDistance; x <= loadDistance; x++) {
+				for (int z = -loadDistance; z <= loadDistance; z++) {
+					ChunkPos cp(camChunkPos.x + x, camChunkPos.z + z);
+					auto* lc = commandContext.dim->getChunkSource().getOrLoadChunk(cp, ChunkSource::LoadMode::Deferred);
+					bool inRenderRange = (std::abs(x) <= renderDistance && std::abs(z) <= renderDistance);
+
+					if (lc && lc->getState() == ChunkState::Loaded) {
+						if (loadedChunkSet.insert(cp).second) {
+							if (inRenderRange) {
+								needsReRendering2.insert(cp);
+							}
+							for (int i = 1; i < 9; i++) {
+								ChunkPos np = cp + offsets[i];
+								if (rc.find(np) != rc.end()) {
+									needsReRendering2.insert(np);
+								}
+							}
+						} else if (inRenderRange && rc.find(cp) == rc.end()) {
+							needsReRendering2.insert(cp);
+						}
+					} else {
+						needsReRendering.insert(cp);
+					}
 				}
 			}
-		}
 
-
-
-			for (auto it = needsReRendering.begin(); it != needsReRendering.end(); )
-			{
-
-
+			for (auto it = needsReRendering.begin(); it != needsReRendering.end(); ) {
 				ChunkPos pos = *it;
-
-				if (commandContext.dim->getChunkSource().getOrLoadChunk(pos, ChunkSource::LoadMode::None)->getState() == ChunkState::Loaded)
-				{
-					needsReRendering2.insert(pos);
-					for (int i = 1; i < 9; i++)
-					{
-						if(commandContext.dim->getChunkSource().getOrLoadChunk(pos + offsets[i], ChunkSource::LoadMode::None)->getState() == ChunkState::Loaded)
-							needsReRendering2.insert(pos+offsets[i]);
+				auto* lc = commandContext.dim->getChunkSource().getOrLoadChunk(pos, ChunkSource::LoadMode::None);
+				if (lc && lc->getState() == ChunkState::Loaded) {
+					loadedChunkSet.insert(pos);
+					if (std::abs(pos.x - camChunkPos.x) <= renderDistance &&
+					    std::abs(pos.z - camChunkPos.z) <= renderDistance) {
+						needsReRendering2.insert(pos);
 					}
-					/*
-					std::cout << "Rendering chunk at " << pos.x << ", " << pos.z << " ChunkPos\n";
-					//int k = rc.size();
-					for (int i = 0; i < 8; i++)
-					{
-						BlockPos cp(pos.x * 16, i * 16, pos.z * 16);
-
-
-
-
-						RenderChunk* chunkPart = new RenderChunk(cp);
-
-						chunkPart->startRebuild(std::move(chunkBuilder));
-						chunkPart->rebuild(false, true);
-						chunkBuilder = chunkPart->endRebuild(Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
-						//					chunkPart->startFaceSort(make_unique<RenderChunkSorter>());
-						//chunkPart->faceSort();
-						//chunkPart->endFaceSort();*
-						rc[cp][i] = chunkPart;
-					}*/
+					for (int i = 1; i < 9; i++) {
+						ChunkPos np = pos + offsets[i];
+						auto* nlc = commandContext.dim->getChunkSource().getOrLoadChunk(np, ChunkSource::LoadMode::None);
+						if (nlc && nlc->getState() == ChunkState::Loaded &&
+						    (rc.find(np) != rc.end() ||
+						     (std::abs(np.x - camChunkPos.x) <= renderDistance &&
+						      std::abs(np.z - camChunkPos.z) <= renderDistance))) {
+							needsReRendering2.insert(np);
+						}
+					}
 					it = needsReRendering.erase(it);
-					//renderChunkMap.insert(pos);
-				}
-				else
-				{
-					it++;
+				} else {
+					++it;
 				}
 			}
 
-
-
-
-
-
-			for (auto it = needsReRendering2.begin(); it != needsReRendering2.end(); )
-			{
+			for (auto it = needsReRendering2.begin(); it != needsReRendering2.end(); ) {
 				ChunkPos pos = *it;
+				auto* lc = commandContext.dim->getChunkSource().getOrLoadChunk(pos, ChunkSource::LoadMode::None);
+				if (!lc || lc->getState() != ChunkState::Loaded) {
+					++it;
+					continue;
+				}
+				for (int i = 0; i < 8; i++) {
+					BlockPos cp(pos.x * 16, i * 16, pos.z * 16);
+					if (rc[pos][i] == nullptr)
+						rc[pos][i] = new RenderChunk(cp);
+					else
+						rc[pos][i]->setDirty(Tick(0), true);
 
-					std::cout << "Rendering chunk at " << pos.x << ", " << pos.z << " ChunkPos\n";
-					//int k = rc.size();
-					for (int i = 0; i < 8; i++)
-					{
-						BlockPos cp(pos.x * 16, i * 16, pos.z * 16);
+					RenderChunk* chunkPart = rc[pos][i];
+					chunkPart->setDirty(Tick(0), true);
+					chunkPart->startRebuild(std::move(chunkBuilder));
+					chunkPart->rebuild(false, true);
+					chunkBuilder = chunkPart->endRebuild(Vec3(renderCamPos.x, renderCamPos.y, renderCamPos.z));
+				}
+				it = needsReRendering2.erase(it);
+			}
 
+			// Bind lightmap (TEXTURE_1) & neutral foliage fallback (TEXTURE_2)
+			glActiveTexture(GL_TEXTURE1);
+			glBindTexture(GL_TEXTURE_2D, gLightmapTex);
+			glActiveTexture(GL_TEXTURE2);
+			glBindTexture(GL_TEXTURE_2D, gWhiteTex);
+			glActiveTexture(GL_TEXTURE0);
 
-						
+			BlockPos camBlockPos(Math::floor(renderCamPos.x), Math::floor(renderCamPos.y), Math::floor(renderCamPos.z));
+			const Material& camMat = c.getRegion().getMaterial(camBlockPos);
+			RenderChunk::setMaterialsBasedOnCameraUnderLiquid(
+				camMat.isType(MaterialType::Water),
+				camMat.isType(MaterialType::Lava));
 
-						if(rc[cp][i] == nullptr)
-							rc[cp][i] = new RenderChunk(cp);
-						else
-							rc[cp][i]->setDirty(Tick(0), true);
+			auto setChunkOrigin = [&](const BlockPos& position) {
+				glm::vec4 chunkOrigin(
+					static_cast<float>(position.x) - renderCamPos.x,
+					static_cast<float>(position.y) - renderCamPos.y,
+					static_cast<float>(position.z) - renderCamPos.z,
+					1.0f);
+				for (auto sl : mptrs) {
+					if (!sl || !(*sl).operator->() || !(*sl)->myShader) continue;
+					(*sl)->myShader->setVector4("CHUNK_ORIGIN_AND_SCALE", chunkOrigin);
+				}
+			};
 
-						RenderChunk* chunkPart = rc[cp][i];
-						chunkPart->setDirty(Tick(0), true);
+			// Pass 1: Opaque, double-sided, and alpha-tested layers
+			static const TerrainLayer opaqueLayers[] = {
+				TerrainLayer::Opaque,
+				TerrainLayer::OpaqueSeasons,
+				TerrainLayer::DoubleSide,
+				TerrainLayer::Alpha,
+				TerrainLayer::AlphaSingleSide,
+				TerrainLayer::AlphaSeasons
+			};
+			struct TransparentChunkRef {
+				RenderChunk* chunk;
+				float distSq;
+			};
+			std::vector<TransparentChunkRef> transparentChunks;
 
-						chunkPart->startRebuild(std::move(chunkBuilder));
-						chunkPart->rebuild(false, true);
-						chunkBuilder = chunkPart->endRebuild(Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+			for (auto& lc : rc) {
+				for (int i = 0; i < 8; i++) {
+					RenderChunk* chunkPart = lc.second[i];
+					if (!chunkPart) continue;
+					BlockPos position = chunkPart->getPosition();
+
+					bool hasTransp = chunkPart->hasLayer(TerrainLayer::Blend) || chunkPart->hasLayer(TerrainLayer::Water);
+					if (hasTransp) {
+						BlockPos center = chunkPart->getCenter();
+						float dx = static_cast<float>(center.x) - renderCamPos.x;
+						float dy = static_cast<float>(center.y) - renderCamPos.y;
+						float dz = static_cast<float>(center.z) - renderCamPos.z;
+						transparentChunks.push_back({ chunkPart, dx * dx + dy * dy + dz * dz });
 					}
-					it = needsReRendering2.erase(it);
+
+					bool anyOpaque = false;
+					for (TerrainLayer layer : opaqueLayers) {
+						if (chunkPart->hasLayer(layer)) {
+							anyOpaque = true;
+							break;
+						}
+					}
+					if (!anyOpaque) continue;
+
+					setChunkOrigin(position);
+					for (TerrainLayer layer : opaqueLayers) {
+						if (chunkPart->hasLayer(layer)) {
+							RenderChunkRenderParameters renderParams;
+							renderParams.layer = layer;
+							renderParams.forceUnsorted = false;
+							renderParams.forceFog = false;
+							chunkPart->render(renderParams, currentFrame);
+						}
+					}
+				}
 			}
 
+			// Pass 2: Transparent layers (Blend & Water) sorted back-to-front
+			std::sort(transparentChunks.begin(), transparentChunks.end(),
+			          [](const TransparentChunkRef& a, const TransparentChunkRef& b) {
+				          return a.distSq > b.distSq;
+			          });
 
-
-
-
-
-
-
-
-
-		//m.render();
-		for (auto & lc : rc)
-		{
-			for (int i = 0; i < 8; i++)
-			{
-				BlockPos position = lc.second[i]->getPosition();
-				lc.second[i]->updateFaceSortState(Vec3(c.mPos.x, c.mPos.y, c.mPos.z));//
-				if (lc.second[i]->isFaceSortDirty())
-				{
-					lc.second[i]->startFaceSort(make_unique<RenderChunkSorter>());
-					lc.second[i]->faceSort();
-					lc.second[i]->endFaceSort();
+			for (const auto& entry : transparentChunks) {
+				RenderChunk* chunkPart = entry.chunk;
+				chunkPart->updateFaceSortState(Vec3(renderCamPos.x, renderCamPos.y, renderCamPos.z));
+				if (chunkPart->isFaceSortDirty()) {
+					chunkPart->startFaceSort(make_unique<RenderChunkSorter>());
+					chunkPart->faceSort();
+					chunkPart->endFaceSort();
 				}
+				setChunkOrigin(chunkPart->getPosition());
 
-				for (auto sl : mptrs)
-				{
-					glm::vec4 chunkOrigin(position.x, position.y, position.z, 1);
-				(*sl)->myShader->setVector4("CHUNK_ORIGIN_AND_SCALE", chunkOrigin);
+				if (chunkPart->hasLayer(TerrainLayer::Blend)) {
+					RenderChunkRenderParameters renderParams;
+					renderParams.layer = TerrainLayer::Blend;
+					renderParams.forceUnsorted = false;
+					renderParams.forceFog = false;
+					chunkPart->render(renderParams, currentFrame);
 				}
-
-				RenderChunkRenderParameters renderParams;
-				renderParams.layer = TerrainLayer::Opaque;//Blend;//?
-				renderParams.forceUnsorted = false;
-				renderParams.forceFog = false;
-
-
-				//shader.setMatrix4("model", glm::value_ptr(model));
-				if (lc.second[i]->hasLayer(renderParams.layer))
-					lc.second[i]->render(renderParams, currentFrame);
+				if (chunkPart->hasLayer(TerrainLayer::Water)) {
+					RenderChunkRenderParameters renderParams;
+					renderParams.layer = TerrainLayer::Water;
+					renderParams.forceUnsorted = false;
+					renderParams.forceFog = false;
+					chunkPart->render(renderParams, currentFrame);
+				}
 			}
-		}
 
-		for (auto& lc : rc)
-		{
-			for (int i = 0; i < 8; i++)
-			{
-				BlockPos position = lc.second[i]->getPosition();
+			glActiveTexture(GL_TEXTURE0);
 
-				for (auto sl : mptrs)
-				{
-					glm::vec4 chunkOrigin(position.x, position.y, position.z, 1);
-				(*sl)->myShader->setVector4("CHUNK_ORIGIN_AND_SCALE", chunkOrigin);
-				}
+			renderWorldItemEntities(worldItems, projection, view);
 
-				RenderChunkRenderParameters renderParams;
-				renderParams.layer = TerrainLayer::Water;
-				renderParams.forceUnsorted = false;
-				renderParams.forceFog = false;
-
-
-				//shader.setMatrix4("model", glm::value_ptr(model));
-				if (lc.second[i]->hasLayer(renderParams.layer))
-					lc.second[i]->render(renderParams, currentFrame);
+			if (gGuiOptions.thirdPerson && !gGuiContext.loadingChunks) {
+				renderWorldSteve3D(c, gGuiContext, projection, view);
 			}
-		}
 
-		renderWorldItemEntities(worldItems, projection, view);
-
-		if (hasTargetHit && gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
-			BlockPos hitPos = targetHit.getBlock();
-			BlockID hitId = c.getRegion().getBlockID(hitPos);
-			const Block* hitBlock = hitId > 0 ? Block::mBlocks[hitId] : nullptr;
-			if (hitBlock) {
-				AABB shapeBuf;
-				AABB localShape = hitBlock->getVisualShape(c.getRegion(), hitPos, shapeBuf);
-				if (localShape.isEmpty()) {
-					localShape.set(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+			if (hasTargetHit && gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
+				BlockPos hitPos = targetHit.getBlock();
+				BlockID hitId = c.getRegion().getBlockID(hitPos);
+				const Block* hitBlock = hitId > 0 ? Block::mBlocks[hitId] : nullptr;
+				if (hitBlock) {
+					AABB shapeBuf;
+					AABB localShape = hitBlock->getVisualShape(c.getRegion(), hitPos, shapeBuf);
+					if (localShape.isEmpty()) {
+						localShape.set(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+					}
+					drawBlockSelectionOutline(hitPos, localShape, projection, view);
 				}
-				drawBlockSelectionOutline(hitPos, localShape, projection, view);
 			}
-		}
+
+			if (!gGuiOptions.thirdPerson && gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
+				gGuiContext.ensureInventoryInitialized();
+				int slotIdx = std::max(0, std::min(8, gGuiContext.selectedHotbarSlot));
+				renderFirstPersonHand(c, gGuiContext.inventorySlots[static_cast<size_t>(slotIdx)], aspect, gGuiOptions.viewBobbing);
+			}
 		} // end if (renderWorld || gGuiContext.loadingChunks)
 
 		if (gGuiContext.loadingChunks) {

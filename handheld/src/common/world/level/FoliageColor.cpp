@@ -149,9 +149,10 @@ int FoliageColor::getGrassColor(BlockSource& source, const BlockPos& pos) {
 		}
 	}
 
-	totalRed = Math::clamp(totalRed / GAUSSIAN_KERNAL_TOTAL_COUNT, 0, 255);
-	totalGreen = Math::clamp(totalGreen / GAUSSIAN_KERNAL_TOTAL_COUNT, 0, 255);
-	totalBlue = Math::clamp(totalBlue / GAUSSIAN_KERNAL_TOTAL_COUNT, 0, 255);
+	const int totalWeight = 25 * 4;
+	totalRed = Math::clamp(totalRed / totalWeight, 0, 255);
+	totalGreen = Math::clamp(totalGreen / totalWeight, 0, 255);
+	totalBlue = Math::clamp(totalBlue / totalWeight, 0, 255);
 
 	return (totalRed << 16) | (totalGreen << 8) | totalBlue;
 }
@@ -173,9 +174,10 @@ int FoliageColor::getMapGrassColor(BlockSource& source, const BlockPos& pos) {
 		}
 	}
 
-	totalRed = Math::clamp(totalRed / GAUSSIAN_KERNAL_TOTAL_COUNT, 0, 255);
-	totalGreen = Math::clamp(totalGreen / GAUSSIAN_KERNAL_TOTAL_COUNT, 0, 255);
-	totalBlue = Math::clamp(totalBlue / GAUSSIAN_KERNAL_TOTAL_COUNT, 0, 255);
+	const int totalWeight = 25 * 4;
+	totalRed = Math::clamp(totalRed / totalWeight, 0, 255);
+	totalGreen = Math::clamp(totalGreen / totalWeight, 0, 255);
+	totalBlue = Math::clamp(totalBlue / totalWeight, 0, 255);
 
 	return (totalRed << 16) | (totalGreen << 8) | totalBlue;
 }

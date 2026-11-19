@@ -184,15 +184,23 @@ namespace {
 		return owned;
 	}
 
-	Item* ensureItem(Item*& target, const char* name, short idOffset, int maxStack = 64) {
-		if (target) return target;
+	Item* ensureItem(Item*& target, const char* name, short idOffset, int maxStack = 64, bool handEquipped = false, bool mirroredArt = false) {
+		if (target) {
+			if (handEquipped) target->setHandEquipped();
+			if (mirroredArt) target->setIsMirroredArt(true);
+			return target;
+		}
 		short actualId = static_cast<short>(256 + idOffset);
 		if (actualId >= 0 && actualId < Item::MAX_ITEMS && Item::mItems[actualId]) {
 			target = Item::mItems[actualId];
+			if (handEquipped) target->setHandEquipped();
+			if (mirroredArt) target->setIsMirroredArt(true);
 			return target;
 		}
 		auto item = std::make_unique<Item>(name, idOffset);
 		item->setMaxStackSize(static_cast<byte>(maxStack));
+		if (handEquipped) item->setHandEquipped();
+		if (mirroredArt) item->setIsMirroredArt(true);
 		target = item.get();
 		if (actualId >= 0 && actualId < Item::MAX_ITEMS) {
 			Item::mItems[actualId] = target;
@@ -224,30 +232,30 @@ namespace {
 		ensureItem(Item::mDiamond, "diamond", 8);
 		ensureItem(Item::mIronIngot, "iron_ingot", 9);
 		ensureItem(Item::mGoldIngot, "gold_ingot", 10);
-		ensureItem(Item::mStick, "stick", 24);
+		ensureItem(Item::mStick, "stick", 24, 64, true, false);
 		ensureItem(Item::mWheat, "wheat", 40);
 		ensureItem(Item::mBrick, "brick", 80);
 		ensureItem(Item::mClay, "clay_ball", 81);
 
-		ensureItem(Item::mShovel_iron, "iron_shovel", 0, 1);
-		ensureItem(Item::mPickAxe_iron, "iron_pickaxe", 1, 1);
-		ensureItem(Item::mHatchet_iron, "iron_axe", 2, 1);
-		ensureItem(Item::mSword_iron, "iron_sword", 11, 1);
+		ensureItem(Item::mShovel_iron, "iron_shovel", 0, 1, true, false);
+		ensureItem(Item::mPickAxe_iron, "iron_pickaxe", 1, 1, true, false);
+		ensureItem(Item::mHatchet_iron, "iron_axe", 2, 1, true, false);
+		ensureItem(Item::mSword_iron, "iron_sword", 11, 1, true, false);
 
-		ensureItem(Item::mSword_wood, "wooden_sword", 12, 1);
-		ensureItem(Item::mShovel_wood, "wooden_shovel", 13, 1);
-		ensureItem(Item::mPickAxe_wood, "wooden_pickaxe", 14, 1);
-		ensureItem(Item::mHatchet_wood, "wooden_axe", 15, 1);
+		ensureItem(Item::mSword_wood, "wooden_sword", 12, 1, true, false);
+		ensureItem(Item::mShovel_wood, "wooden_shovel", 13, 1, true, false);
+		ensureItem(Item::mPickAxe_wood, "wooden_pickaxe", 14, 1, true, false);
+		ensureItem(Item::mHatchet_wood, "wooden_axe", 15, 1, true, false);
 
-		ensureItem(Item::mSword_stone, "stone_sword", 16, 1);
-		ensureItem(Item::mShovel_stone, "stone_shovel", 17, 1);
-		ensureItem(Item::mPickAxe_stone, "stone_pickaxe", 18, 1);
-		ensureItem(Item::mHatchet_stone, "stone_axe", 19, 1);
+		ensureItem(Item::mSword_stone, "stone_sword", 16, 1, true, false);
+		ensureItem(Item::mShovel_stone, "stone_shovel", 17, 1, true, false);
+		ensureItem(Item::mPickAxe_stone, "stone_pickaxe", 18, 1, true, false);
+		ensureItem(Item::mHatchet_stone, "stone_axe", 19, 1, true, false);
 
-		ensureItem(Item::mSword_diamond, "diamond_sword", 20, 1);
-		ensureItem(Item::mShovel_diamond, "diamond_shovel", 21, 1);
-		ensureItem(Item::mPickAxe_diamond, "diamond_pickaxe", 22, 1);
-		ensureItem(Item::mHatchet_diamond, "diamond_axe", 23, 1);
+		ensureItem(Item::mSword_diamond, "diamond_sword", 20, 1, true, false);
+		ensureItem(Item::mShovel_diamond, "diamond_shovel", 21, 1, true, false);
+		ensureItem(Item::mPickAxe_diamond, "diamond_pickaxe", 22, 1, true, false);
+		ensureItem(Item::mHatchet_diamond, "diamond_axe", 23, 1, true, false);
 
 		ensureItem(Item::mHelmet_iron, "iron_helmet", 50, 1);
 		ensureItem(Item::mChestplate_iron, "iron_chestplate", 51, 1);
