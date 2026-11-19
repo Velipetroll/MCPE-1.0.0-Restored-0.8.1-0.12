@@ -97,6 +97,8 @@ public:
 
 	static bool isAnimalFood(MobType type, const ItemInstance& item);
 
+	bool peaceful = false; // Difficulty == Peaceful: no hostile mobs
+
 	void update(float dt,
 	            BlockSource& region,
 	            const Vec3& playerEyePos,

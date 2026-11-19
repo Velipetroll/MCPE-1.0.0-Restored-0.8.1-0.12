@@ -1184,7 +1184,7 @@ void MobManager::trySpawnMobs(BlockSource& region, const Vec3& playerPos, float 
 	if (passiveCount < maxPassive) {
 		trySpawnOne(false);
 	}
-	if (hostileCount < maxHostile && sunFactor < 0.45f) {
+	if (!peaceful && hostileCount < maxHostile && sunFactor < 0.45f) {
 		trySpawnOne(true);
 	}
 }
@@ -1204,6 +1204,10 @@ void MobManager::update(float dt,
                         const std::function<void(const Vec3& pos, float hw, float h, int count)>& onHearts) {
 	dt = std::min(std::max(dt, 0.0001f), 0.05f);
 	Random& rng = mobRng();
+
+	if (peaceful) {
+		mobs.erase(std::remove_if(mobs.begin(), mobs.end(), [](const WorldMobEntity& e) { return e.isHostile(); }), mobs.end());
+	}
 
 	mSpawnTimer -= dt;
 	if (mSpawnTimer <= 0.0f) {

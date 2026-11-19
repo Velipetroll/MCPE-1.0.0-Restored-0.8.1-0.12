@@ -682,9 +682,9 @@ public:
 			lastX = xposIn;
 			lastY = yposIn;
 
-			float sensitivity = 0.1f;
+			float sensitivity = 0.02f + gGuiOptions.sensitivity * 0.16f;
 			xoffset *= sensitivity;
-			yoffset *= sensitivity;
+			yoffset *= sensitivity * (gGuiOptions.invertMouse ? -1.0f : 1.0f);
 
 			yaw += xoffset;
 			pitch += yoffset;
@@ -4428,6 +4428,7 @@ void renderThreadStuff()
 					}
 				}
 
+				mobManager.peaceful = (gGuiOptions.difficulty == 0);
 				mobManager.update(
 					clampedDt,
 					c.getRegion(),
@@ -4677,7 +4678,7 @@ void renderThreadStuff()
 			}
 
 			ChunkPos camChunkPos(Math::floor(c.mPos.x / 16.0f), Math::floor(c.mPos.z / 16.0f));
-			int renderDistance = 3;
+			int renderDistance = std::max(1, std::min(3, 1 + gGuiOptions.renderDistance));
 			int lightDistance = renderDistance + 1;
 			int loadDistance = lightDistance + 2;
 			ChunkSource& chunkSrc = commandContext.dim->getChunkSource();
@@ -4834,7 +4835,7 @@ void renderThreadStuff()
 			}
 
 			if (!camUnderwater && !camUnderlava) {
-				renderSkyAndCelestials(projection, camRelView, skyInfo, gGuiContext.worldTime);
+				if (gGuiOptions.fancySkies) renderSkyAndCelestials(projection, camRelView, skyInfo, gGuiContext.worldTime);
 				renderClouds(projection, camRelView, renderCamPos, skyInfo, gGuiContext.worldTime, gGuiOptions.fancyGraphics);
 			}
 
