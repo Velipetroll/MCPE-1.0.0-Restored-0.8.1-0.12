@@ -955,8 +955,7 @@ int main(int argc, char** argv)
 		commandContext.level = level;
 		commandContext.dim = &level->createDimension(Overworld);
 		commandContext.running = true;
-		std::vector<std::string> emptyOpts, emptyParams;
-		mcmd_render(&commandContext, emptyOpts, emptyParams);
+		renderThreadStuff();
 	}
 
 

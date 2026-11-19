@@ -14,10 +14,37 @@
 #include "Shader.h"
 #include <world/level/FoliageColor.h>
 #include "renderer/renderer/RenderMaterialGroup.h"
+#include "client/gui/GuiContext.h"
+#include "client/gui/Options.h"
+#include "client/gui/Font.h"
+#include "client/gui/Gui.h"
+#include "client/gui/ChatScreen.h"
+#include "client/gui/InventoryScreens.h"
+#include "client/gui/StartMenuScreen.h"
 
 
 int screenx = 1600;
 int screeny = 900;
+
+static GuiContext gGuiContext;
+static Options gGuiOptions;
+static Font gGuiFont;
+static Gui gGuiHud;
+
+static void updateGuiScale()
+{
+	int autoScale = 1;
+	if (screenx >= 1000) autoScale = 4;
+	else if (screenx >= 800) autoScale = 3;
+	else if (screenx >= 400) autoScale = 2;
+
+	int scale = (gGuiOptions.guiScale > 0) ? gGuiOptions.guiScale : autoScale;
+	gGuiContext.windowWidth = screenx;
+	gGuiContext.windowHeight = screeny;
+	gGuiContext.guiScale = scale;
+	gGuiContext.guiWidth = std::max(1, static_cast<int>(screenx / static_cast<float>(scale)));
+	gGuiContext.guiHeight = std::max(1, static_cast<int>(screeny / static_cast<float>(scale)));
+}
 
 //Shader* sptr;
 
@@ -27,6 +54,10 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 	glViewport(0, 0, width, height);//Set the height again
 	screenx = width;
 	screeny = height;
+	updateGuiScale();
+	if (gGuiContext.currentScreen) {
+		gGuiContext.currentScreen->init(&gGuiContext, gGuiContext.guiWidth, gGuiContext.guiHeight);
+	}
 
 	glm::mat4 projection = glm::perspective(glm::radians(85.0f),
 		(float)screenx / (float)screeny,
@@ -107,11 +138,36 @@ void GLInput::Clear()
 
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
-	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
-		glfwSetWindowShouldClose(window, true);
+	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
+		if (gGuiContext.state == GameState::InGame) {
+			gGuiContext.pauseGame();
+		} else if (gGuiContext.state == GameState::Paused) {
+			gGuiContext.resumeGame();
+		} else if (gGuiContext.currentScreen) {
+			gGuiContext.currentScreen->keyPressed(key);
+		}
+		return;
+	}
+	if (action == GLFW_PRESS && gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
+		if (key >= GLFW_KEY_1 && key <= GLFW_KEY_9) {
+			gGuiHud.selectedSlot = key - GLFW_KEY_1;
+		} else if (key == GLFW_KEY_T) {
+			gGuiContext.setScreen(new ChatScreen(""));
+			return;
+		} else if (key == GLFW_KEY_SLASH) {
+			gGuiContext.setScreen(new ChatScreen("/"));
+			return;
+		} else if (key == GLFW_KEY_E) {
+			gGuiContext.setScreen(new InventoryScreen());
+			return;
+		}
+	}
+	if (action == GLFW_PRESS && gGuiContext.currentScreen) {
+		gGuiContext.currentScreen->keyPressed(key);
+	}
 	if (key == GLFW_KEY_0 && action == GLFW_PRESS)
 		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	if (key == GLFW_KEY_1 && action == GLFW_PRESS)
+	if (key == GLFW_KEY_1 && action == GLFW_PRESS && gGuiContext.state != GameState::InGame)
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
 	bool pressed = (action != GLFW_RELEASE);
@@ -640,6 +696,19 @@ void mouse_callback(GLFWwindow* window, double xposIn, double yposIn)
 
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 {
+	if (gGuiContext.currentScreen) {
+		int guiX = static_cast<int>(glinput.mouseXPos) * gGuiContext.guiWidth / std::max(1, screenx);
+		int guiY = static_cast<int>(glinput.mouseYPos) * gGuiContext.guiHeight / std::max(1, screeny);
+		if (action == GLFW_PRESS) {
+			gGuiContext.currentScreen->mouseClicked(guiX, guiY, button);
+		} else if (action == GLFW_RELEASE) {
+			gGuiContext.currentScreen->mouseReleased(guiX, guiY, button);
+		}
+	} else if (action == GLFW_PRESS && button == 0 && gGuiContext.state == GameState::InGame) {
+		int guiX = static_cast<int>(glinput.mouseXPos) * gGuiContext.guiWidth / std::max(1, screenx);
+		int guiY = static_cast<int>(glinput.mouseYPos) * gGuiContext.guiHeight / std::max(1, screeny);
+		gGuiHud.handleHudClick(guiX, guiY, gGuiContext.guiWidth, gGuiContext.guiHeight, &gGuiContext);
+	}
 
 	bool pressed = (action != GLFW_RELEASE);
 
@@ -698,6 +767,13 @@ GLFWwindow* renderThreadInit()
 	glfwSetCursorPosCallback(window, mouse_callback);
 	glfwSetKeyCallback(window, key_callback);
 	glfwSetMouseButtonCallback(window, mouse_button_callback);
+
+	gGuiFont.init("font/default8.png");
+	gGuiContext.font = &gGuiFont;
+	gGuiContext.options = &gGuiOptions;
+	updateGuiScale();
+	gGuiContext.setScreen(new StartMenuScreen());
+	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 
 	return window;
 }
@@ -851,12 +927,30 @@ void renderThreadStuff()
 		currentFrame = glfwGetTime();
 
 		deltaTime = currentFrame - lastFrame;
+		gGuiContext.deltaTime = deltaTime;
+		static bool lastUseTouchUI = gGuiOptions.useTouchUI;
+		if (gGuiOptions.guiScale != gGuiContext.guiScale || gGuiOptions.useTouchUI != lastUseTouchUI) {
+			lastUseTouchUI = gGuiOptions.useTouchUI;
+			updateGuiScale();
+			if (gGuiContext.currentScreen) {
+				gGuiContext.currentScreen->init(&gGuiContext, gGuiContext.guiWidth, gGuiContext.guiHeight);
+			}
+		}
+		if (gGuiContext.shouldQuit) {
+			glfwSetWindowShouldClose(window, true);
+			continue;
+		}
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);//Set clear color to be brown with 0 alpha 
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);//Actually clears screen + depth buffer 
 
-		//run stuff here 
-		c.UpdateCam(deltaTime);
-		glm::mat4 view = glm::lookAt(c.mPos, c.mPos + c.cameraFront, c.cameraUp);
+		bool renderWorld = (gGuiContext.state == GameState::InGame) ||
+		                   (gGuiContext.currentScreen && gGuiContext.currentScreen->renderGameBehind());
+
+		if (renderWorld || gGuiContext.loadingChunks) {
+			if (gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
+				c.UpdateCam(deltaTime);
+			}
+			glm::mat4 view = glm::lookAt(c.mPos, c.mPos + c.cameraFront, c.cameraUp);
 		
 		//chunkMaterial->myShader->setVector4("CHUNK_ORIGIN_AND_SCALE", glm::vec4(0, 0, 0, 1));
 		for (auto sl : mptrs)
@@ -1027,8 +1121,53 @@ void renderThreadStuff()
 					lc.second[i]->render(renderParams, currentFrame);
 			}
 		}
+		} // end if (renderWorld || gGuiContext.loadingChunks)
 
+		if (gGuiContext.loadingChunks) {
+			const int targetChunks = 49; // (2 * renderDistance + 1)^2 for renderDistance = 3
+			gGuiContext.loadingProgress = std::min(1.0f, static_cast<float>(rc.size()) / static_cast<float>(targetChunks));
+		}
 
+		// 2D GUI / HUD Pass
+		glUseProgram(0);
+		glDisable(GL_DEPTH_TEST);
+		glDisable(GL_CULL_FACE);
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+		glMatrixMode(GL_PROJECTION);
+		glPushMatrix();
+		glLoadIdentity();
+		glOrtho(0.0, static_cast<double>(gGuiContext.guiWidth), static_cast<double>(gGuiContext.guiHeight), 0.0, -1000.0, 1000.0);
+		glMatrixMode(GL_MODELVIEW);
+		glPushMatrix();
+		glLoadIdentity();
+
+		if (gGuiContext.state == GameState::InGame) {
+			gGuiHud.render(0.0f, gGuiContext.guiWidth, gGuiContext.guiHeight, &gGuiOptions, &gGuiFont, &gGuiContext);
+		}
+		if (gGuiContext.currentScreen) {
+			int guiMouseX = static_cast<int>(glinput.mouseXPos) * gGuiContext.guiWidth / std::max(1, screenx);
+			int guiMouseY = static_cast<int>(glinput.mouseYPos) * gGuiContext.guiHeight / std::max(1, screeny);
+			gGuiContext.currentScreen->tick();
+			if (gGuiContext.currentScreen) {
+				gGuiContext.currentScreen->render(guiMouseX, guiMouseY, 0.0f);
+			}
+		}
+
+		glMatrixMode(GL_MODELVIEW);
+		glPopMatrix();
+		glMatrixMode(GL_PROJECTION);
+		glPopMatrix();
+		glMatrixMode(GL_MODELVIEW);
+		glEnable(GL_DEPTH_TEST);
+		glEnable(GL_CULL_FACE);
+
+		bool wantLock = (gGuiContext.state == GameState::InGame && gGuiContext.currentScreen == nullptr);
+		if (wantLock != cursor_locked) {
+			cursor_locked = wantLock;
+			glfwSetInputMode(window, GLFW_CURSOR, cursor_locked ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+		}
 
 		if (glinput.NewKeyDown(GLFW_KEY_U))
 		{

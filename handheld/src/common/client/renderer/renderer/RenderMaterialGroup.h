@@ -19,15 +19,24 @@ namespace mce
 		static RenderMaterialGroup switchable;
 
 		std::unordered_set<mce::MaterialPtr*> ml;
+		bool mDestroyed = false;
+
+		~RenderMaterialGroup()
+		{
+			mDestroyed = true;
+		}
+
 		//std::map<const ResourceLocation, TexturePair> mlll;
 		void _addRef(mce::MaterialPtr& m)
 		{
-			ml.insert(&m);
+			if (!mDestroyed)
+				ml.insert(&m);
 		}
 
 		void _removeRef(mce::MaterialPtr& l)
 		{
-			ml.erase(&l);
+			if (!mDestroyed)
+				ml.erase(&l);
 		}
 
 		void _getMaterial(std::string&);
