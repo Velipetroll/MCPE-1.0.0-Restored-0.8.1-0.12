@@ -15,6 +15,9 @@ On March 1, 2026, a major Minecraft source code leak which included Minecraft Le
 - Loading real Minecraft PE shaders+materials (incomplete but works)
 - Dual GUI/UI system with live hot-switching (`useTouchUI`): 1:1 MCPE 0.8.1 Touch layout and Classic PC layout (menus, world management, options, pause, chat, HUD/hotbar)
 - Functional Crafting & Inventory system for both PC (2x2 / 3x3 grids) and Touch MATTIS 0.8.1 (`PaneCraftingScreen`, `StonecutterScreen`, `ArmorScreen` with 3D Steve, `FurnaceScreen`, `ChestScreen`), including 3D isometric block rendering and 2D item rendering in all UI slots
+- World block interaction (raycast block selection, breaking/placing blocks, opening Crafting Table / Stonecutter / Furnace / Chest in-world)
+- Player physics & AABB block collisions (gravity, jumping, fall damage, Creative flight toggle) and dropped `ItemEntity` physics/pickup
+- World, player, container, and modified chunk persistence (`WorldPersistence` under `./worlds/<name>`)
 - Unstable multithreading (define TEST_THREADING when building a vs solution with cmake)
 
 ## Missing/Recreated code
@@ -47,9 +50,6 @@ Code from the HoloLens E3 minecraft demo can be found here. There is not much le
 Contributions are welcome. Create a pull request fixing an issue or restoring a feature to the repo. If you are decompiling code try and find an android build near 1.0.2.0 with debug information.
 
 ## TODO
-- World block interaction (raycast, breaking/placing blocks, opening Crafting Table / Stonecutter / Furnace / Chest in-world)
-- Player physics & AABB block collisions (gravity, jumping, fall damage) and dropped `ItemEntity` physics
-- World & chunk persistence (`./worlds/<name>` metadata, LevelDB chunk saving, container contents)
 - First-person hand/held-item rendering, third-person Steve rendering, and view bobbing
 - Fix water
 - Restore more of Renderer
