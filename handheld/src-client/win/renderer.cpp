@@ -33,6 +33,9 @@
 #include "world/phys/HitResult.h"
 #include "world/Facing.h"
 #include "world/item/Item.h"
+#include "SoundEngine.h"
+#include "ParticleSystem.h"
+#include "ProjectileTntSystem.h"
 #include "world/level/block/Block.h"
 #include "world/level/block/BedBlock.h"
 #include "world/level/block/TorchBlock.h"
@@ -863,6 +866,9 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 		int guiX = static_cast<int>(glinput.mouseXPos) * gGuiContext.guiWidth / std::max(1, screenx);
 		int guiY = static_cast<int>(glinput.mouseYPos) * gGuiContext.guiHeight / std::max(1, screeny);
 		if (action == GLFW_PRESS) {
+			if (button == GLFW_MOUSE_BUTTON_LEFT) {
+				SoundEngine::play(SoundEngine::SND_CLICK, 0.5f);
+			}
 			gGuiContext.currentScreen->mouseClicked(guiX, guiY, button);
 		} else if (action == GLFW_RELEASE) {
 			gGuiContext.currentScreen->mouseReleased(guiX, guiY, button);
@@ -964,6 +970,7 @@ GLFWwindow* renderThreadInit()
 	gGuiFont.init("font/default8.png");
 	gGuiContext.font = &gGuiFont;
 	gGuiContext.options = &gGuiOptions;
+	SoundEngine::init();
 	updateGuiScale();
 	gGuiContext.setScreen(new StartMenuScreen());
 	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
@@ -1989,6 +1996,9 @@ std::string getArmorTexturePath(const ItemInstance& item, bool layer2) {
 	return "";
 }
 
+static float gBowPullTime = 0.0f;
+static bool gBowPulling = false;
+
 void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspect, bool viewBobbing, float lightShade) {
 	glUseProgram(0);
 	glEnable(GL_DEPTH_TEST);
@@ -2071,7 +2081,28 @@ void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspe
 			glTranslatef(8.0f, 0.5f, 8.0f);
 			glScalef(16.0f, 16.0f, -16.0f);
 			glRotatef(90.0f, 1.0f, 0.0f, 0.0f);
-			drawTexturedSprite3D(tex, lightShade);
+			if (Item::mBow && held.getItem() == Item::mBow && gBowPulling && gBowPullTime > 0.0f) {
+				float f = std::min(1.0f, gBowPullTime / 1.0f);
+				float jitter = (f > 0.9f) ? std::sin(gBowPullTime * 60.0f) * 0.02f : 0.0f;
+				glTranslatef(0.0f, jitter, -0.05f * f);
+				glScalef(1.0f, 1.0f + f * 0.2f, 1.0f);
+				const char* bowTex = "textures/items/bow_pulling_0.png";
+				if (gBowPullTime >= 0.85f) bowTex = "textures/items/bow_pulling_2.png";
+				else if (gBowPullTime >= 0.45f) bowTex = "textures/items/bow_pulling_1.png";
+				if (GuiComponent::bindTexture(bowTex)) {
+					glColor4f(lightShade, lightShade, lightShade, 1.0f);
+					glBegin(GL_QUADS);
+					glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, 0.0f);
+					glTexCoord2f(1.0f, 0.0f); glVertex3f( 0.5f, 0.5f, 0.0f);
+					glTexCoord2f(1.0f, 1.0f); glVertex3f( 0.5f,-0.5f, 0.0f);
+					glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f,-0.5f, 0.0f);
+					glEnd();
+				} else {
+					drawTexturedSprite3D(tex, lightShade);
+				}
+			} else {
+				drawTexturedSprite3D(tex, lightShade);
+			}
 		}
 	}
 
@@ -2648,6 +2679,7 @@ void renderThreadStuff()
 				if (gGuiContext.isCreative || gGuiContext.health <= 0) return;
 				int dealt = gGuiContext.applyDamage(rawDmg, false);
 				if (dealt > 0) {
+					SoundEngine::play(SoundEngine::SND_HURT, 0.9f);
 					float kLen = std::sqrt(knockDir.x * knockDir.x + knockDir.z * knockDir.z);
 					if (kLen > 0.001f) {
 						c.mPosDelta.x += (knockDir.x / kLen) * 0.34f;
@@ -2812,6 +2844,9 @@ void renderThreadStuff()
 								         (mobDropRng.nextFloat() - 0.5f) * 2.4f);
 								spawnWorldItem(worldItems, dropItem, dropPos, vel, 0.25f);
 							});
+						if (landed) {
+							SoundEngine::play(SoundEngine::SND_HURT, 0.8f, 0.9f + (std::rand() % 20) * 0.01f);
+						}
 						if (landed && !gGuiContext.isCreative) {
 							gGuiContext.exhaustion += 0.3f;
 							int maxDur = getItemMaxDurability(held);
@@ -2844,6 +2879,18 @@ void renderThreadStuff()
 					                     region.getBlockID(bedSecondPos) == Block::mBed->mID);
 
 					if (region.removeBlock(hitPos)) {
+						SoundEngine::play(SoundEngine::SND_DIG, 0.85f, 0.9f + (std::rand() % 20) * 0.01f);
+						float pr = 0.55f, pg = 0.55f, pb = 0.55f;
+						if (block == Block::mGrass || block == Block::mLeaves || block == Block::mLeaves2) {
+							pr = 0.30f; pg = 0.65f; pb = 0.25f;
+						} else if (block == Block::mDirt || block == Block::mLog || block == Block::mWoodPlanks) {
+							pr = 0.55f; pg = 0.38f; pb = 0.22f;
+						} else if (block == Block::mSand || block == Block::mSandStone) {
+							pr = 0.85f; pg = 0.80f; pb = 0.55f;
+						} else if (block == Block::mTNT) {
+							pr = 0.80f; pg = 0.20f; pb = 0.15f;
+						}
+						ParticleSystem::spawnBlockBreak(static_cast<float>(hitPos.x), static_cast<float>(hitPos.y), static_cast<float>(hitPos.z), pr, pg, pb);
 						if (hasBedSecond) {
 							region.removeBlock(bedSecondPos);
 						}
@@ -2943,12 +2990,64 @@ void renderThreadStuff()
 					miningProgress = 0.0f;
 				}
 
+				// Bow pull & release
+				{
+					bool holdingBow = (Item::mBow && !held.isNull() && held.getItem() == Item::mBow);
+					bool rightHeld = (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS);
+					auto findArrowSlot = [&]() -> int {
+						if (!Item::mArrow) return -1;
+						for (size_t si = 0; si < gGuiContext.inventorySlots.size(); ++si) {
+							const ItemInstance& sItem = gGuiContext.inventorySlots[si];
+							if (!sItem.isNull() && sItem.getItem() == Item::mArrow && sItem.getStackSize() > 0) {
+								return static_cast<int>(si);
+							}
+						}
+						return -1;
+					};
+					if (holdingBow && rightHeld && (gGuiContext.isCreative || findArrowSlot() >= 0)) {
+						gBowPulling = true;
+						gBowPullTime += deltaTime;
+					} else if (gBowPulling) {
+						if (holdingBow && gBowPullTime >= 0.12f) {
+							int arrowSlot = findArrowSlot();
+							if (gGuiContext.isCreative || arrowSlot >= 0) {
+								float power = std::min(1.0f, gBowPullTime / 1.0f);
+								float speed = 12.0f + power * 26.0f;
+								int dmg = 2 + static_cast<int>(power * 7.0f);
+								Vec3 spawnPos(c.mPos.x + c.cameraFront.x * 0.4f,
+								              c.mPos.y + 1.52f + c.cameraFront.y * 0.4f,
+								              c.mPos.z + c.cameraFront.z * 0.4f);
+								ProjectileTntSystem::spawnArrow(spawnPos, Vec3(c.cameraFront.x, c.cameraFront.y, c.cameraFront.z), speed, dmg, true);
+								SoundEngine::play(SoundEngine::SND_BOW, 0.9f, 0.9f + power * 0.2f);
+								if (!gGuiContext.isCreative && arrowSlot >= 0) {
+									ItemInstance& aSlot = gGuiContext.inventorySlots[static_cast<size_t>(arrowSlot)];
+									aSlot.remove(1);
+									if (aSlot.getStackSize() <= 0) aSlot.setNull();
+								}
+							}
+						}
+						gBowPulling = false;
+						gBowPullTime = 0.0f;
+					}
+				}
+
 				if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_RIGHT)) {
 					bool handledRightClick = false;
 					if (hasTargetHit && !c.isSneaking()) {
 						BlockPos hitPos = targetHit.getBlock();
 						FullBlock fb = region.getBlockAndData(hitPos);
-						if (openInteractiveBlockScreen(region, hitPos, fb.id, gGuiContext)) {
+						if (Block::mTNT && fb.id == Block::mTNT->mID &&
+						    Item::mFlintAndSteel && !held.isNull() && held.getItem() == Item::mFlintAndSteel) {
+							region.removeBlock(hitPos);
+							ProjectileTntSystem::spawnPrimedTnt(hitPos.x + 0.5f, static_cast<float>(hitPos.y), hitPos.z + 0.5f);
+							c.triggerSwing();
+							handledRightClick = true;
+						} else if ((Block::mWoodenDoor && fb.id == Block::mWoodenDoor->mID) || fb.id == 107) {
+							region.setBlockAndData(hitPos, FullBlock(fb.id, static_cast<DataID>(fb.data ^ 4)), Block::UPDATE_ALL);
+							SoundEngine::play(SoundEngine::SND_DOOR, 0.75f);
+							c.triggerSwing();
+							handledRightClick = true;
+						} else if (openInteractiveBlockScreen(region, hitPos, fb.id, gGuiContext)) {
 							c.triggerSwing();
 							handledRightClick = true;
 						}
@@ -2976,6 +3075,7 @@ void renderThreadStuff()
 									gGuiContext.pendingWorldDrops.push_back(rem);
 								}
 							}
+							SoundEngine::play(SoundEngine::SND_EAT, 0.8f);
 							eatCooldown = 0.25f;
 							handledRightClick = true;
 						}
@@ -3062,6 +3162,7 @@ void renderThreadStuff()
 											}
 										}
 										if (allowPlace && region.setBlockAndData(placePos, FullBlock(placeBlock->mID, placeData), Block::UPDATE_ALL)) {
+											SoundEngine::play(SoundEngine::SND_PLACE, 0.75f, 0.95f + (std::rand() % 15) * 0.01f);
 											c.triggerSwing();
 											if (!gGuiContext.isCreative) {
 												held.remove(1);
@@ -3088,6 +3189,44 @@ void renderThreadStuff()
 				syncFurnaceBlockStates(c.getRegion(), gGuiContext, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
 				bool allowPickup = (gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen);
 				updateWorldItemEntities(worldItems, deltaTime, c.getRegion(), c.mBB, gGuiContext, allowPickup);
+				SoundEngine::setMasterVolume(gGuiOptions.soundVolume);
+				ParticleSystem::tick(clampedDt);
+				{
+					static float stepDistAccum = 0.0f;
+					if (c.mOnGround && gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
+						float hSpeed = std::sqrt(c.mPosDelta.x * c.mPosDelta.x + c.mPosDelta.z * c.mPosDelta.z);
+						if (hSpeed > 0.01f) {
+							stepDistAccum += hSpeed;
+							if (stepDistAccum >= 1.85f) {
+								stepDistAccum = 0.0f;
+								SoundEngine::play(SoundEngine::SND_STEP, 0.35f, 0.9f + (std::rand() % 20) * 0.01f);
+							}
+						}
+					}
+				}
+
+				// Ambient torch / lit furnace particles near player
+				static float ambientParticleAccum = 0.0f;
+				ambientParticleAccum += clampedDt;
+				if (ambientParticleAccum >= 0.18f) {
+					ambientParticleAccum = 0.0f;
+					BlockSource& reg = c.getRegion();
+					int px = Math::floor(c.mPos.x);
+					int py = Math::floor(c.mPos.y);
+					int pz = Math::floor(c.mPos.z);
+					for (int i = 0; i < 6; ++i) {
+						int rx = px + (std::rand() % 13) - 6;
+						int ry = py + (std::rand() % 9) - 4;
+						int rz = pz + (std::rand() % 13) - 6;
+						if (ry < 1 || ry > 126) continue;
+						BlockID bid = reg.getBlockID(BlockPos(rx, ry, rz));
+						if (Block::mTorch && bid == Block::mTorch->mID) {
+							ParticleSystem::spawnTorchSmoke(rx + 0.5f, ry + 0.72f, rz + 0.5f);
+						} else if (Block::mLitFurnace && bid == Block::mLitFurnace->mID) {
+							ParticleSystem::spawnFurnaceSmoke(rx + 0.5f, ry + 1.05f, rz + 0.5f);
+						}
+					}
+				}
 
 				mobManager.update(
 					clampedDt,
@@ -3100,6 +3239,8 @@ void renderThreadStuff()
 					damagePlayer,
 					[&](const Vec3& expPos, float radius) {
 						static Random expRng;
+						SoundEngine::play(SoundEngine::SND_EXPLODE, 1.0f);
+						ParticleSystem::spawnExplosion(expPos.x, expPos.y, expPos.z);
 						BlockSource& reg = c.getRegion();
 						int r = static_cast<int>(std::ceil(radius));
 						int cx = Math::floor(expPos.x);
@@ -3134,6 +3275,131 @@ void renderThreadStuff()
 						Vec3 dvel((mobDropRng2.nextFloat() - 0.5f) * 2.4f, 3.0f, (mobDropRng2.nextFloat() - 0.5f) * 2.4f);
 						spawnWorldItem(worldItems, dropItem, dropPos, dvel, 0.25f);
 					});
+
+				// Update arrows
+				{
+					auto& arrows = ProjectileTntSystem::getArrows();
+					BlockSource& reg = c.getRegion();
+					for (size_t ai = 0; ai < arrows.size();) {
+						auto& a = arrows[ai];
+						a.age += clampedDt;
+						if (a.age > 20.0f) {
+							arrows[ai] = arrows.back();
+							arrows.pop_back();
+							continue;
+						}
+						if (!a.inGround) {
+							a.vy -= 18.0f * clampedDt;
+							a.vx *= 0.995f;
+							a.vz *= 0.995f;
+							float nx = a.x + a.vx * clampedDt;
+							float ny = a.y + a.vy * clampedDt;
+							float nz = a.z + a.vz * clampedDt;
+							float stepLen = std::sqrt((nx - a.x) * (nx - a.x) + (ny - a.y) * (ny - a.y) + (nz - a.z) * (nz - a.z));
+							bool hitEntity = false;
+							if (a.fromPlayer && stepLen > 0.001f) {
+								float mobHitDist = 0.0f;
+								int hitMob = mobManager.raycastMob(
+									Vec3(a.x, a.y, a.z),
+									Vec3((nx - a.x) / stepLen, (ny - a.y) / stepLen, (nz - a.z) / stepLen),
+									stepLen + 0.35f, mobHitDist);
+								if (hitMob >= 0) {
+									static Random arrowDropRng;
+									bool landed = mobManager.damageMob(
+										hitMob, a.damage, Vec3(a.vx, 0.0f, a.vz),
+										[&](const ItemInstance& dropItem, const Vec3& dropPos) {
+											Vec3 dvel((arrowDropRng.nextFloat() - 0.5f) * 2.4f, 3.0f, (arrowDropRng.nextFloat() - 0.5f) * 2.4f);
+											spawnWorldItem(worldItems, dropItem, dropPos, dvel, 0.25f);
+										});
+									if (landed) {
+										SoundEngine::play(SoundEngine::SND_HURT, 0.8f);
+									}
+									hitEntity = true;
+								}
+							} else if (!a.fromPlayer) {
+								if (nx >= c.mBB.min.x && nx <= c.mBB.max.x &&
+								    ny >= c.mBB.min.y && ny <= c.mBB.max.y &&
+								    nz >= c.mBB.min.z && nz <= c.mBB.max.z) {
+									damagePlayer(a.damage, Vec3(a.vx, 0.0f, a.vz));
+									hitEntity = true;
+								}
+							}
+							if (hitEntity) {
+								arrows[ai] = arrows.back();
+								arrows.pop_back();
+								continue;
+							}
+							if (reg.isSolidBlockingBlock(BlockPos(Math::floor(nx), Math::floor(ny), Math::floor(nz)))) {
+								a.inGround = true;
+								a.vx = a.vy = a.vz = 0.0f;
+							} else {
+								a.x = nx; a.y = ny; a.z = nz;
+							}
+						}
+						++ai;
+					}
+				}
+
+				// Update primed TNT
+				{
+					auto& tnts = ProjectileTntSystem::getTnts();
+					BlockSource& reg = c.getRegion();
+					for (size_t ti = 0; ti < tnts.size();) {
+						auto& t = tnts[ti];
+						t.fuse -= clampedDt;
+						if (t.fuse <= 0.0f) {
+							static Random tntRng;
+							SoundEngine::play(SoundEngine::SND_EXPLODE, 1.0f);
+							ParticleSystem::spawnExplosion(t.x, t.y + 0.5f, t.z);
+							int cx = Math::floor(t.x), cy = Math::floor(t.y + 0.5f), cz = Math::floor(t.z);
+							float radius = 3.8f;
+							int r = 4;
+							for (int dx = -r; dx <= r; ++dx) {
+								for (int dy = -r; dy <= r; ++dy) {
+									for (int dz = -r; dz <= r; ++dz) {
+										if (dx * dx + dy * dy + dz * dz > radius * radius) continue;
+										BlockPos bp(cx + dx, cy + dy, cz + dz);
+										if (bp.y <= 0 || bp.y >= 127) continue;
+										FullBlock fb = reg.getBlockAndData(bp);
+										if (fb.id == 0) continue;
+										const Block* blk = Block::mBlocks[fb.id];
+										if (!blk || blk == Block::mBedrock || blk == Block::mObsidian || blk->getMaterial().isLiquid()) continue;
+										if (reg.removeBlock(bp) && !gGuiContext.isCreative && tntRng.nextFloat() < 0.35f) {
+											int dropId = blk->getResource(tntRng, fb.data, 0);
+											if (dropId > 0) {
+												spawnWorldItem(worldItems, ItemInstance(dropId, 1, 0),
+												               Vec3(bp.x + 0.5f, bp.y + 0.5f, bp.z + 0.5f),
+												               Vec3((tntRng.nextFloat() - 0.5f) * 3.0f, 3.5f, (tntRng.nextFloat() - 0.5f) * 3.0f), 0.35f);
+											}
+										}
+									}
+								}
+							}
+							float pdx = c.mPos.x - t.x, pdy = c.mPos.y - t.y, pdz = c.mPos.z - t.z;
+							float pdist = std::sqrt(pdx * pdx + pdy * pdy + pdz * pdz);
+							if (pdist < 5.0f) {
+								int dmg = std::max(1, static_cast<int>((1.0f - pdist / 5.0f) * 14.0f));
+								damagePlayer(dmg, Vec3(pdx, 0.0f, pdz));
+							}
+							updateLightingAndRebuildChunks(reg, BlockPos(cx, cy, cz), rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+							tnts[ti] = tnts.back();
+							tnts.pop_back();
+							continue;
+						}
+						t.vy -= 18.0f * clampedDt;
+						float ny = t.y + t.vy * clampedDt;
+						if (reg.isSolidBlockingBlock(BlockPos(Math::floor(t.x), Math::floor(ny), Math::floor(t.z)))) {
+							t.vy = 0.0f;
+							t.vx *= 0.7f;
+							t.vz *= 0.7f;
+						} else {
+							t.x += t.vx * clampedDt;
+							t.y = ny;
+							t.z += t.vz * clampedDt;
+						}
+						++ti;
+					}
+				}
 			}
 			float aspect = static_cast<float>(screenx) / static_cast<float>(std::max(1, screeny));
 			projection = glm::perspective(glm::radians(85.0f), aspect, 0.1f, 1000.0f);
@@ -3411,6 +3677,22 @@ void renderThreadStuff()
 
 			mobManager.render(c.getRegion(), projection, view, skyInfo.sunFactor);
 
+			// Render particles
+			glUseProgram(0);
+			glMatrixMode(GL_PROJECTION);
+			glPushMatrix();
+			glLoadMatrixf(&projection[0][0]);
+			glMatrixMode(GL_MODELVIEW);
+			glPushMatrix();
+			glLoadMatrixf(&view[0][0]);
+			ParticleSystem::render(c.yaw, c.pitch);
+			ProjectileTntSystem::renderArrows();
+			ProjectileTntSystem::renderTnts();
+			glPopMatrix();
+			glMatrixMode(GL_PROJECTION);
+			glPopMatrix();
+			glMatrixMode(GL_MODELVIEW);
+
 			if (gGuiOptions.thirdPerson && !gGuiContext.loadingChunks) {
 				renderWorldSteve3D(c, gGuiContext, projection, view);
 			}
@@ -3504,6 +3786,7 @@ void renderThreadStuff()
 	}
 	saveActiveWorld();
 	closeActiveWorld();
+	SoundEngine::shutdown();
 	commandContext.running = false;
 	glfwTerminate();
 }

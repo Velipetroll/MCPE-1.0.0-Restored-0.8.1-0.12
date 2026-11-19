@@ -58,7 +58,6 @@ void Screen::mouseClicked(int x, int y, int button) {
 			if (b && b->clicked(context, x, y)) {
 				lastPressedButton = b;
 				b->setPressed();
-				buttonClicked(b);
 				return;
 			}
 		}
@@ -72,8 +71,12 @@ void Screen::mouseClicked(int x, int y, int button) {
 
 void Screen::mouseReleased(int x, int y, int button) {
 	if (button == 0 && lastPressedButton) {
-		lastPressedButton->released(x, y);
+		Button* releasedBtn = lastPressedButton;
 		lastPressedButton = nullptr;
+		releasedBtn->released(x, y);
+		if (releasedBtn->clicked(context, x, y)) {
+			buttonClicked(releasedBtn);
+		}
 	}
 	for (GuiElement* e : elements) {
 		if (e && e->visible) {
