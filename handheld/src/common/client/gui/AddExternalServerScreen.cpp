@@ -1,18 +1,27 @@
 #include "AddExternalServerScreen.h"
 #include "SelectWorldScreen.h"
+#include "PlayScreen.h"
 #include "TouchControls.h"
 #include "GuiContext.h"
 #include "Options.h"
 #include "Font.h"
 
+AddExternalServerScreen::~AddExternalServerScreen() {
+	delete mFrame;
+}
+
 void AddExternalServerScreen::init() {
 	bool touch = context && context->options && context->options->useTouchUI;
+	delete mFrame;
+	mFrame = nullptr;
 	if (touch) {
+		mFrame = new NinePatchLayer("textures/gui/spritesheet.png", IntRectangle{ 34, 43, 14, 14 }, 3, 3, 3, 3, 256, 256);
+
 		auto* header = new Touch::THeader(0, "Add External Server");
 		header->posX = 0;
 		header->posY = 0;
 		header->width = width;
-		header->height = 26;
+		header->height = 30;
 		buttons.push_back(header);
 
 		mAddButton = new Touch::TButton(1, "Add Server");
@@ -28,8 +37,25 @@ void AddExternalServerScreen::init() {
 void AddExternalServerScreen::setupPositions() {
 	bool touch = context && context->options && context->options->useTouchUI;
 	if (touch) {
-		if (mCancelButton) { mCancelButton->posX = 4; mCancelButton->posY = 3; mCancelButton->width = 48; mCancelButton->height = 20; }
-		if (mAddButton) { mAddButton->posX = width / 2 - 100; mAddButton->posY = height - 32; mAddButton->width = 200; mAddButton->height = 24; }
+		int headerH = 30;
+		if (!buttons.empty() && buttons[0]->id == 0) {
+			buttons[0]->posX = 0;
+			buttons[0]->posY = 0;
+			buttons[0]->width = width;
+			buttons[0]->height = headerH;
+		}
+		if (mCancelButton) {
+			mCancelButton->posX = 4;
+			mCancelButton->posY = 5;
+			mCancelButton->width = 38;
+			mCancelButton->height = 20;
+		}
+		if (mAddButton) {
+			mAddButton->width = 100;
+			mAddButton->height = 24;
+			mAddButton->posX = (3 * (width - 10)) / 4 - mAddButton->width / 2;
+			mAddButton->posY = headerH + 54;
+		}
 		return;
 	}
 	if (mAddButton) { mAddButton->posX = width / 2 - 154; mAddButton->posY = height - 32; mAddButton->width = 150; mAddButton->height = 20; }
@@ -37,10 +63,45 @@ void AddExternalServerScreen::setupPositions() {
 }
 
 void AddExternalServerScreen::render(int mouseX, int mouseY, float partialTicks) {
-	renderDirtBackground();
-
 	bool touch = context && context->options && context->options->useTouchUI;
-	if (!touch && font) {
+	if (touch) {
+		renderMenuBackground(partialTicks);
+		int headerH = 30;
+		if (mFrame) {
+			mFrame->draw(5, headerH + 5, width - 10, height - headerH - 10);
+		}
+
+		int lx = 10;
+		int lw = std::max(80, width / 2 - 20);
+		int y0 = headerH + 10;
+
+		if (font) drawString(font, "Server Name", lx, y0, 0xFFE0E0E0);
+		fill(lx, y0 + 12, lx + lw, y0 + 30, 0xFF000000);
+		drawRect(lx, y0 + 12, lx + lw, y0 + 30, (mFocusedField == 0) ? 0xFFFFFFFF : 0xFFA0A0A0);
+		if (font) drawString(font, mServerName + (mFocusedField == 0 ? "_" : ""), lx + 4, y0 + 17, 0xFFE0E0E0);
+
+		int y1 = y0 + 38;
+		if (font) drawString(font, "Address", lx, y1, 0xFFE0E0E0);
+		fill(lx, y1 + 10, lx + lw, y1 + 28, 0xFF000000);
+		drawRect(lx, y1 + 10, lx + lw, y1 + 28, (mFocusedField == 1) ? 0xFFFFFFFF : 0xFFA0A0A0);
+		if (font) drawString(font, mAddress + (mFocusedField == 1 ? "_" : ""), lx + 4, y1 + 15, 0xFFE0E0E0);
+
+		int y2 = y1 + 36;
+		if (font) drawString(font, "Port", lx, y2, 0xFFE0E0E0);
+		fill(lx, y2 + 10, lx + lw, y2 + 28, 0xFF000000);
+		drawRect(lx, y2 + 10, lx + lw, y2 + 28, (mFocusedField == 2) ? 0xFFFFFFFF : 0xFFA0A0A0);
+		if (font) drawString(font, mPort + (mFocusedField == 2 ? "_" : ""), lx + 4, y2 + 15, 0xFFE0E0E0);
+
+		if (font) {
+			drawString(font, "Add server by IP/Address.", width / 2 + 10, headerH + 14, 0xFFE0E0E0);
+		}
+
+		Screen::render(mouseX, mouseY, partialTicks);
+		return;
+	}
+
+	renderDirtBackground();
+	if (font) {
 		drawCenteredString(font, "Add External Server", width / 2, 16, 0xFFFFFFFF);
 	}
 
@@ -66,10 +127,22 @@ void AddExternalServerScreen::render(int mouseX, int mouseY, float partialTicks)
 
 void AddExternalServerScreen::mouseClicked(int x, int y, int button) {
 	if (button == 0) {
-		int cx = width / 2 - 100;
-		if (x >= cx && x < cx + 200 && y >= 44 && y < 64) mFocusedField = 0;
-		else if (x >= cx && x < cx + 200 && y >= 82 && y < 102) mFocusedField = 1;
-		else if (x >= cx && x < cx + 200 && y >= 120 && y < 140) mFocusedField = 2;
+		bool touch = context && context->options && context->options->useTouchUI;
+		if (touch) {
+			int lx = 10;
+			int lw = std::max(80, width / 2 - 20);
+			int y0 = 30 + 10;
+			int y1 = y0 + 38;
+			int y2 = y1 + 36;
+			if (x >= lx && x < lx + lw && y >= y0 + 12 && y < y0 + 30) mFocusedField = 0;
+			else if (x >= lx && x < lx + lw && y >= y1 + 10 && y < y1 + 28) mFocusedField = 1;
+			else if (x >= lx && x < lx + lw && y >= y2 + 10 && y < y2 + 28) mFocusedField = 2;
+		} else {
+			int cx = width / 2 - 100;
+			if (x >= cx && x < cx + 200 && y >= 44 && y < 64) mFocusedField = 0;
+			else if (x >= cx && x < cx + 200 && y >= 82 && y < 102) mFocusedField = 1;
+			else if (x >= cx && x < cx + 200 && y >= 120 && y < 140) mFocusedField = 2;
+		}
 	}
 	Screen::mouseClicked(x, y, button);
 }
@@ -89,6 +162,11 @@ void AddExternalServerScreen::keyPressed(int key) {
 void AddExternalServerScreen::buttonClicked(Button* button) {
 	if (!context || !button) return;
 	if (button->id == 1 || button->id == 2) {
-		context->setScreen(new SelectWorldScreen());
+		bool touch = context->options && context->options->useTouchUI;
+		if (touch) {
+			context->setScreen(new PlayScreen(true));
+		} else {
+			context->setScreen(new SelectWorldScreen());
+		}
 	}
 }

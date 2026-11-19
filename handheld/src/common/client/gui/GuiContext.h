@@ -1,5 +1,7 @@
 #pragma once
 
+#include "world/item/ItemInstance.h"
+#include <array>
 #include <string>
 #include <vector>
 
@@ -28,6 +30,14 @@ struct GuiContext {
 	int guiHeight = 240;
 	int guiScale = 2;
 	float deltaTime = 0.016f;
+
+	std::array<ItemInstance, 36> inventorySlots;
+	std::array<ItemInstance, 4> armorSlots;
+	int selectedHotbarSlot = 0;
+	bool inventoryInitialized = false;
+
+	void ensureInventoryInitialized();
+	bool addItemToInventory(const ItemInstance& item);
 
 	void setScreen(Screen* screen);
 	void startGame();

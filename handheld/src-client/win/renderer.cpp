@@ -729,7 +729,20 @@ GLFWwindow* renderThreadInit()
 	glfwWindowHint(GLFW_SRGB_CAPABLE, GLFW_TRUE);
 	//glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
+	GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+	const GLFWvidmode* mode = monitor ? glfwGetVideoMode(monitor) : nullptr;
+	if (mode && mode->width > 0 && mode->height > 0) {
+		screenx = static_cast<int>(mode->width * 0.85f);
+		screeny = static_cast<int>(mode->height * 0.85f);
+	} else {
+		screenx = 1280;
+		screeny = 720;
+	}
+
 	GLFWwindow* window = glfwCreateWindow(screenx, screeny, "Minecraft PE 1.0.0 Restoration", NULL, NULL);
+	if (window && mode) {
+		glfwSetWindowPos(window, (mode->width - screenx) / 2, (mode->height - screeny) / 2);
+	}
 	if (window == NULL)
 	{
 		DEBUG_FAIL("Failed to make GLFW window");
@@ -743,6 +756,9 @@ GLFWwindow* renderThreadInit()
 		glfwTerminate();
 		return nullptr;
 	}
+
+	glfwGetFramebufferSize(window, &screenx, &screeny);
+	glViewport(0, 0, screenx, screeny);
 
 	glViewport(0, 0, screenx, screeny); //this sets the screen size
 

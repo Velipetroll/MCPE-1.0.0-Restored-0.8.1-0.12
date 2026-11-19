@@ -1,10 +1,12 @@
 #pragma once
 
 #include "Screen.h"
+#include "NinePatchLayer.h"
 #include <string>
 
 class CreateWorldScreen : public Screen {
 public:
+	~CreateWorldScreen() override;
 	void init() override;
 	void setupPositions() override;
 	void render(int mouseX, int mouseY, float partialTicks) override;
@@ -19,8 +21,13 @@ private:
 	int mFocusedField = 0; // 0 = name, 1 = seed
 
 	Button* mGameModeButton = nullptr;
+	Button* mCreativeButton = nullptr;
+	Button* mSurvivalButton = nullptr;
 	Button* mCreateButton = nullptr;
 	Button* mCancelButton = nullptr;
+	NinePatchLayer* mFrame = nullptr;
+	NinePatchLayer* mTabNormal = nullptr;
+	NinePatchLayer* mTabSelected = nullptr;
 
 	void updateLabels();
 };

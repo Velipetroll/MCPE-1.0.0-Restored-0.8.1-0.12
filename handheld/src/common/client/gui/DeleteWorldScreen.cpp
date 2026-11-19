@@ -1,5 +1,6 @@
 #include "DeleteWorldScreen.h"
 #include "SelectWorldScreen.h"
+#include "PlayScreen.h"
 #include "TouchControls.h"
 #include "GuiContext.h"
 #include "Options.h"
@@ -32,6 +33,12 @@ void DeleteWorldScreen::init() {
 
 void DeleteWorldScreen::setupPositions() {
 	bool touch = context && context->options && context->options->useTouchUI;
+	if (touch && !buttons.empty() && buttons[0]->id == 0) {
+		buttons[0]->posX = 0;
+		buttons[0]->posY = 0;
+		buttons[0]->width = width;
+		buttons[0]->height = 30;
+	}
 	int btnW = 100;
 	int btnH = touch ? 24 : 20;
 	int y = height / 2 + 16;
@@ -53,11 +60,12 @@ void DeleteWorldScreen::render(int mouseX, int mouseY, float partialTicks) {
 
 void DeleteWorldScreen::buttonClicked(Button* button) {
 	if (!context || !button) return;
+	bool touch = context->options && context->options->useTouchUI;
 	if (button->id == 1) {
 		std::error_code ec;
 		std::filesystem::remove_all(mWorldPath, ec);
-		context->setScreen(new SelectWorldScreen());
+		context->setScreen(touch ? static_cast<Screen*>(new PlayScreen(true)) : static_cast<Screen*>(new SelectWorldScreen()));
 	} else if (button->id == 2) {
-		context->setScreen(new SelectWorldScreen());
+		context->setScreen(touch ? static_cast<Screen*>(new PlayScreen(true)) : static_cast<Screen*>(new SelectWorldScreen()));
 	}
 }

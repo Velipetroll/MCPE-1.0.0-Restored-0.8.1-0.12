@@ -25,6 +25,8 @@ private:
 	int mScrollY = 0;
 	bool mDragging = false;
 	int mLastDragY = 0;
+	int mPressedIndex = -1;
+	bool mPressedDelete = false;
 
 	int mListX = 10;
 	int mListY = 32;
@@ -34,6 +36,8 @@ private:
 	NinePatchLayer* mFrame = nullptr;
 	NinePatchLayer* mItemNormal = nullptr;
 	NinePatchLayer* mItemPressed = nullptr;
+	NinePatchLayer* mDeleteNormal = nullptr;
+	NinePatchLayer* mDeletePressed = nullptr;
 	Button* mHeader = nullptr;
 	Button* mBackButton = nullptr;
 	Button* mEditButton = nullptr;

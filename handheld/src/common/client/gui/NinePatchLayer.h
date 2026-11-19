@@ -16,6 +16,7 @@ public:
 	               int borderLeft, int borderTop, int borderRight, int borderBottom,
 	               int texW = 256, int texH = 256);
 
+	NinePatchLayer& setExcluded(int mask);
 	void draw(int x, int y, int w, int h) const;
 
 private:
@@ -27,4 +28,5 @@ private:
 	int mBorderBottom;
 	int mTexW;
 	int mTexH;
+	int mExcluded = 0;
 };

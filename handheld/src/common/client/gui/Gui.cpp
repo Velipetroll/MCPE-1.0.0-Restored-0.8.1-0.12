@@ -5,16 +5,21 @@
 #include "PauseScreen.h"
 #include "Options.h"
 #include "Font.h"
+#include "world/crafting/CraftingRecipes.h"
 #include <glad/glad.h>
 
 void Gui::render(float partialTicks, int guiW, int guiH, Options* options, Font* font, GuiContext* ctx) {
 	if (options && options->hideGUI) return;
+	if (ctx) {
+		ctx->ensureInventoryInitialized();
+		selectedSlot = ctx->selectedHotbarSlot;
+	}
 
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 	renderCrosshair(guiW, guiH);
-	renderHotbar(guiW, guiH, font);
+	renderHotbar(guiW, guiH, font, ctx);
 	renderHearts(guiW, guiH);
 	if (options && options->useTouchUI) {
 		renderTouchButtons(guiW, guiH, font);
@@ -46,15 +51,15 @@ bool Gui::handleHudClick(int guiX, int guiY, int guiW, int guiH, GuiContext* ctx
 }
 
 void Gui::renderTouchButtons(int guiW, int guiH, Font* font) {
-	// Chat button
-	fill(guiW - 42, 4, guiW - 24, 22, 0x80000000);
-	drawRect(guiW - 42, 4, guiW - 24, 22, 0xFFC0C0C0);
-	if (font) drawCenteredString(font, "T", guiW - 33, 9, 0xFFFFFFFF);
-
-	// Pause button
-	fill(guiW - 20, 4, guiW - 2, 22, 0x80000000);
-	drawRect(guiW - 20, 4, guiW - 2, 22, 0xFFC0C0C0);
-	if (font) drawCenteredString(font, "||", guiW - 11, 9, 0xFFFFFFFF);
+	if (bindTexture("textures/gui/gui.png")) {
+		blit(guiW - 42, 4, 200, 82, 18, 18, 256, 256); // Chat
+		blit(guiW - 20, 4, 200, 64, 18, 18, 256, 256); // Pause
+	} else {
+		fill(guiW - 42, 4, guiW - 24, 22, 0x80000000);
+		if (font) drawCenteredString(font, "T", guiW - 33, 9, 0xFFFFFFFF);
+		fill(guiW - 20, 4, guiW - 2, 22, 0x80000000);
+		if (font) drawCenteredString(font, "||", guiW - 11, 9, 0xFFFFFFFF);
+	}
 }
 
 void Gui::renderChat(int guiW, int guiH, Font* font, GuiContext* ctx) {
@@ -81,7 +86,7 @@ void Gui::renderCrosshair(int guiW, int guiH) {
 	}
 }
 
-void Gui::renderHotbar(int guiW, int guiH, Font* font) {
+void Gui::renderHotbar(int guiW, int guiH, Font* font, GuiContext* ctx) {
 	int barW = 182;
 	int barH = 22;
 	int x = guiW / 2 - barW / 2;
@@ -95,12 +100,36 @@ void Gui::renderHotbar(int guiW, int guiH, Font* font) {
 		drawRect(x + selectedSlot * 20, y, x + (selectedSlot + 1) * 20, y + barH, 0xFFFFFFFF);
 	}
 
+	if (ctx) {
+		for (int i = 0; i < 9; ++i) {
+			const ItemInstance& item = ctx->inventorySlots[static_cast<size_t>(i)];
+			if (item.isNull()) continue;
+			int ix = x + 3 + i * 20;
+			int iy = y + 3;
+			std::string tex = getItemTexturePath(item);
+			if (!tex.empty() && bindTexture(tex)) {
+				blitScaled(ix, iy, 16, 16, 0, 0, 16, 16, 16, 16);
+			} else {
+				fill(ix, iy, ix + 16, iy + 16, 0xFF88AA88);
+			}
+			if (font && item.getStackSize() > 1) {
+				std::string cnt = std::to_string(static_cast<int>(item.getStackSize()));
+				font->drawShadow(cnt, ix + 17 - font->width(cnt), iy + 9, 0xFFFFFFFF);
+			}
+		}
+	}
+
 	// [...] button to the right of hotbar
 	int dotX = x + barW + 2;
-	fill(dotX, y, dotX + 20, y + barH, 0x80222222);
-	drawRect(dotX, y, dotX + 20, y + barH, 0xFF808080);
-	if (font) {
-		drawCenteredString(font, "...", dotX + 10, y + 7, 0xFFE0E0E0);
+	if (bindTexture("textures/gui/gui.png")) {
+		blit(dotX, y, 0, 0, 20, 22, 256, 256);
+		blitScaled(dotX + 3, y + 9, 14, 4, 228, 248, 28, 8, 256, 256);
+	} else {
+		fill(dotX, y, dotX + 20, y + barH, 0x80222222);
+		drawRect(dotX, y, dotX + 20, y + barH, 0xFF808080);
+		if (font) {
+			drawCenteredString(font, "...", dotX + 10, y + 7, 0xFFE0E0E0);
+		}
 	}
 }
 

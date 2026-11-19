@@ -3,10 +3,12 @@
 #include "Screen.h"
 #include "Slider.h"
 #include "OptionsPane.h"
+#include "NinePatchLayer.h"
 
 class OptionsScreen : public Screen {
 public:
 	explicit OptionsScreen(bool fromPause = false);
+	~OptionsScreen() override;
 
 	void init() override;
 	void setupPositions() override;
@@ -33,6 +35,8 @@ private:
 	int mSelectedCategory = 0;
 	std::vector<Button*> mCategoryButtons;
 	std::vector<OptionsPane*> mOptionPanes;
+	NinePatchLayer* mCatNormal = nullptr;
+	NinePatchLayer* mCatSelected = nullptr;
 
 	void updateButtonLabels();
 };

@@ -20,6 +20,8 @@ PlayScreen::~PlayScreen() {
 	delete mFrame;
 	delete mItemNormal;
 	delete mItemPressed;
+	delete mDeleteNormal;
+	delete mDeletePressed;
 }
 
 void PlayScreen::loadWorlds() {
@@ -48,14 +50,18 @@ void PlayScreen::init() {
 	delete mFrame;
 	delete mItemNormal;
 	delete mItemPressed;
+	delete mDeleteNormal;
+	delete mDeletePressed;
 	mFrame = new NinePatchLayer("textures/gui/spritesheet.png", IntRectangle{ 34, 43, 14, 14 }, 3, 3, 3, 3, 256, 256);
 	mItemNormal = new NinePatchLayer("textures/gui/spritesheet.png", IntRectangle{ 8, 32, 8, 8 }, 2, 2, 2, 2, 256, 256);
 	mItemPressed = new NinePatchLayer("textures/gui/spritesheet.png", IntRectangle{ 0, 32, 8, 8 }, 2, 2, 2, 2, 256, 256);
+	mDeleteNormal = new NinePatchLayer("textures/gui/spritesheet.png", IntRectangle{ 112, 0, 8, 67 }, 2, 2, 2, 2, 256, 256);
+	mDeletePressed = new NinePatchLayer("textures/gui/spritesheet.png", IntRectangle{ 120, 0, 8, 67 }, 2, 2, 2, 2, 256, 256);
 
 	mHeader = new Touch::THeader(0, mLocalWorlds ? "Play" : "Realms");
 	mBackButton = new Touch::TButton(1, "Back");
 	mBackButton->width = 38;
-	mBackButton->height = 18;
+	mBackButton->height = 20;
 
 	buttons.push_back(mHeader);
 	buttons.push_back(mBackButton);
@@ -63,15 +69,15 @@ void PlayScreen::init() {
 	if (mLocalWorlds) {
 		mNewButton = new Touch::TButton(2, "New");
 		mNewButton->width = 38;
-		mNewButton->height = 18;
+		mNewButton->height = 20;
 
 		mEditButton = new Touch::TButton(3, mEditMode ? "Done" : "Edit");
 		mEditButton->width = 38;
-		mEditButton->height = 18;
+		mEditButton->height = 20;
 
 		mExternalButton = new Touch::TButton(2626, "External");
 		mExternalButton->width = 50;
-		mExternalButton->height = 18;
+		mExternalButton->height = 20;
 
 		buttons.push_back(mNewButton);
 		buttons.push_back(mEditButton);
@@ -80,11 +86,11 @@ void PlayScreen::init() {
 }
 
 void PlayScreen::setupPositions() {
+	int headerH = 30;
 	if (mBackButton) {
 		mBackButton->posX = 4;
-		mBackButton->posY = 4;
+		mBackButton->posY = 5;
 	}
-	int headerH = (mBackButton ? mBackButton->height : 18) + 8;
 	if (mHeader) {
 		mHeader->posX = 0;
 		mHeader->posY = 0;
@@ -95,15 +101,15 @@ void PlayScreen::setupPositions() {
 	if (mLocalWorlds) {
 		if (mEditButton) {
 			mEditButton->posX = width - mEditButton->width - 4;
-			mEditButton->posY = 4;
+			mEditButton->posY = 5;
 		}
 		if (mNewButton && mEditButton) {
 			mNewButton->posX = width - mEditButton->width - 8 - mNewButton->width;
-			mNewButton->posY = 4;
+			mNewButton->posY = 5;
 		}
 		if (mExternalButton && mNewButton) {
 			mExternalButton->posX = mNewButton->posX - mExternalButton->width - 4;
-			mExternalButton->posY = 4;
+			mExternalButton->posY = 5;
 		}
 	}
 
@@ -119,7 +125,6 @@ void PlayScreen::render(int mouseX, int mouseY, float partialTicks) {
 	if (mFrame) {
 		mFrame->draw(mListX - 3, mListY - 3, mListW + 6, mListH + 6);
 	}
-	fill(mListX, mListY, mListX + mListW, mListY + mListH, 0x90000000);
 
 	if (!mLocalWorlds) {
 		if (font) {
@@ -129,10 +134,11 @@ void PlayScreen::render(int mouseX, int mouseY, float partialTicks) {
 		return;
 	}
 
+	const int rowH = 32;
 	if (mDragging) {
 		int dy = mLastDragY - mouseY;
 		mLastDragY = mouseY;
-		int maxScroll = std::max(0, static_cast<int>(mWorlds.size()) * 28 - mListH);
+		int maxScroll = std::max(0, static_cast<int>(mWorlds.size()) * rowH - mListH);
 		mScrollY = std::max(0, std::min(maxScroll, mScrollY + dy));
 	}
 
@@ -141,28 +147,36 @@ void PlayScreen::render(int mouseX, int mouseY, float partialTicks) {
 	glEnable(GL_SCISSOR_TEST);
 	glScissor(mListX * scale, winH - (mListY + mListH) * scale, mListW * scale, mListH * scale);
 
-	int rowH = 28;
 	for (size_t i = 0; i < mWorlds.size(); ++i) {
 		int ry = mListY + static_cast<int>(i) * rowH - mScrollY;
-		bool hov = (mouseX >= mListX && mouseX < mListX + mListW && mouseY >= ry && mouseY < ry + rowH);
-		NinePatchLayer* bg = hov ? mItemPressed : mItemNormal;
+		bool showDelete = (mEditMode && !mWorlds[i].isDefault);
+		int rowW = showDelete ? (mListW - 32) : mListW;
+
+		bool rowPressed = (mDragging && !mPressedDelete && mPressedIndex == static_cast<int>(i));
+		NinePatchLayer* bg = rowPressed ? mItemPressed : mItemNormal;
 		if (bg) {
-			bg->draw(mListX + 2, ry + 1, mListW - 4, rowH - 2);
+			bg->draw(mListX, ry, rowW, rowH);
 		} else {
-			fill(mListX + 2, ry + 1, mListX + mListW - 2, ry + rowH - 1, hov ? 0xFF6B7EBF : 0xFF555555);
+			fill(mListX, ry, mListX + rowW, ry + rowH, rowPressed ? 0xFF6B7EBF : 0xFF555555);
 		}
 
 		if (font) {
-			drawString(font, mWorlds[i].name, mListX + 8, ry + 4, 0xFFFFFFFF);
-			drawString(font, mWorlds[i].info, mListX + 8, ry + 15, 0xFFAAAAAA);
+			int titleColor = rowPressed ? 0xFFFFFFA0 : 0xFFFFFFFF;
+			drawString(font, mWorlds[i].name, mListX + 5, ry + 5, titleColor);
+			drawString(font, mWorlds[i].info, mListX + 5, ry + 16, 0xFFBBBBBB);
 		}
 
-		if (mEditMode && !mWorlds[i].isDefault) {
-			int xbx = mListX + mListW - 22;
-			int xby = ry + 6;
-			fill(xbx, xby, xbx + 16, xby + 16, 0xFFAA2222);
-			drawRect(xbx, xby, xbx + 16, xby + 16, 0xFFFFFFFF);
-			if (font) drawCenteredString(font, "X", xbx + 8, xby + 4, 0xFFFFFFFF);
+		if (showDelete) {
+			int xbx = mListX + mListW - 32;
+			int xby = ry;
+			bool delPressed = (mDragging && mPressedDelete && mPressedIndex == static_cast<int>(i));
+			NinePatchLayer* delBg = delPressed ? mDeletePressed : mDeleteNormal;
+			if (delBg) {
+				delBg->draw(xbx, xby, 32, 32);
+			}
+			if (bindTexture("textures/gui/gui.png")) {
+				blitScaled(xbx + (32 - 11) / 2, xby + (32 - 11) / 2, 11, 11, 182, 10, 11, 11, 256, 256);
+			}
 		}
 	}
 	glDisable(GL_SCISSOR_TEST);
@@ -174,18 +188,17 @@ void PlayScreen::mouseClicked(int x, int y, int button) {
 	if (button == 0 && mLocalWorlds && x >= mListX && x < mListX + mListW && y >= mListY && y < mListY + mListH) {
 		mDragging = true;
 		mLastDragY = y;
-		int rowH = 28;
+		const int rowH = 32;
 		int idx = (y - mListY + mScrollY) / rowH;
+		mPressedIndex = -1;
+		mPressedDelete = false;
 		if (idx >= 0 && idx < static_cast<int>(mWorlds.size())) {
+			mPressedIndex = idx;
 			if (mEditMode && !mWorlds[idx].isDefault) {
-				int xbx = mListX + mListW - 22;
-				if (x >= xbx && x < xbx + 16) {
-					context->setScreen(new DeleteWorldScreen(mWorlds[idx].name, mWorlds[idx].path));
-					return;
+				int xbx = mListX + mListW - 32;
+				if (x >= xbx && x < xbx + 32) {
+					mPressedDelete = true;
 				}
-			} else if (!mEditMode) {
-				context->setScreen(new ProgressScreen());
-				return;
 			}
 		}
 	}
@@ -193,7 +206,31 @@ void PlayScreen::mouseClicked(int x, int y, int button) {
 }
 
 void PlayScreen::mouseReleased(int x, int y, int button) {
+	if (button == 0 && mDragging && mLocalWorlds && x >= mListX && x < mListX + mListW && y >= mListY && y < mListY + mListH) {
+		const int rowH = 32;
+		int idx = (y - mListY + mScrollY) / rowH;
+		if (idx == mPressedIndex && idx >= 0 && idx < static_cast<int>(mWorlds.size())) {
+			if (mPressedDelete && mEditMode && !mWorlds[idx].isDefault) {
+				int xbx = mListX + mListW - 32;
+				if (x >= xbx && x < xbx + 32) {
+					mDragging = false;
+					mPressedIndex = -1;
+					mPressedDelete = false;
+					context->setScreen(new DeleteWorldScreen(mWorlds[idx].name, mWorlds[idx].path));
+					return;
+				}
+			} else if (!mEditMode) {
+				mDragging = false;
+				mPressedIndex = -1;
+				mPressedDelete = false;
+				context->setScreen(new ProgressScreen());
+				return;
+			}
+		}
+	}
 	mDragging = false;
+	mPressedIndex = -1;
+	mPressedDelete = false;
 	Screen::mouseReleased(x, y, button);
 }
 

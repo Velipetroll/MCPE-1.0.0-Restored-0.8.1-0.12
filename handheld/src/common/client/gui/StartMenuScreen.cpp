@@ -145,11 +145,11 @@ void StartMenuScreen::render(int mouseX, int mouseY, float partialTicks) {
 	if (font) {
 		if (touch) {
 			drawString(font, "Minecraft PE 1.0.0", 1, height - 20, 0xFFFFFFFF);
-			drawString(font, "Mojang AB", 1, height - 10, 0xFFFFFFFF);
+			drawString(font, "\x1a Mojang AB", 1, height - 10, 0xFFFFFFFF);
 		} else {
-			drawString(font, "Minecraft PE 1.0.0", 4, height - 12, 0xFFFFFFFF);
-			std::string copy = "Mojang AB";
-			drawString(font, copy, width - font->width(copy) - 4, height - 12, 0xFFFFFFFF);
+			drawString(font, "Minecraft PE 1.0.0", 4, height - 10, 0xFFFFFFFF);
+			std::string copy = "\x1a Mojang AB";
+			drawString(font, copy, width - font->width(copy) - 2, height - 10, 0xFFFFFFFF);
 		}
 	}
 

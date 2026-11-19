@@ -143,3 +143,51 @@ Este documento documenta **exclusivamente** las clases y flujos reales en runtim
 - **Copyright y Versión**:
   - `0.8.1`: ambos en el **borde izquierdo** (`x = 1`): `"\x0fMojang AB"` en `y = height - 10`, versión en `y = height - 20`.
   - `1.0.0`: versión en `(4, height - 12)` y `"Mojang AB"` en la **esquina derecha** `(width - font->width(copy) - 4, height - 12)`.
+
+
+---
+
+# Análisis de Crafteo (`PaneCraftingScreen`) y Botones In-Game (`Gui.cpp`)
+
+## 1. Sistema de Crafteo MATTIS (`PaneCraftingScreen.cpp`, `WorkbenchScreen.cpp`, `StonecutterScreen.cpp`)
+- **Estructura**:
+  - **Pestañas de categorías (izquierda)**: `std::vector<ImageButton*> field_54` en `posX = 6`, `width = height = (screenHeight - 16) / max(numCategories, 4)`. Iconos en `"gui/spritesheet.png"` con `UV = (32 * (catId / 2), 32 * ((catId & 1) + 2), 32, 32)`.
+  - **Lista de recetas (centro)**: `ItemPane*` en `minX = catSize + 12`, `minY = 8`.
+  - **Panel derecho (`CraftButton` + descripción)**: `craftButton` en `(width - 95, 20)` de tamaño `88×62`, con ingredientes y texto `drawWordWrap(..., 0xFFF0F0F0)` debajo (`craftButton.posY + craftButton.height + 6`).
+  - **Botón cerrar (`closeButton`)**: `19×19` en `(width - 19, 0)`, icono en `"gui/spritesheet.png"` UV `(60, 0, 18, 18)`.
+  - **Fondos NinePatch (`gui/spritesheet.png`)**: `{0, 0, 16, 16}` (marco), `{0, 20, 8, 8}` (pestaña/panel), `{8, 32, 8, 8}` (normal) y `{0, 32, 8, 8}` (pressed).
+- **Estado en `handheld/`**: No implementado aún (`PaneCraftingScreen`, `WorkbenchScreen`, `StonecutterScreen` no existen en `handheld/src/common/client/gui/`).
+
+## 2. Botones In-Game (`Gui.cpp`: `0.8.1` vs `handheld/`)
+- **Botón `[...]` de la hotbar**:
+  - **`MCPE-0.8.1` (`Gui.cpp:841-845`)**: Se dibuja usando `"gui/gui.png"` con `blit(10 * NumSlots + width / 2 - 16, height - 13, 228, 248, 14, 4, 28, 8)` dentro del último slot de la hotbar.
+  - **`handheld/` (`Gui.cpp:98-103`)**: Dibuja texto `"..."` con `drawCenteredString(font, "...", dotX + 10, y + 7, 0xFFE0E0E0)` en lugar del sprite de `gui.png`.
+- **Iconos de Chat y Pausa**:
+  - **`handheld/`**: No tiene aún los botones táctiles superiores de Chat y Pausa en `Gui.cpp`.
+
+
+---
+
+# Comparación 1:1 de Crafteo e Inventarios (`InventoryScreens.cpp` vs `MCPE-0.8.1`)
+
+## 1. Geometría Exacta (`setupPositions()` en `0.8.1` vs `InventoryScreens.cpp`)
+- **Pantalla completa vs Panel centrado**:
+  - `MCPE-0.8.1` (`PaneCraftingScreen.cpp`): ocupa **toda la pantalla** (`0, 0, width, height`) con fondo NinePatch `{0, 0, 16, 16}`.
+  - `handheld/` (`InventoryScreens.cpp`): dibuja un panel centrado fijo de `220×150` (`drawPanel` con `fill(0xFFC6C6C6)`).
+- **Pestañas de categorías**:
+  - `0.8.1`: `posX = 6`, `v7 = (height - 16) / max(numCategories, 4)`, `width = height = v7`, icono en `"gui/spritesheet.png"` `UV = (32 * (catId / 2), 32 * ((catId & 1) + 2), 32, 32)`.
+  - `handheld/`: `posX = px - 28`, `28×26` con texto (`"Blocks"`, `"Tools"`, `"Food"`, `"Misc"`) y NinePatch `{20, 32, 8, 8}` / `{28, 32, 8, 8}` (con `256×256` en lugar de `128×128`).
+- **Lista central de recetas**:
+  - `0.8.1`: `ItemPane` en `minX = v7 + 12`, `minY = 8`.
+  - `handheld/`: `drawSlotGrid` estático `4×5` (`listW = 96`).
+- **Panel derecho (`CraftButton` + descripción)**:
+  - `0.8.1`: `craftButton` de `88×62` en `(width - 95, 20)` y descripción `drawWordWrap` debajo (`craftButton.posY + 68`).
+  - `handheld/`: caja estática `64px` arriba + botón `Craft` de `rightW×28` debajo.
+- **Botón cerrar (`X`)**:
+  - `0.8.1`: `19×19` en `(width - 19, 0)` usando `ImageButton` con `"gui/spritesheet.png"` UV `(60, 0, 18, 18)`.
+  - `handheld/`: botón de texto `"X"` de `20×20` en `(px + pw - 20, py - 22)`.
+
+## 2. Discrepancias en `InventoryScreens.cpp`
+1. **Falta de interactividad real**: `drawMattisCrafting` y `drawSlotGrid` son funciones de dibujo estático sin `ItemPane` ni selección de recetas/ingredientes.
+2. **Desfase 2× en `spritesheet.png`**: `tabSel`/`tabUnsel` usan `256, 256` con coordenadas de `128×128`.
+3. **Layout**: `InventoryScreens.cpp` usa un panel centrado `220×150` en lugar del layout a pantalla completa de `PaneCraftingScreen` / `ArmorScreen` / `CreativeInventoryScreen` en `0.8.1`.

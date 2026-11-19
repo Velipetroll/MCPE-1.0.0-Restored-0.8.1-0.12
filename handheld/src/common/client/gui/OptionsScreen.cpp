@@ -7,8 +7,48 @@
 #include "Font.h"
 #include <glad/glad.h>
 
+namespace {
+class TouchCategoryButton : public Button {
+public:
+	TouchCategoryButton(int id, int iconU, int iconV, NinePatchLayer* normalBg, NinePatchLayer* selectedBg, int* selectedIdx, int myIdx)
+		: Button(id, 0, 0, 28, 28, "")
+		, mIconU(iconU)
+		, mIconV(iconV)
+		, mNormalBg(normalBg)
+		, mSelectedBg(selectedBg)
+		, mSelectedIdx(selectedIdx)
+		, mMyIdx(myIdx) {}
+
+	void render(GuiContext* ctx, int mouseX, int mouseY) override {
+		if (!visible) return;
+		bool isSelected = (mSelectedIdx && *mSelectedIdx == mMyIdx);
+		bool isHovered = active && pointInside(mouseX, mouseY);
+		NinePatchLayer* bg = (isSelected || (pressed && isHovered)) ? mSelectedBg : mNormalBg;
+		if (bg) {
+			bg->draw(posX, posY, width, height);
+		}
+		if (bindTexture("textures/gui/touchgui2.png")) {
+			blitScaled(posX, posY, width, height, mIconU, mIconV, 28, 28, 256, 256);
+		}
+	}
+
+private:
+	int mIconU;
+	int mIconV;
+	NinePatchLayer* mNormalBg;
+	NinePatchLayer* mSelectedBg;
+	int* mSelectedIdx;
+	int mMyIdx;
+};
+} // namespace
+
 OptionsScreen::OptionsScreen(bool fromPause)
 	: mFromPause(fromPause) {
+}
+
+OptionsScreen::~OptionsScreen() {
+	delete mCatNormal;
+	delete mCatSelected;
 }
 
 static Slider* makeTouchSlider(Options* opts, Options::Option opt, float minV, float maxV) {
@@ -39,9 +79,15 @@ void OptionsScreen::init() {
 		mBackButton = new Touch::TButton(1, "Back");
 		buttons.push_back(mBackButton);
 
-		static const char* catNames[4] = { "Game", "Controls", "Graphics", "Sound" };
+		delete mCatNormal;
+		delete mCatSelected;
+		mCatNormal = new NinePatchLayer("textures/gui/spritesheet.png", IntRectangle{ 8, 32, 8, 8 }, 2, 2, 2, 2, 256, 256);
+		mCatSelected = new NinePatchLayer("textures/gui/spritesheet.png", IntRectangle{ 0, 32, 8, 8 }, 2, 2, 2, 2, 256, 256);
+
+		static const int iconU[4] = { 134, 106, 134, 106 };
+		static const int iconV[4] = { 0, 0, 28, 28 };
 		for (int i = 0; i < 4; ++i) {
-			auto* catBtn = new Touch::TButton(100 + i, catNames[i]);
+			auto* catBtn = new TouchCategoryButton(100 + i, iconU[i], iconV[i], mCatNormal, mCatSelected, &mSelectedCategory, i);
 			mCategoryButtons.push_back(catBtn);
 			buttons.push_back(catBtn);
 		}
@@ -143,13 +189,13 @@ void OptionsScreen::setupPositions() {
 	bool touch = context && context->options && context->options->useTouchUI;
 
 	if (touch) {
+		int headerH = 30;
 		if (mBackButton) {
 			mBackButton->posX = 4;
-			mBackButton->posY = 4;
+			mBackButton->posY = 5;
 			mBackButton->width = 48;
 			mBackButton->height = 20;
 		}
-		int headerH = (mBackButton ? mBackButton->height : 20) + 8;
 		if (!buttons.empty() && buttons[0]->id == 0) {
 			buttons[0]->posX = 0;
 			buttons[0]->posY = 0;
@@ -157,25 +203,24 @@ void OptionsScreen::setupPositions() {
 			buttons[0]->height = headerH;
 		}
 
-		int catW = 84;
-		int catH = 26;
-		int v3 = (height - headerH - 3 - (4 * catH + 2 * 3)) / 2;
+		int catSize = 28;
+		int v3 = (height - headerH - 3 - (4 * catSize + 2 * 3)) / 2;
 		if (v3 < 0) v3 = 0;
 		for (size_t i = 0; i < mCategoryButtons.size(); ++i) {
 			Button* b = mCategoryButtons[i];
 			b->posX = 5;
 			b->posY = headerH + 3 + v3 + 29 * static_cast<int>(i);
-			b->width = catW;
-			b->height = catH;
+			b->width = catSize;
+			b->height = catSize;
 			b->active = (static_cast<int>(i) != mSelectedCategory);
 		}
 
 		for (size_t i = 0; i < mOptionPanes.size(); ++i) {
 			OptionsPane* p = mOptionPanes[i];
 			p->visible = (static_cast<int>(i) == mSelectedCategory);
-			p->posX = catW + 20;
+			p->posX = catSize + 20;
 			p->posY = headerH + 3;
-			p->width = width - catW - 20;
+			p->width = width - catSize - 20;
 			p->height = height - headerH - 3;
 			p->setupPositions();
 		}
@@ -218,18 +263,8 @@ void OptionsScreen::render(int mouseX, int mouseY, float partialTicks) {
 			renderMenuBackground(partialTicks);
 		}
 		fillGradient(0, 0, width, height, 0xC0101010, 0xD0101010);
-		fill(0, 0, 94, height, 0xFF958782);
+		fill(0, 0, 38, height, 0xFF958782);
 		Screen::render(mouseX, mouseY, partialTicks);
-
-		// Draw category icons from touchgui2.png on top of category tabs
-		if (bindTexture("textures/gui/touchgui2.png")) {
-			static const int iconU[4] = { 134, 106, 134, 106 };
-			static const int iconV[4] = { 0, 0, 28, 28 };
-			for (size_t i = 0; i < mCategoryButtons.size() && i < 4; ++i) {
-				Button* b = mCategoryButtons[i];
-				blitScaled(b->posX + 4, b->posY + 4, 18, 18, iconU[i], iconV[i], 28, 28, 256, 256);
-			}
-		}
 		return;
 	}
 

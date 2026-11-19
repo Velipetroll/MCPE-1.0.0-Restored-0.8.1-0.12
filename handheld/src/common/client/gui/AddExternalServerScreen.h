@@ -1,10 +1,12 @@
 #pragma once
 
 #include "Screen.h"
+#include "NinePatchLayer.h"
 #include <string>
 
 class AddExternalServerScreen : public Screen {
 public:
+	~AddExternalServerScreen() override;
 	void init() override;
 	void setupPositions() override;
 	void render(int mouseX, int mouseY, float partialTicks) override;
@@ -20,4 +22,5 @@ private:
 
 	Button* mAddButton = nullptr;
 	Button* mCancelButton = nullptr;
+	NinePatchLayer* mFrame = nullptr;
 };

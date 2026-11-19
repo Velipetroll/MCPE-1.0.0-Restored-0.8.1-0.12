@@ -94,7 +94,34 @@ void Slider::render(GuiContext* ctx, int mouseX, int mouseY) {
 		setOption(ctx);
 	}
 
-	// Base bar
+	Options* opts = mOptions ? mOptions : (ctx ? ctx->options : nullptr);
+	bool touch = opts && opts->useTouchUI;
+
+	if (!touch) {
+		bool hovered = active && pointInside(mouseX, mouseY);
+		if (bindTexture("textures/gui/gui.png")) {
+			int halfW = width / 2;
+			int rightW = width - halfW;
+			blitScaled(posX, posY, halfW, height, 0, 46, halfW, 20, 256, 256);
+			blitScaled(posX + halfW, posY, rightW, height, 200 - rightW, 46, rightW, 20, 256, 256);
+
+			int knobX = posX + static_cast<int>(mProgress * static_cast<float>(width - 8));
+			int kv = (hovered || mDragging) ? 86 : 66;
+			blitScaled(knobX, posY, 4, height, 0, kv, 4, 20, 256, 256);
+			blitScaled(knobX + 4, posY, 4, height, 196, kv, 4, 20, 256, 256);
+		} else {
+			fill(posX, posY, posX + width, posY + height, 0xFF444444);
+			int knobX = posX + static_cast<int>(mProgress * static_cast<float>(width - 8));
+			fill(knobX, posY, knobX + 8, posY + height, 0xFFAAAAAA);
+		}
+		if (opts && ctx && ctx->font) {
+			std::string label = opts->getMessage(mOption);
+			drawCenteredString(ctx->font, label, posX + width / 2, posY + (height - 8) / 2, 0xFFFFFFFF);
+		}
+		return;
+	}
+
+	// Touch mode: base bar
 	fill(posX + 5, posY + 7, posX + width - 5, posY + 10, 0xFF707070);
 
 	// Step ticks
@@ -113,12 +140,5 @@ void Slider::render(GuiContext* ctx, int mouseX, int mouseY) {
 	} else {
 		fill(knobX, posY + 1, knobX + 11, posY + 18, 0xFFC0C0C0);
 		drawRect(knobX, posY + 1, knobX + 11, posY + 18, 0xFF000000);
-	}
-
-	// Label
-	Options* opts = mOptions ? mOptions : (ctx ? ctx->options : nullptr);
-	if (opts && ctx && ctx->font) {
-		std::string label = opts->getMessage(mOption);
-		drawCenteredString(ctx->font, label, posX + width / 2, posY + (height - 8) / 2, 0xFFFFFFFF);
 	}
 }

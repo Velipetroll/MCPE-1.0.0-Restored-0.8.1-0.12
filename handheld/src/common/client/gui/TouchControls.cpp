@@ -42,20 +42,21 @@ void TButton::render(GuiContext* ctx, int mouseX, int mouseY) {
 }
 
 THeader::THeader(int id, const std::string& msg)
-	: Button(id, 0, 0, 66, 26, msg) {
+	: Button(id, 0, 0, 66, 30, msg) {
 	active = false;
 }
 
 void THeader::render(GuiContext* ctx, int mouseX, int mouseY) {
 	if (!visible) return;
 
+	int bodyH = std::max(1, height - 1);
 	if (bindTexture("textures/gui/touchgui.png")) {
-		blitScaled(posX, posY, 2, 25, 150, 26, 2, 25, 256, 256);
+		blitScaled(posX, posY, 2, bodyH, 150, 26, 2, 25, 256, 256);
 		if (width > 4) {
-			blitScaled(posX + 2, posY, width - 4, 25, 153, 26, 8, 25, 256, 256);
-			blitScaled(posX + 2, posY + 25, width - 4, 3, 153, 52, 8, 3, 256, 256);
+			blitScaled(posX + 2, posY, width - 3, bodyH, 153, 26, 8, 25, 256, 256);
 		}
-		blitScaled(posX + width - 2, posY, 2, 25, 162, 26, 2, 25, 256, 256);
+		blitScaled(posX + width - 2, posY, 2, bodyH, 162, 26, 2, 25, 256, 256);
+		blitScaled(posX, posY + bodyH, width, 3, 153, 52, 8, 3, 256, 256);
 	} else {
 		fill(posX, posY, posX + width, posY + height, 0xFF333333);
 	}

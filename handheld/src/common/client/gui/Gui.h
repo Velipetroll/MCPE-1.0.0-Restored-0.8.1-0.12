@@ -17,7 +17,7 @@ public:
 
 private:
 	void renderCrosshair(int guiW, int guiH);
-	void renderHotbar(int guiW, int guiH, Font* font);
+	void renderHotbar(int guiW, int guiH, Font* font, GuiContext* ctx);
 	void renderHearts(int guiW, int guiH);
 	void renderTouchButtons(int guiW, int guiH, Font* font);
 	void renderChat(int guiW, int guiH, Font* font, GuiContext* ctx);

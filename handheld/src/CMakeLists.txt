@@ -1035,6 +1035,7 @@ common/client/gui/GuiComponent.cpp
 common/client/gui/GuiContext.cpp
 common/client/gui/InBedScreen.cpp
 common/client/gui/InventoryScreens.cpp
+common/world/crafting/CraftingRecipes.cpp
 common/client/gui/NinePatchLayer.cpp
 common/client/gui/Options.cpp
 common/client/gui/OptionsPane.cpp

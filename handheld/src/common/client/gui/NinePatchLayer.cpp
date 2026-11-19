@@ -13,6 +13,11 @@ NinePatchLayer::NinePatchLayer(const std::string& texturePath, const IntRectangl
 	, mTexH(texH) {
 }
 
+NinePatchLayer& NinePatchLayer::setExcluded(int mask) {
+	mExcluded = mask;
+	return *this;
+}
+
 void NinePatchLayer::draw(int x, int y, int w, int h) const {
 	if (!bindTexture(mTexturePath)) {
 		fill(x, y, x + w, y + h, 0xFF666666);
@@ -38,19 +43,19 @@ void NinePatchLayer::draw(int x, int y, int w, int h) const {
 	int sy2 = mSrc.y + bt + srcCenterH;
 
 	// Top row
-	blitScaled(x, y, bl, bt, sx0, sy0, bl, bt, mTexW, mTexH);
-	if (centerW > 0) blitScaled(x + bl, y, centerW, bt, sx1, sy0, srcCenterW, bt, mTexW, mTexH);
-	blitScaled(x + bl + centerW, y, br, bt, sx2, sy0, br, bt, mTexW, mTexH);
+	if (!(mExcluded & (1 << 0))) blitScaled(x, y, bl, bt, sx0, sy0, bl, bt, mTexW, mTexH);
+	if (!(mExcluded & (1 << 1)) && centerW > 0) blitScaled(x + bl, y, centerW, bt, sx1, sy0, srcCenterW, bt, mTexW, mTexH);
+	if (!(mExcluded & (1 << 2))) blitScaled(x + bl + centerW, y, br, bt, sx2, sy0, br, bt, mTexW, mTexH);
 
 	// Middle row
 	if (centerH > 0) {
-		blitScaled(x, y + bt, bl, centerH, sx0, sy1, bl, srcCenterH, mTexW, mTexH);
-		if (centerW > 0) blitScaled(x + bl, y + bt, centerW, centerH, sx1, sy1, srcCenterW, srcCenterH, mTexW, mTexH);
-		blitScaled(x + bl + centerW, y + bt, br, centerH, sx2, sy1, br, srcCenterH, mTexW, mTexH);
+		if (!(mExcluded & (1 << 3))) blitScaled(x, y + bt, bl, centerH, sx0, sy1, bl, srcCenterH, mTexW, mTexH);
+		if (!(mExcluded & (1 << 4)) && centerW > 0) blitScaled(x + bl, y + bt, centerW, centerH, sx1, sy1, srcCenterW, srcCenterH, mTexW, mTexH);
+		if (!(mExcluded & (1 << 5))) blitScaled(x + bl + centerW, y + bt, br, centerH, sx2, sy1, br, srcCenterH, mTexW, mTexH);
 	}
 
 	// Bottom row
-	blitScaled(x, y + bt + centerH, bl, bb, sx0, sy2, bl, bb, mTexW, mTexH);
-	if (centerW > 0) blitScaled(x + bl, y + bt + centerH, centerW, bb, sx1, sy2, srcCenterW, bb, mTexW, mTexH);
-	blitScaled(x + bl + centerW, y + bt + centerH, br, bb, sx2, sy2, br, bb, mTexW, mTexH);
+	if (!(mExcluded & (1 << 6))) blitScaled(x, y + bt + centerH, bl, bb, sx0, sy2, bl, bb, mTexW, mTexH);
+	if (!(mExcluded & (1 << 7)) && centerW > 0) blitScaled(x + bl, y + bt + centerH, centerW, bb, sx1, sy2, srcCenterW, bb, mTexW, mTexH);
+	if (!(mExcluded & (1 << 8))) blitScaled(x + bl + centerW, y + bt + centerH, br, bb, sx2, sy2, br, bb, mTexW, mTexH);
 }
