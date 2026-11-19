@@ -3,6 +3,8 @@
 
 This project aims to restore leaked MCPE 1.0.2.0 code from Minecraft Dungeons to working condition and to hopefully be playable.
 
+![Restored MCPE menu](images/menu.png)
+
 ## About the code
 On March 1, 2026, a major Minecraft source code leak which included Minecraft Legacy Console edition code, Minecraft Pocket Edition 0.6.1 code and the full Minecraft Dungeons development repo occurred. The Minecraft Dungeons codebase also included part of a newer version of Pocket Edition's codebase 1.0.2.0, dating to around 2016-2017. This code is only partially complete as several necessary parts to run it have been stripped out and replaced with Unreal Engine 4 code.
 
