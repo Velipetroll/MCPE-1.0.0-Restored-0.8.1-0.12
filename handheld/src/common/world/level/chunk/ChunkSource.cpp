@@ -106,6 +106,9 @@ LevelChunk* ChunkSource::getOrLoadChunk(const ChunkPos& cp, LoadMode lm) {
  		WorkerPool::getFor(WorkerRole::Streaming).queue(
  			[this, lc, succeeded, immediatelyLoadReplacementData] () {
  				ScopedProfile("loadChunk");
+ 				if (mLevel && mLevel->getTearingDown()) {
+ 					return true;
+ 				}
  				if (lc->tryChangeState(ChunkState::Unloaded, ChunkState::Generating)) {	//check if this chunk isn't already
  																						// being loaded by the main thread
  
@@ -260,17 +263,20 @@ void ChunkSource::_startPostProcessing(LevelChunk& lc) {
 #ifdef TAC_THREADED_CHUNK_GEN
  	WorkerPool::getFor(WorkerRole::Streaming).queue(
  		[this, &lc, chunks, succeeded] () {
-			if (lc.getPosition() == ChunkPos(1, 1)) printf("Yes this chunk is processing\n");
  			ScopedProfile("postProcess");
+ 			if (mLevel && mLevel->getTearingDown()) {
+ 				return true;
+ 			}
  			if (lc.tryChangeState(ChunkState::Generated, ChunkState::PostProcessing)) {
  				if (lc.getGenerator()->postProcess(*chunks) == false) {
-					if (lc.getPosition() == ChunkPos(1, 1)) printf("No this chunk is failing processing\n");
  					lc.changeState(ChunkState::PostProcessing, ChunkState::Generated);	//go back and try again
  					return false;
  				}
-				if (lc.getPosition() == ChunkPos(1, 1)) printf("Yes this chunk is loaded\n");
  
  				lc.changeState(ChunkState::PostProcessing, ChunkState::Loaded);
+ 				if (lc.getDebugDisplaySavedState() != ChunkDebugDisplaySavedState::Saved) {
+ 					lc.clearUpdateMap();
+ 				}
  				*succeeded = true;
  			}
  

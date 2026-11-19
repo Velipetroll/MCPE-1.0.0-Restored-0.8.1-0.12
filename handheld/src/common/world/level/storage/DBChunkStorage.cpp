@@ -83,16 +83,49 @@ DBChunkStorage::~DBChunkStorage() {
 	waitDiscardFinished();
 }
 
+void DBChunkStorage::_markPendingWrite(const ChunkPos& pos) {
+	std::lock_guard<std::mutex> lock(mPendingWriteMutex);
+	mPendingWriteCounts[pos] += 1;
+}
+
+void DBChunkStorage::_unmarkPendingWrite(const ChunkPos& pos) {
+	{
+		std::lock_guard<std::mutex> lock(mPendingWriteMutex);
+		auto it = mPendingWriteCounts.find(pos);
+		if (it != mPendingWriteCounts.end()) {
+			if (--(it->second) <= 0) {
+				mPendingWriteCounts.erase(it);
+			}
+		}
+	}
+	mPendingWriteCv.notify_all();
+}
+
+void DBChunkStorage::_waitForPendingSave(const ChunkPos& pos, int radius) {
+	std::unique_lock<std::mutex> lock(mPendingWriteMutex);
+	mPendingWriteCv.wait(lock, [&]() {
+		if (mPendingWriteCounts.empty()) {
+			return true;
+		}
+		for (int dx = -radius; dx <= radius; ++dx) {
+			for (int dz = -radius; dz <= radius; ++dz) {
+				if (mPendingWriteCounts.find(ChunkPos(pos.x + dx, pos.z + dz)) != mPendingWriteCounts.end()) {
+					return false;
+				}
+			}
+		}
+		return true;
+	});
+}
+
 void DBChunkStorage::waitDiscardFinished() {
 	//flush out all batched chunks
 	if(mDiscardBatch.size() > 0) {
 		_writeBatch();
 	}
 
- 	for (auto&& queue : WorkerPool::getWorkersFor(WorkerRole::Disk)) {
- 		queue->sync();
- 	}
- 
+	WorkerPool::drainWorkerPool(WorkerRole::Disk);
+
  	ALOGI(LOG_AREA_STORAGE, "Saved pending chunks\n");
 }
 
@@ -115,6 +148,9 @@ void DBChunkStorage::loadChunk(LevelChunk& lc, bool forceImmediateReplacementDat
 
 	DEBUG_ASSERT(lc.getGenerator() == nullptr, "DBChunkStorage should be the first to attempt to set the levelchunk's generator!!!");
 	lc._setGenerator(this);
+
+	// Ensure any in-flight unload/live save for this chunk or its 3x3 neighbors finishes hitting DB before _hasChunk/_loadChunkFromDB
+	_waitForPendingSave(lc.getPosition(), 1);
 
 	// if we are in the DB, we need to check the 8 neighbors.  If they are in the DB, we do not generate the chunk as it's
 	// fully saved and doesn't bleed original data to the neighbors (as they are loaded too)
@@ -176,6 +212,7 @@ void DBChunkStorage::loadChunk(LevelChunk& lc, bool forceImmediateReplacementDat
 }
 
 bool DBChunkStorage::_replaceChunkDataIfSaved(LevelChunk& lc, ChunkViewSource& neighborhood) {
+	_waitForPendingSave(lc.getPosition(), 0);
 
 	// see if there's data to load
 	ChunkKey key(lc);
@@ -346,7 +383,7 @@ void DBChunkStorage::_serializeChunk(const LevelChunk& lc, leveldb::WriteBatch& 
  	
  	if (lc.getDirtyTicksCounter(LevelChunkDataField::Entity).isDirty()) {
  		auto& list = lc.getEntities();
- 		if (list.size() > 0) {
+ 		if (list.size() > 0 || lc.hasSerializedEntities()) {
  			buffer.clear();
  			lc.serializeEntities(stream);
  			batch.Put(join(prefix, LevelChunk::Tag::Entity), buffer);
@@ -419,12 +456,20 @@ void DBChunkStorage::_writeBatch() {
  
  	//transfer the ownership into a shared pointer because lambdas don't capture uniques :(
  	auto list = make_shared<ChunkPtrList>(std::move(mDiscardBatch));
+ 	auto savedPositions = make_shared<std::vector<ChunkPos>>();
+ 	savedPositions->reserve(list->size());
+ 	for (const auto& chunk : *list) {
+ 		if (chunk) {
+ 			savedPositions->push_back(chunk->getPosition());
+ 			_markPendingWrite(chunk->getPosition());
+ 		}
+ 	}
  
  #ifndef PUBLISH
  	mPending += list->size();
  #endif
  	// REVIEW:  Possibly restore change for QueueRole here to STREAMING instead of "SAVE"
- 	WorkerPool::getFor(WorkerRole::Disk).queue([this, list] () {
+ 	WorkerPool::getFor(WorkerRole::Disk).queue([this, list, savedPositions] () {
  		ScopedProfile("saveToDisk");
  		//save to disk using the thread-local buffer
  		auto& batch = threadBatch.getLocal();
@@ -453,6 +498,9 @@ void DBChunkStorage::_writeBatch() {
  		}
  
  		mStorage->_write(batch);
+ 		for (const auto& pos : *savedPositions) {
+ 			_unmarkPendingWrite(pos);
+ 		}
  		return true;
  	},
  		BackgroundWorker::NOP,
@@ -471,7 +519,7 @@ void DBChunkStorage::acquireDiscarded(ChunkPtr&& ptr){
 		mDiscardedWhileLiveSaved[ptr->getPosition()] = std::move(ptr);
 	}
 	else if (ptr->getState() == ChunkState::Loaded) {
-		if (ptr->isDirty()) {
+		if (ptr->shouldSave()) {
 			mDiscardBatch.emplace_back(std::move(ptr));
 
 			if (!mBatch || mDiscardBatch.size() > 20) {
@@ -519,7 +567,9 @@ bool DBChunkStorage::saveLiveChunk(LevelChunk& lc){
  	if (mLiveChunksBeingSaved.count(lc.getPosition()) == 0) {
  		ScopedProfile("SaveLiveChunk-serialize");
  
- 		mLiveChunksBeingSaved.insert(lc.getPosition());
+ 		ChunkPos savedPos = lc.getPosition();
+ 		mLiveChunksBeingSaved.insert(savedPos);
+ 		_markPendingWrite(savedPos);
  
  		_serializeChunk(lc, *batch);
  
@@ -528,17 +578,25 @@ bool DBChunkStorage::saveLiveChunk(LevelChunk& lc){
  
  		WorkerPool::getFor(WorkerRole::Disk).queue(
  			//only write on the helper thread
- 			[batch, this] () {
+ 			[batch, this, savedPos] () {
  			ScopedProfile("SaveLiveChunk-write");
  			mStorage->_write(*batch);
+ 			_unmarkPendingWrite(savedPos);
  			return true;
  		},
- 			[this, batch, &lc] (){
+ 			[this, batch, savedPos] (){
  			ScopedProfile("putBackBuffer");
  			//then put back the used buffer
  			mBufferPool.emplace_back(std::move(batch));
- 			mLiveChunksBeingSaved.erase(lc.getPosition());
- 			mDiscardedWhileLiveSaved.erase(lc.getPosition());	//this deletes the chunk if it was discarded while saving
+ 			mLiveChunksBeingSaved.erase(savedPos);
+ 			auto discIt = mDiscardedWhileLiveSaved.find(savedPos);
+ 			if (discIt != mDiscardedWhileLiveSaved.end()) {
+ 				ChunkPtr disc = std::move(discIt->second);
+ 				mDiscardedWhileLiveSaved.erase(discIt);
+ 				if (disc && disc->shouldSave()) {
+ 					acquireDiscarded(std::move(disc));
+ 				}
+ 			}
  		},
  			60);
  

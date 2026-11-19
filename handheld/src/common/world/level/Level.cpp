@@ -290,10 +290,7 @@ Level::~Level() {
 		// empty the work queue
 		queue->flush();
 	}
-	for (auto&& queue : WorkerPool::getWorkersFor(WorkerRole::Streaming)) {
-		// make sure than any currently executing work finishes
-		queue->sync();
-	}
+	WorkerPool::drainWorkerPool(WorkerRole::Streaming);
 
 	//// could be holding the "to be destroyed" BlockSource
 	//mLightUpdates.clear();
@@ -1209,7 +1206,7 @@ void Level::saveDirtyChunks() {
 		for (auto& chunkRef : cs.getStoredChunks()) {
 			auto& lc = chunkRef.second.getChunk();
 
-			if (lc.isDirty() && lc.getState() == ChunkState::Loaded) {
+			if (lc.shouldSave() && lc.getState() == ChunkState::Loaded) {
 				cs.saveLiveChunk(lc);
 			}
 		}
@@ -2431,6 +2428,11 @@ void Level::onChunkLoaded(LevelChunk& lc) {
 		return true;
 		});
 
+	// Replicate MCPE 0.8.1 LevelChunk::load() lifecycle even when no Player entity is registered (singleplayer camera mode)
+	if (!lc.isLoaded()) {
+		lc.load(lc.getDimension().getBlockSourceDEPRECATEDUSEPLAYERREGIONINSTEAD());
+	}
+
 	for (auto& listener : m_Listeners) {
 		listener->onChunkLoaded(lc);
 	}
@@ -2480,6 +2482,7 @@ void Level::onChunkDiscarded(LevelChunk& lc) {
 	for (auto& listener : m_Listeners) {
 		listener->onChunkUnloaded(lc);
 	}
+	lc.unload();
 }
 
 void Level::forEachPlayer(std::function<bool(Player&)> callback) {

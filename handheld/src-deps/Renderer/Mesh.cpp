@@ -166,11 +166,19 @@ namespace mce
         indexSize = other.indexSize;
         mode = other.mode;
         byteData = other.byteData;
+        other.vertexCount = 0;
+        other.vertexSize = 0;
+        other.indexCount = 0;
+        other.indexSize = 0;
+        other.byteData = nullptr;
     }
 
     Mesh& Mesh::operator=(Mesh&& lll)
     {
-        _move(lll);
+        if (this != &lll) {
+            reset();
+            _move(lll);
+        }
         return *this;
     }
 
@@ -235,13 +243,19 @@ namespace mce
 
     void Mesh::reset()
     {
-        glDeleteVertexArrays(1, &VAO);
-        glDeleteBuffers(1, &VBO);
-        glDeleteBuffers(1, &EBO);
-
-        VAO = -1;
-        VBO = -1;
-        EBO = -1;
+        const unsigned int invalidId = static_cast<unsigned int>(-1);
+        if (VAO != invalidId) {
+            glDeleteVertexArrays(1, &VAO);
+            VAO = invalidId;
+        }
+        if (VBO != invalidId) {
+            glDeleteBuffers(1, &VBO);
+            VBO = invalidId;
+        }
+        if (EBO != invalidId) {
+            glDeleteBuffers(1, &EBO);
+            EBO = invalidId;
+        }
 
         vf = VertexFormat::EMPTY;
         vertexCount = 0;

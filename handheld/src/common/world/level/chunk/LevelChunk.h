@@ -168,13 +168,21 @@ public:
 	///tells if the chunk needs to/can be saved
 	bool needsSaving(int wait, int maxWait) const;
 	bool isDirty() const;
+	bool shouldSave(bool checkEntities = false) const;
 
 	void setUnsaved();
 	void setSaved();
+	void markUnsaved();
+	void clearUpdateMap();
 
 	void onBlockEntityChanged();
 	//Entities are assumed dirty
 	void onLoaded(BlockSource &region);
+	void load(BlockSource &region);
+	void unload();
+	bool isLoaded() const {
+		return mIsLoaded;
+	}
 
 	Height getHeightmap(const ChunkBlockPos& pos) const;
 
@@ -288,6 +296,23 @@ public:
 	void legacyDeserializeTerrain(IDataInput& stream);
 
 	void setPendingEntities(std::string& entitiesData);
+
+	bool hasSerializedEntities() const {
+		return !mSerializedEntitiesBuffer.empty();
+	}
+	const std::string& getSerializedEntitiesBuffer() const {
+		return mSerializedEntitiesBuffer;
+	}
+	std::string takeSerializedEntitiesBuffer() {
+		return std::move(mSerializedEntitiesBuffer);
+	}
+	void setSerializedEntitiesBuffer(std::string data, bool markDirty = true);
+	bool hadSerializedEntities() const {
+		return mHadSerializedEntities;
+	}
+	void setHadSerializedEntities(bool val) {
+		mHadSerializedEntities = val;
+	}
 
 	const std::atomic<ChunkState>& getState() const;
 
@@ -443,6 +468,7 @@ protected:
 	BBorder mBorderBlockMap[CHUNK_COLUMNS];
 	Finalization mFinalized = Finalization::NeedsInstaticking;
 	bool mIsLoaded = false;
+	bool mHadSerializedEntities = false;
 
 	DirtyTicksCounter mFullChunkDirtyTicksCounters[enum_cast(LevelChunkDataField::_count)];
 	static_vector<DirtyTicksCounter*, enum_cast(LevelChunkDataField::_count) + (MAX_CHUNK_HEIGHT / CHUNK_WIDTH)> mDirtyTickCounters;

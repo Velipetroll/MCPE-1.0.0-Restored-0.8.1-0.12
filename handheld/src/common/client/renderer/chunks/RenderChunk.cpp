@@ -89,6 +89,7 @@ RenderChunk::RenderChunk(const BlockPos& p) :
 }
 
 RenderChunk::~RenderChunk() {
+	reset();
 }
 
 void RenderChunk::setPos(const BlockPos& p) {
@@ -595,7 +596,36 @@ void RenderChunk::reset() {
 	mVisible = false;
 	mCanRender = false;
 	mSkyLit = false;
+	mAllDark = false;
+	mAverageSkyLight = 0.0f;
 	mReadyTime = 0;
+	mImmediateChange = false;
+	mVisibilityChanged = true;
+	mVisibility = VisibilityNode(false);
+	mLastChangeTick = Tick(0);
+	mFirstChangeTick = Tick::MAX;
+	mLastSortCameraDelta = BlockPos(INT_MAX);
+	mPosition = BlockPos(INT_MAX);
+	distanceFromPlayer2 = FLT_MAX;
+	mIndexSize = 0;
+	mNumFaces = 0;
+
+	memset(mIndexRange, 0, sizeof(mIndexRange));
+	memset(mSortedIndexRange, 0, sizeof(mSortedIndexRange));
+	memset(mRenderLayerIndexRange, 0, sizeof(mRenderLayerIndexRange));
+	memset(mSortedRenderLayerIndexRange, 0, sizeof(mSortedRenderLayerIndexRange));
+
+	Util::freeVectorMemory(mData);
+	Util::freeVectorMemory(mData32bit);
+	for (int i = 0; i < Facing::NUM_CULLING_IDS; ++i) {
+		Util::freeVectorMemory(mFaces[i]);
+	}
+	mCutawayVisibilityBuffer.reset();
+	mCurrentBuilder.reset();
+	mCurrentSorter.reset();
+
+	mBuildState = BuildState::Dirty;
+	mSortState = SortState::SortDirty;
 
  	mMesh.reset();
 }

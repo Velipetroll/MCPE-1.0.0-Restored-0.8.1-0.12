@@ -50,9 +50,16 @@
 #include "world/level/GameType.h"
 #include "world/level/material/Material.h"
 #include "util/Random.h"
+#include "nbt/NbtIo.h"
+#include "nbt/CompoundTag.h"
+#include "nbt/ListTag.h"
+#include "util/StringByteInput.h"
+#include "util/StringByteOutput.h"
 #include "stb_image.h"
 #include <chrono>
 #include <cstdio>
+#include <unordered_map>
+#include <unordered_set>
 
 
 int screenx = 1600;
@@ -1609,6 +1616,106 @@ struct WorldItemEntity {
 	int lifeTime = 6000;
 };
 
+static void serializeChunkWorldItems(const ChunkPos& cp,
+                                     std::vector<WorldItemEntity>& items,
+                                     LevelChunk& lc,
+                                     bool removeFromList) {
+	std::string encoded;
+	StringByteOutput stream(encoded);
+	bool anyWritten = false;
+
+	for (size_t i = 0; i < items.size(); ) {
+		const WorldItemEntity& e = items[i];
+		ChunkPos itemCp(Math::floor(e.pos.x) >> 4, Math::floor(e.pos.z) >> 4);
+		if (itemCp == cp) {
+			if (!e.item.isNull() && e.item.getStackSize() > 0) {
+				CompoundTag tag;
+				tag.putInt("id", 64);
+				tag.put("Pos", ListTagFloatAdder(e.pos.x)(e.pos.y)(e.pos.z).done());
+				tag.put("Motion", ListTagFloatAdder(e.vel.x)(e.vel.y)(e.vel.z).done());
+				tag.putShort("Age", static_cast<short>(std::max(0, std::min(e.age, 32767))));
+				tag.putShort("PickupDelay", static_cast<short>(std::max(0, std::min(e.delayBeforePickup, 32767))));
+				tag.putInt("LifeTime", e.lifeTime);
+
+				auto itemTag = make_unique<CompoundTag>();
+				itemTag->putShort("id", static_cast<short>(e.item.getId()));
+				itemTag->putShort("Damage", static_cast<short>(e.item.getAuxValue()));
+				itemTag->putByte("Count", static_cast<char>(e.item.getStackSize()));
+				tag.putCompound("Item", std::move(itemTag));
+
+				NbtIo::write(&tag, stream);
+				anyWritten = true;
+			}
+			if (removeFromList) {
+				items[i] = std::move(items.back());
+				items.pop_back();
+				continue;
+			}
+		}
+		++i;
+	}
+
+	if (anyWritten) {
+		lc.setSerializedEntitiesBuffer(std::move(encoded), true);
+		lc.setHadSerializedEntities(true);
+	} else if (lc.hadSerializedEntities()) {
+		// Entities previously on disk were picked up/despawned; mark Entity field dirty so DB removes stale Tag::Entity
+		lc.setSerializedEntitiesBuffer(std::string(), true);
+		lc.setHadSerializedEntities(false);
+	}
+}
+
+static void deserializeChunkWorldItems(LevelChunk& lc, std::vector<WorldItemEntity>& items) {
+	if (!lc.hasSerializedEntities()) {
+		return;
+	}
+	std::string encoded = lc.takeSerializedEntitiesBuffer();
+	StringByteInput input(encoded);
+	static Random loadItemRng;
+
+	while (input.numBytesLeft() > 0) {
+		auto tag = NbtIo::read(input);
+		if (!tag) {
+			break;
+		}
+		if (tag->getInt("id") != 64) {
+			continue;
+		}
+		const ListTag* posList = tag->getList("Pos");
+		const CompoundTag* itemTag = tag->getCompound("Item");
+		if (!posList || posList->size() < 3 || !itemTag) {
+			continue;
+		}
+		int itemId = static_cast<int>(itemTag->getShort("id"));
+		int aux = static_cast<int>(itemTag->getShort("Damage"));
+		int count = static_cast<int>(static_cast<uint8_t>(itemTag->getByte("Count")));
+		if (itemId <= 0 || count <= 0) {
+			continue;
+		}
+		ItemInstance inst(itemId, count, aux);
+		if (inst.isNull() || !inst.isValid()) {
+			continue;
+		}
+
+		WorldItemEntity ent;
+		ent.item = inst;
+		ent.pos = Vec3(posList->getFloat(0), posList->getFloat(1), posList->getFloat(2));
+		ent.prevPos = ent.pos;
+		const ListTag* velList = tag->getList("Motion");
+		if (velList && velList->size() >= 3) {
+			ent.vel = Vec3(velList->getFloat(0), velList->getFloat(1), velList->getFloat(2));
+		}
+		ent.age = static_cast<int>(tag->getShort("Age"));
+		ent.delayBeforePickup = static_cast<int>(tag->getShort("PickupDelay"));
+		int lt = tag->getInt("LifeTime");
+		if (lt > 0) {
+			ent.lifeTime = lt;
+		}
+		ent.hoverStart = loadItemRng.nextFloat() * 3.1416f * 2.0f;
+		items.push_back(std::move(ent));
+	}
+}
+
 void spawnWorldItem(std::vector<WorldItemEntity>& items,
                     const ItemInstance& item,
                     const Vec3& pos,
@@ -1699,6 +1806,11 @@ void updateWorldItemEntities(std::vector<WorldItemEntity>& items,
 		tickAccum -= TICK_DT;
 		for (size_t i = 0; i < items.size(); ) {
 			WorldItemEntity& e = items[i];
+			LevelChunk* itemLc = region.getChunk(ChunkPos(Math::floor(e.pos.x) >> 4, Math::floor(e.pos.z) >> 4));
+			if (!itemLc || itemLc->getState() != ChunkState::Loaded) {
+				++i;
+				continue;
+			}
 			e.prevPos = e.pos;
 			if (e.delayBeforePickup > 0) {
 				--e.delayBeforePickup;
@@ -3376,13 +3488,50 @@ void renderThreadStuff()
 	}
 
 	std::unordered_map<ChunkPos,RenderChunk*[8]> rc;
+	std::vector<RenderChunk*> renderChunkPool;
+	std::unordered_map<ChunkPos, LevelChunk*> heldChunks;
 
 	std::unordered_set<ChunkPos> needsReRendering;
 	std::unordered_set<ChunkPos> needsReRendering2;
 	std::unordered_set<ChunkPos> loadedChunkSet;
 	std::unordered_set<ChunkPos> litChunks;
 
+	auto acquireRenderChunk = [&](const BlockPos& pos) -> RenderChunk* {
+		if (!renderChunkPool.empty()) {
+			RenderChunk* recycled = renderChunkPool.back();
+			renderChunkPool.pop_back();
+			recycled->setPos(pos);
+			return recycled;
+		}
+		return new RenderChunk(pos);
+	};
+
+	auto releaseRenderChunk = [&](RenderChunk*& part, size_t maxPoolSize) {
+		if (!part) return;
+		part->reset();
+		if (renderChunkPool.size() < maxPoolSize) {
+			renderChunkPool.push_back(part);
+		} else {
+			delete part;
+		}
+		part = nullptr;
+	};
+
+	auto acquireHeldChunk = [&](ChunkSource& chunkSrc, const ChunkPos& cp) -> LevelChunk* {
+		auto it = heldChunks.find(cp);
+		if (it != heldChunks.end()) {
+			return it->second;
+		}
+		LevelChunk* lc = chunkSrc.getOrLoadChunk(cp, ChunkSource::LoadMode::Deferred);
+		if (lc) {
+			heldChunks[cp] = lc;
+		}
+		return lc;
+	};
+
 	std::unique_ptr<RenderChunkBuilder> chunkBuilder;
+
+	WorkerPool::setMainThreadPumpActive(true);
 
 	Recipes::getInstance()->init();
 
@@ -3431,20 +3580,33 @@ void renderThreadStuff()
 		saveWorldMetadata(gGuiContext.activeWorldDir, meta);
 
 		if (commandContext.level) {
-			commandContext.level->saveDirtyChunks();
-			for (auto* w : WorkerPool::getWorkersFor(WorkerRole::Disk)) {
-				w->sync();
+			for (auto& kv : heldChunks) {
+				LevelChunk* lc = kv.second;
+				if (lc && lc->getState() == ChunkState::Loaded) {
+					serializeChunkWorldItems(kv.first, worldItems, *lc, false);
+				}
 			}
+			commandContext.level->saveDirtyChunks();
+			WorkerPool::drainWorkerPool(WorkerRole::Disk);
 		}
 	};
 
 	auto closeActiveWorld = [&]() {
-		for (auto* w : WorkerPool::getWorkersFor(WorkerRole::Streaming)) {
-			w->sync();
+		WorkerPool::drainWorkerPool(WorkerRole::Streaming);
+		if (commandContext.dim != nullptr && !heldChunks.empty()) {
+			ChunkSource& chunkSrc = commandContext.dim->getChunkSource();
+			chunkSrc.hintDiscardBatchBegin();
+			for (auto& kv : heldChunks) {
+				LevelChunk* lc = kv.second;
+				if (lc) {
+					serializeChunkWorldItems(kv.first, worldItems, *lc, true);
+					chunkSrc.releaseChunk(*lc);
+				}
+			}
+			chunkSrc.hintDiscardBatchEnd();
 		}
-		for (auto* w : WorkerPool::getWorkersFor(WorkerRole::Disk)) {
-			w->sync();
-		}
+		heldChunks.clear();
+		WorkerPool::drainWorkerPool(WorkerRole::Disk);
 		for (auto& kv : rc) {
 			for (int i = 0; i < 8; ++i) {
 				delete kv.second[i];
@@ -3452,6 +3614,10 @@ void renderThreadStuff()
 			}
 		}
 		rc.clear();
+		for (RenderChunk* pooled : renderChunkPool) {
+			delete pooled;
+		}
+		renderChunkPool.clear();
 		needsReRendering.clear();
 		needsReRendering2.clear();
 		loadedChunkSet.clear();
@@ -3469,6 +3635,8 @@ void renderThreadStuff()
 		commandContext.dim = nullptr;
 		delete commandContext.level;
 		commandContext.level = nullptr;
+		LevelChunk::trimMemoryPool();
+		LevelChunk::SubChunk::trimMemoryPool();
 		gGuiContext.hasWorldLoaded = false;
 	};
 
@@ -3521,6 +3689,7 @@ void renderThreadStuff()
 	std::string lastSavedOptions = gGuiOptions.serialize();
 	while (!glfwWindowShouldClose(window)) 
 	{
+		WorkerPool::pumpMainThreadCallbacks();
 		lastFrame = currentFrame;
 		currentFrame = glfwGetTime();
 
@@ -3627,7 +3796,7 @@ void renderThreadStuff()
 			    (!hasInitialSpawn || gGuiContext.respawnRequested)) {
 				if (gGuiContext.respawnRequested && gGuiContext.hasBedSpawn) {
 					ChunkPos bedCp(gGuiContext.bedSpawnX >> 4, gGuiContext.bedSpawnZ >> 4);
-					auto* bedChunk = commandContext.dim->getChunkSource().getOrLoadChunk(bedCp, ChunkSource::LoadMode::None);
+					auto* bedChunk = acquireHeldChunk(commandContext.dim->getChunkSource(), bedCp);
 					if (bedChunk && bedChunk->getState() == ChunkState::Loaded) {
 						bool bedFound = false;
 						BlockSource& reg = c.getRegion();
@@ -3652,7 +3821,7 @@ void renderThreadStuff()
 						gGuiContext.respawnRequested = false;
 					}
 				} else {
-					auto* spawnChunk = commandContext.dim->getChunkSource().getOrLoadChunk(ChunkPos(0, 0), ChunkSource::LoadMode::None);
+					auto* spawnChunk = acquireHeldChunk(commandContext.dim->getChunkSource(), ChunkPos(0, 0));
 					if (spawnChunk && spawnChunk->getState() == ChunkState::Loaded) {
 						c.spawnAtSurface();
 						hasInitialSpawn = true;
@@ -4906,18 +5075,94 @@ void renderThreadStuff()
 			int activeRenderDist = gGuiContext.loadingChunks ? std::min(renderDistance, 2) : renderDistance;
 			int lightDistance = activeRenderDist + 1;
 			int loadDistance = lightDistance + 2;
+			int renderUnloadDist = activeRenderDist + 1;
+			int chunkUnloadDist = loadDistance + 1;
+			size_t maxRenderPool = static_cast<size_t>((2 * renderUnloadDist + 1) * (2 * renderUnloadDist + 1) * 8);
 			ChunkSource& chunkSrc = commandContext.dim->getChunkSource();
 
+			// Recycle / unload RenderChunks outside the active render window (MCPE 0.8.1 LevelRenderer::resortChunks)
+			for (auto it = rc.begin(); it != rc.end(); ) {
+				const ChunkPos& pos = it->first;
+				if (std::abs(pos.x - camChunkPos.x) > renderUnloadDist ||
+				    std::abs(pos.z - camChunkPos.z) > renderUnloadDist) {
+					for (int i = 0; i < 8; ++i) {
+						releaseRenderChunk(it->second[i], maxRenderPool);
+					}
+					needsReRendering2.erase(pos);
+					it = rc.erase(it);
+				} else {
+					++it;
+				}
+			}
+			while (renderChunkPool.size() > maxRenderPool) {
+				delete renderChunkPool.back();
+				renderChunkPool.pop_back();
+			}
+
+			// Unload chunks beyond chunkUnloadDist cleanly (save entities + dirty chunk data -> unload -> releaseChunk -> trim pools)
+			bool anyChunkUnloaded = false;
+			chunkSrc.hintDiscardBatchBegin();
+			for (auto it = heldChunks.begin(); it != heldChunks.end(); ) {
+				const ChunkPos& cp = it->first;
+				if (std::abs(cp.x - camChunkPos.x) > chunkUnloadDist ||
+				    std::abs(cp.z - camChunkPos.z) > chunkUnloadDist) {
+					LevelChunk* lc = it->second;
+					if (lc) {
+						if (lc->isLoaded() || lc->getState() == ChunkState::Loaded) {
+							serializeChunkWorldItems(cp, worldItems, *lc, true);
+						}
+						chunkSrc.releaseChunk(*lc);
+					}
+					loadedChunkSet.erase(cp);
+					litChunks.erase(cp);
+					needsReRendering.erase(cp);
+					needsReRendering2.erase(cp);
+					auto rcIt = rc.find(cp);
+					if (rcIt != rc.end()) {
+						for (int i = 0; i < 8; ++i) {
+							releaseRenderChunk(rcIt->second[i], maxRenderPool);
+						}
+						rc.erase(rcIt);
+					}
+					it = heldChunks.erase(it);
+					anyChunkUnloaded = true;
+				} else {
+					++it;
+				}
+			}
+			chunkSrc.hintDiscardBatchEnd();
+			if (anyChunkUnloaded) {
+				LevelChunk::trimMemoryPool();
+				LevelChunk::SubChunk::trimMemoryPool();
+			}
+
+			for (auto it = needsReRendering.begin(); it != needsReRendering.end(); ) {
+				if (std::abs(it->x - camChunkPos.x) > chunkUnloadDist ||
+				    std::abs(it->z - camChunkPos.z) > chunkUnloadDist) {
+					it = needsReRendering.erase(it);
+				} else {
+					++it;
+				}
+			}
+			for (auto it = needsReRendering2.begin(); it != needsReRendering2.end(); ) {
+				if (std::abs(it->x - camChunkPos.x) > activeRenderDist ||
+				    std::abs(it->z - camChunkPos.z) > activeRenderDist) {
+					it = needsReRendering2.erase(it);
+				} else {
+					++it;
+				}
+			}
+
 			auto queueChunkAndNeighbors = [&](const ChunkPos& cp) {
-				if (std::abs(cp.x - camChunkPos.x) <= renderDistance &&
-				    std::abs(cp.z - camChunkPos.z) <= renderDistance) {
+				if (std::abs(cp.x - camChunkPos.x) <= activeRenderDist &&
+				    std::abs(cp.z - camChunkPos.z) <= activeRenderDist) {
 					needsReRendering2.insert(cp);
 				}
 				for (int i = 1; i < 9; i++) {
 					ChunkPos np = cp + offsets[i];
 					if (rc.find(np) != rc.end() ||
-					    (std::abs(np.x - camChunkPos.x) <= renderDistance &&
-					     std::abs(np.z - camChunkPos.z) <= renderDistance)) {
+					    (std::abs(np.x - camChunkPos.x) <= activeRenderDist &&
+					     std::abs(np.z - camChunkPos.z) <= activeRenderDist)) {
 						needsReRendering2.insert(np);
 					}
 				}
@@ -4948,21 +5193,29 @@ void renderThreadStuff()
 			auto loadOffsets = buildSpiralOffsets(loadDistance);
 			for (const auto& off : loadOffsets) {
 				ChunkPos cp(camChunkPos.x + off.dx, camChunkPos.z + off.dz);
-				auto* lc = chunkSrc.getExistingChunk(cp);
-				if (!lc || lc->getState() == ChunkState::Unloaded) {
+				LevelChunk* lc = nullptr;
+				auto heldIt = heldChunks.find(cp);
+				if (heldIt == heldChunks.end()) {
 					if (loadedThisFrame > 0 && chunkElapsedMs() >= frameBudgetMs) {
 						break;
 					}
-					lc = chunkSrc.getOrLoadChunk(cp, ChunkSource::LoadMode::Deferred);
+					lc = acquireHeldChunk(chunkSrc, cp);
 					++loadedThisFrame;
+				} else {
+					lc = heldIt->second;
 				}
 				bool inRenderRange = (std::abs(off.dx) <= activeRenderDist && std::abs(off.dz) <= activeRenderDist);
 
 				if (lc && lc->getState() == ChunkState::Loaded) {
 					if (loadedChunkSet.insert(cp).second) {
+						deserializeChunkWorldItems(*lc, worldItems);
 						queueChunkAndNeighbors(cp);
-					} else if (inRenderRange && (rc.find(cp) == rc.end() || litChunks.find(cp) == litChunks.end())) {
-						needsReRendering2.insert(cp);
+					} else if (inRenderRange) {
+						auto rcIt = rc.find(cp);
+						if (rcIt == rc.end() || litChunks.find(cp) == litChunks.end() ||
+						    (rcIt->second[0] && rcIt->second[0]->isDirty(Tick(0)))) {
+							needsReRendering2.insert(cp);
+						}
 					}
 				} else if (std::abs(off.dx) <= lightDistance + 1 && std::abs(off.dz) <= lightDistance + 1) {
 					needsReRendering.insert(cp);
@@ -4973,7 +5226,9 @@ void renderThreadStuff()
 				ChunkPos pos = *it;
 				auto* lc = chunkSrc.getExistingChunk(pos);
 				if (lc && lc->getState() == ChunkState::Loaded) {
-					loadedChunkSet.insert(pos);
+					if (loadedChunkSet.insert(pos).second) {
+						deserializeChunkWorldItems(*lc, worldItems);
+					}
 					queueChunkAndNeighbors(pos);
 					it = needsReRendering.erase(it);
 				} else {
@@ -5003,8 +5258,8 @@ void renderThreadStuff()
 				touchedChunks.insert(ChunkPos(pos.x, pos.z - 1));
 
 				for (const ChunkPos& np : touchedChunks) {
-					bool npInRender = (std::abs(np.x - camChunkPos.x) <= renderDistance &&
-					                   std::abs(np.z - camChunkPos.z) <= renderDistance);
+					bool npInRender = (std::abs(np.x - camChunkPos.x) <= activeRenderDist &&
+					                   std::abs(np.z - camChunkPos.z) <= activeRenderDist);
 					auto rcIt = rc.find(np);
 					if (rcIt != rc.end()) {
 						for (int s = 0; s < 8; ++s) {
@@ -5012,7 +5267,9 @@ void renderThreadStuff()
 								rcIt->second[s]->setDirty(Tick(0), true);
 							}
 						}
-						needsReRendering2.insert(np);
+						if (npInRender) {
+							needsReRendering2.insert(np);
+						}
 					} else if (npInRender) {
 						needsReRendering2.insert(np);
 					}
@@ -5059,14 +5316,15 @@ void renderThreadStuff()
 					break;
 				}
 				const ChunkPos& pos = cand.second;
+				auto& subChunks = rc[pos];
 				for (int i = 0; i < 8; i++) {
 					BlockPos cp(pos.x * 16, i * 16, pos.z * 16);
-					if (rc[pos][i] == nullptr)
-						rc[pos][i] = new RenderChunk(cp);
+					if (subChunks[i] == nullptr)
+						subChunks[i] = acquireRenderChunk(cp);
 					else
-						rc[pos][i]->setDirty(Tick(0), true);
+						subChunks[i]->setDirty(Tick(0), true);
 
-					RenderChunk* chunkPart = rc[pos][i];
+					RenderChunk* chunkPart = subChunks[i];
 					chunkPart->setDirty(Tick(0), true);
 					chunkPart->startRebuild(std::move(chunkBuilder));
 					chunkPart->rebuild(gGuiOptions.fancyGraphics, true);
@@ -5130,6 +5388,10 @@ void renderThreadStuff()
 
 			// Ensure every RenderChunk has a sorted index buffer before Pass 1 so Pass 1 never falls back to unindexed glDrawArrays
 			for (auto& lc : rc) {
+				if (std::abs(lc.first.x - camChunkPos.x) > activeRenderDist ||
+				    std::abs(lc.first.z - camChunkPos.z) > activeRenderDist) {
+					continue;
+				}
 				for (int i = 0; i < 8; i++) {
 					RenderChunk* chunkPart = lc.second[i];
 					if (!chunkPart) continue;
@@ -5158,6 +5420,10 @@ void renderThreadStuff()
 			std::vector<TransparentChunkRef> transparentChunks;
 
 			for (auto& lc : rc) {
+				if (std::abs(lc.first.x - camChunkPos.x) > activeRenderDist ||
+				    std::abs(lc.first.z - camChunkPos.z) > activeRenderDist) {
+					continue;
+				}
 				for (int i = 0; i < 8; i++) {
 					RenderChunk* chunkPart = lc.second[i];
 					if (!chunkPart) continue;
@@ -5383,6 +5649,7 @@ void renderThreadStuff()
 	gGuiOptions.save("options.txt");
 	saveActiveWorld();
 	closeActiveWorld();
+	WorkerPool::setMainThreadPumpActive(false);
 	SoundEngine::shutdown();
 	commandContext.running = false;
 	glfwTerminate();

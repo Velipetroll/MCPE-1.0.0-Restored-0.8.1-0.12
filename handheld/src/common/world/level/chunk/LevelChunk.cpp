@@ -1282,6 +1282,9 @@ void LevelChunk::serializeBiomeStates(IDataOutput& stream) const {
 }
 
 void LevelChunk::serializeEntities(IDataOutput& stream) const {
+	if (!mSerializedEntitiesBuffer.empty()) {
+		stream.writeBytes(mSerializedEntitiesBuffer.data(), mSerializedEntitiesBuffer.size());
+	}
 	//for (auto& e : getEntities()) {
 	//	CompoundTag tag;
 	//	if (e->save(tag)) {
@@ -1534,6 +1537,7 @@ bool LevelChunk::deserialize(KeyValueInput& keymap) {
 			mSerializedEntitiesBuffer.resize(stream.numBytesLeft());
 
 			stream.readBytes((void*)mSerializedEntitiesBuffer.data(), mSerializedEntitiesBuffer.size());
+			mHadSerializedEntities = !mSerializedEntitiesBuffer.empty();
 			break;
 		}
 		case Tag::Version: {
@@ -1654,6 +1658,16 @@ bool LevelChunk::needsSaving(int wait, int maxWait) const {
 
 bool LevelChunk::isDirty() const {
 	return needsSaving(0, 0);
+}
+
+bool LevelChunk::shouldSave(bool checkEntities) const {
+	if (mLoadState < ChunkState::Loaded || mReadOnly) {
+		return false;
+	}
+	if (isDirty()) {
+		return true;
+	}
+	return checkEntities && (!mEntities.empty() || !mSerializedEntitiesBuffer.empty());
 }
 
 Biome& LevelChunk::getBiome(const ChunkBlockPos& pos) const {
@@ -1781,8 +1795,33 @@ void LevelChunk::setSaved() {
 	}
 }
 
+void LevelChunk::markUnsaved() {
+	setUnsaved();
+}
+
+void LevelChunk::clearUpdateMap() {
+	setSaved();
+}
+
+void LevelChunk::setSerializedEntitiesBuffer(std::string data, bool markDirty) {
+	mSerializedEntitiesBuffer = std::move(data);
+	if (markDirty) {
+		_dirtyTicksCounter(LevelChunkDataField::Entity).touch();
+	}
+}
+
 void LevelChunk::onBlockEntityChanged() {
 	_dirtyTicksCounter(LevelChunkDataField::BlockEntity).touch();
+}
+
+void LevelChunk::load(BlockSource& region) {
+	onLoaded(region);
+}
+
+void LevelChunk::unload() {
+	mIsLoaded = false;
+	std::lock_guard<SpinLock> lock(mLightListLock);
+	mBlockLightSources.clear();
 }
 
 void LevelChunk::onLoaded(BlockSource &resource) {

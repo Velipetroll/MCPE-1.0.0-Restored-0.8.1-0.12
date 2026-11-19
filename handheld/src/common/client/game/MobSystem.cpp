@@ -9,6 +9,7 @@
 #include "world/level/BlockSource.h"
 #include "world/level/LightLayer.h"
 #include "world/level/block/Block.h"
+#include "world/level/chunk/LevelChunk.h"
 #include "world/level/material/Material.h"
 #include "world/phys/HitResult.h"
 #include "stb_image.h"
@@ -1230,6 +1231,13 @@ void MobManager::update(float dt,
 		if (distSq > 62.0f * 62.0f || m.pos.y < -32.0f) {
 			mobs[i] = mobs.back();
 			mobs.pop_back();
+			continue;
+		}
+
+		// Pause mob simulation if standing inside an unloaded/generating chunk so mobs don't fall through unloaded ground
+		LevelChunk* mobLc = region.getChunk(ChunkPos(Math::floor(m.pos.x) >> 4, Math::floor(m.pos.z) >> 4));
+		if (!mobLc || mobLc->getState() != ChunkState::Loaded) {
+			++i;
 			continue;
 		}
 

@@ -6,6 +6,9 @@
 
 #include "common_header.h"
 
+#include <condition_variable>
+#include <mutex>
+
 // #include "AppPlatformListener.h"
 #include "Core/Utility/MemoryTracker.h"
  #include "platform/threading/ThreadLocal.h"
@@ -75,4 +78,12 @@ private:
 	void _serializeChunk(const LevelChunk& lc, leveldb::WriteBatch& batch);
 
 	std::atomic<int> mPending;
+
+	std::mutex mPendingWriteMutex;
+	std::condition_variable mPendingWriteCv;
+	std::unordered_map<ChunkPos, int> mPendingWriteCounts;
+
+	void _markPendingWrite(const ChunkPos& pos);
+	void _unmarkPendingWrite(const ChunkPos& pos);
+	void _waitForPendingSave(const ChunkPos& pos, int radius = 0);
 };
