@@ -66,6 +66,20 @@ void RenderChunk::_initLayers(mce::MaterialPtr* materials, const std::string& po
  
  	_initLayers(sMaterialMap, Util::EMPTY_STRING);
  	_initLayers(sFogMaterialMap, "_fog");
+
+ 	auto disableDepthWrite = [](const std::string& name) {
+ 		if (auto* mat = mce::RenderMaterialGroup::switchable._getMaterialPtr(name)) {
+ 			mat->setDepthWrite(false);
+ 		}
+ 	};
+ 	disableDepthWrite("terrain_water");
+ 	disableDepthWrite("terrain_water_below");
+ 	disableDepthWrite("terrain_water_fog");
+ 	disableDepthWrite("terrain_water_below_fog");
+ 	disableDepthWrite("terrain_blend");
+ 	disableDepthWrite("terrain_blend_below");
+ 	disableDepthWrite("terrain_blend_fog");
+ 	disableDepthWrite("terrain_blend_below_fog");
  }
 
 RenderChunk::RenderChunk(const BlockPos& p) :

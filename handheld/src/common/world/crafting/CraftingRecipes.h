@@ -2,6 +2,7 @@
 
 #include "world/item/ItemCategory.h"
 #include "world/item/ItemInstance.h"
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
@@ -115,8 +116,38 @@ struct BlockRenderInfo {
 	std::string sideTex;
 };
 
+enum class ToolType {
+	None,
+	Pickaxe,
+	Axe,
+	Shovel,
+	Sword,
+	Shears
+};
+
+struct ToolInfo {
+	ToolType type = ToolType::None;
+	int harvestLevel = 0; // 0=wood/gold, 1=stone, 2=iron, 3=diamond
+	float speedMultiplier = 1.0f;
+	int maxDurability = 0;
+};
+
+struct FoodInfo {
+	bool isFood = false;
+	int nutrition = 0;
+	float saturation = 0.0f;
+	int healHealth = 0;
+	bool alwaysEdible = false;
+	bool returnsBowl = false;
+};
+
 std::string getItemDisplayName(const ItemInstance& item);
 std::string getItemDescription(const ItemInstance& item);
 std::string getItemTexturePath(const ItemInstance& item);
 BlockRenderInfo getBlockRenderInfo(const ItemInstance& item);
 int getArmorSlotForItem(const ItemInstance& item);
+int getArmorDefensePoints(const ItemInstance& item);
+int getTotalArmorDefense(const std::array<ItemInstance, 4>& armorSlots);
+int getItemMaxDurability(const ItemInstance& item);
+ToolInfo getToolInfo(const ItemInstance& item);
+FoodInfo getFoodInfo(const ItemInstance& item);

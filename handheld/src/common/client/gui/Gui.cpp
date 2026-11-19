@@ -5,6 +5,7 @@
 #include "PauseScreen.h"
 #include "Options.h"
 #include "Font.h"
+#include "world/crafting/CraftingRecipes.h"
 #include <glad/glad.h>
 
 void Gui::render(float partialTicks, int guiW, int guiH, Options* options, Font* font, GuiContext* ctx) {
@@ -13,6 +14,8 @@ void Gui::render(float partialTicks, int guiW, int guiH, Options* options, Font*
 		ctx->ensureInventoryInitialized();
 		selectedSlot = ctx->selectedHotbarSlot;
 		health = ctx->health;
+		hunger = ctx->hunger;
+		armor = getTotalArmorDefense(ctx->armorSlots);
 	}
 
 	glEnable(GL_BLEND);
@@ -22,6 +25,10 @@ void Gui::render(float partialTicks, int guiW, int guiH, Options* options, Font*
 	renderHotbar(guiW, guiH, font, ctx);
 	if (!ctx || !ctx->isCreative) {
 		renderHearts(guiW, guiH);
+		renderHunger(guiW, guiH);
+		if (armor > 0) {
+			renderArmor(guiW, guiH);
+		}
 	}
 	if (options && options->useTouchUI) {
 		renderTouchButtons(guiW, guiH, font);
@@ -143,6 +150,51 @@ void Gui::renderHearts(int guiW, int guiH) {
 		for (int i = 0; i < 10; ++i) {
 			int hx = startX + i * 9;
 			fill(hx, y, hx + 7, y + 7, (i * 2 < health) ? 0xFFFF2020 : 0xFF333333);
+		}
+	}
+}
+
+void Gui::renderHunger(int guiW, int guiH) {
+	int rightEdge = guiW / 2 + 91;
+	int y = guiH - 32;
+
+	if (bindTexture("textures/gui/icons.png")) {
+		for (int i = 0; i < 10; ++i) {
+			int fx = rightEdge - i * 8 - 9;
+			blit(fx, y, 16, 27, 9, 9, 256, 256); // empty drumstick
+			if (i * 2 + 1 < hunger) {
+				blit(fx, y, 52, 27, 9, 9, 256, 256); // full drumstick
+			} else if (i * 2 + 1 == hunger) {
+				blit(fx, y, 61, 27, 9, 9, 256, 256); // half drumstick
+			}
+		}
+	} else {
+		for (int i = 0; i < 10; ++i) {
+			int fx = rightEdge - i * 9 - 8;
+			fill(fx, y, fx + 7, y + 7, (i * 2 < hunger) ? 0xFFD27D2D : 0xFF333333);
+		}
+	}
+}
+
+void Gui::renderArmor(int guiW, int guiH) {
+	int startX = guiW / 2 - 91;
+	int y = guiH - 42;
+
+	if (bindTexture("textures/gui/icons.png")) {
+		for (int i = 0; i < 10; ++i) {
+			int ax = startX + i * 8;
+			if (i * 2 + 1 < armor) {
+				blit(ax, y, 34, 9, 9, 9, 256, 256); // full armor
+			} else if (i * 2 + 1 == armor) {
+				blit(ax, y, 25, 9, 9, 9, 256, 256); // half armor
+			} else {
+				blit(ax, y, 16, 9, 9, 9, 256, 256); // empty armor
+			}
+		}
+	} else {
+		for (int i = 0; i < 10; ++i) {
+			int ax = startX + i * 9;
+			fill(ax, y, ax + 7, y + 7, (i * 2 < armor) ? 0xFFC0C8D0 : 0xFF333333);
 		}
 	}
 }

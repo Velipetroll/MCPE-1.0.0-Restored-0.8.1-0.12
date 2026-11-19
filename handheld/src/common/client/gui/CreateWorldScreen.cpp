@@ -286,6 +286,8 @@ void CreateWorldScreen::buttonClicked(Button* button) {
 		meta.seed = seed;
 		meta.isCreative = mCreativeMode;
 		meta.health = 20;
+		meta.hunger = 20;
+		meta.saturation = 5.0f;
 		meta.hasPlayerPos = false;
 		meta.hasInventory = false;
 		saveWorldMetadata(worldDir, meta);
@@ -294,7 +296,7 @@ void CreateWorldScreen::buttonClicked(Button* button) {
 		context->activeWorldName = displayName;
 		context->activeWorldSeed = seed;
 		context->isCreative = mCreativeMode;
-		context->health = 20;
+		context->resetSurvivalStats();
 		context->respawnRequested = true;
 		context->worldOpenRequested = true;
 		context->setScreen(new ProgressScreen());

@@ -228,7 +228,7 @@ void GuiComponent::drawItemInSlot(Font* font, const ItemInstance& item, int x, i
 		glPopMatrix();
 
 		if (!wasDepthTest) glDisable(GL_DEPTH_TEST);
-		glDepthMask(GL_FALSE);
+		glDepthMask(GL_TRUE);
 		if (wasCullFace) glEnable(GL_CULL_FACE);
 		if (!wasBlend) glDisable(GL_BLEND);
 		glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
@@ -239,6 +239,18 @@ void GuiComponent::drawItemInSlot(Font* font, const ItemInstance& item, int x, i
 		} else {
 			fill(x + 1, y + 1, x + 15, y + 15, 0xFF7FA87F);
 			drawRect(x + 1, y + 1, x + 15, y + 15, 0xFF2B402B);
+		}
+	}
+
+	int maxDur = getItemMaxDurability(item);
+	int dmg = static_cast<int>(item.getAuxValue());
+	if (maxDur > 0 && dmg > 0) {
+		float frac = std::max(0.0f, std::min(1.0f, static_cast<float>(maxDur - dmg) / static_cast<float>(maxDur)));
+		int barW = static_cast<int>(std::round(frac * 13.0f));
+		uint32_t barColor = (frac > 0.5f) ? 0xFF33EE33 : ((frac > 0.2f) ? 0xFFEECC22 : 0xFFEE2222);
+		fill(x + 2, y + 13, x + 15, y + 15, 0xFF000000);
+		if (barW > 0) {
+			fill(x + 2, y + 13, x + 2 + barW, y + 14, barColor);
 		}
 	}
 

@@ -136,6 +136,8 @@ bool loadWorldMetadata(const std::string& worldDir, WorldMetadata& outMeta) {
 	}
 
 	outMeta.health = std::max(0, std::min(20, root.get("health", 20).asInt()));
+	outMeta.hunger = std::max(0, std::min(20, root.get("hunger", 20).asInt()));
+	outMeta.saturation = std::max(0.0f, std::min(20.0f, root.get("saturation", 5.0f).asFloat()));
 	outMeta.selectedHotbarSlot = std::max(0, std::min(8, root.get("selectedHotbarSlot", 0).asInt()));
 
 	const Json::Value& player = root["player"];
@@ -226,6 +228,8 @@ bool saveWorldMetadata(const std::string& worldDir, const WorldMetadata& meta) {
 	root["gameMode"] = meta.isCreative ? "creative" : "survival";
 	root["isCreative"] = meta.isCreative;
 	root["health"] = meta.health;
+	root["hunger"] = meta.hunger;
+	root["saturation"] = meta.saturation;
 	root["selectedHotbarSlot"] = meta.selectedHotbarSlot;
 
 	Json::Value player(Json::objectValue);
@@ -332,6 +336,11 @@ void applyMetadataToContext(const WorldMetadata& meta, GuiContext& ctx) {
 	ctx.activeWorldSeed = meta.seed;
 	ctx.isCreative = meta.isCreative;
 	ctx.health = (meta.health > 0) ? meta.health : 20;
+	ctx.hunger = (meta.health > 0) ? meta.hunger : 20;
+	ctx.saturation = (meta.health > 0) ? meta.saturation : 5.0f;
+	ctx.exhaustion = 0.0f;
+	ctx.healTimer = 0.0f;
+	ctx.starveTimer = 0.0f;
 	ctx.selectedHotbarSlot = std::max(0, std::min(8, meta.selectedHotbarSlot));
 
 	ctx.hasPlayerTransform = meta.hasPlayerPos;
@@ -362,6 +371,8 @@ void captureMetadataFromContext(const GuiContext& ctx, WorldMetadata& outMeta) {
 	outMeta.seed = ctx.activeWorldSeed;
 	outMeta.isCreative = ctx.isCreative;
 	outMeta.health = ctx.health;
+	outMeta.hunger = ctx.hunger;
+	outMeta.saturation = ctx.saturation;
 	outMeta.selectedHotbarSlot = ctx.selectedHotbarSlot;
 
 	outMeta.hasPlayerPos = ctx.hasPlayerTransform;

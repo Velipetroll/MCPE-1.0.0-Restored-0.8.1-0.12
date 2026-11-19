@@ -68,6 +68,11 @@ struct GuiContext {
 	bool inventoryInitialized = false;
 	bool isCreative = false;
 	int health = 20;
+	int hunger = 20;
+	float saturation = 5.0f;
+	float exhaustion = 0.0f;
+	float healTimer = 0.0f;
+	float starveTimer = 0.0f;
 	bool respawnRequested = false;
 	std::vector<ItemInstance> pendingWorldDrops;
 
@@ -91,6 +96,8 @@ struct GuiContext {
 	void ensureInventoryInitialized();
 	ItemInstance addItemToInventoryRemainder(const ItemInstance& item);
 	bool addItemToInventory(const ItemInstance& item);
+	void resetSurvivalStats();
+	int applyDamage(int rawDamage, bool ignoreArmor = false);
 
 	void setScreen(Screen* screen);
 	void startGame();

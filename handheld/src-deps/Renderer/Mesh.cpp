@@ -260,6 +260,10 @@ namespace mce
 
     void Mesh::loadIndexBuffer(uint32_t _indexSize, void const* data, unsigned int count)
     {
+        if (VBO == -1)
+        {
+            upload();
+        }
         indexSize = _indexSize;
         indexCount = count;
         glBindVertexArray(VAO);
@@ -280,6 +284,7 @@ namespace mce
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
             glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexCount * indexSize, data, GL_STATIC_DRAW);
         }
+        glBindVertexArray(0);
     }
 
 };

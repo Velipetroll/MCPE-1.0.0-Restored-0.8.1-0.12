@@ -168,7 +168,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 		} else if (key == GLFW_KEY_V) {
 			gGuiContext.isCreative = !gGuiContext.isCreative;
 			if (!gGuiContext.isCreative && gGuiContext.health <= 0) {
-				gGuiContext.health = 20;
+				gGuiContext.resetSurvivalStats();
 			}
 			gGuiContext.chatHistory.push_back(gGuiContext.isCreative ? "Mode: Creative (Double-Space to Fly)" : "Mode: Survival");
 			return;
@@ -346,7 +346,7 @@ public:
 			if (mFallDistance > 0.0f) {
 				int damage = static_cast<int>(std::ceil(mFallDistance - 3.0f));
 				if (damage > 0) {
-					gGuiContext.health = std::max(0, gGuiContext.health - damage);
+					gGuiContext.applyDamage(damage, false);
 					if (gGuiContext.health <= 0 && !gGuiContext.currentScreen) {
 						gGuiContext.setScreen(new DeathScreen());
 					}
@@ -427,7 +427,8 @@ public:
 		float cameraSpeed = mOnGround ? 2.7f : (mIsFlying ? 1.15f : 0.46f);
 		if (inWater) cameraSpeed = 0.85f;
 
-		if (glinput.KeyDown(GLFW_KEY_LEFT_CONTROL) || glinput.KeyDown(GLFW_KEY_RIGHT_CONTROL)) {
+		bool sprinting = glinput.KeyDown(GLFW_KEY_LEFT_CONTROL) || glinput.KeyDown(GLFW_KEY_RIGHT_CONTROL);
+		if (sprinting) {
 			cameraSpeed *= mIsFlying ? 1.8f : 1.4f;
 		}
 		if (!mIsFlying && isSneaking()) {
@@ -470,6 +471,9 @@ public:
 			if (mOnGround && glinput.KeyDown(GLFW_KEY_SPACE)) {
 				mPosDelta.y = 0.44f;
 				mOnGround = false;
+				if (!gGuiContext.isCreative) {
+					gGuiContext.exhaustion += sprinting ? 0.6f : 0.25f;
+				}
 			}
 		}
 
@@ -496,6 +500,10 @@ public:
 		float horizStep = std::sqrt(stepDx * stepDx + stepDz * stepDz);
 		if (mOnGround && !mIsFlying) {
 			mWalkDist += horizStep * 0.6f;
+		}
+		if (!gGuiContext.isCreative && !mIsFlying && horizStep > 0.0005f) {
+			float moveRate = sprinting ? 0.14f : (inWater ? 0.09f : 0.07f);
+			gGuiContext.exhaustion += horizStep * moveRate;
 		}
 		float targetBob = (mOnGround && !mIsFlying && horizStep > 0.001f) ? 1.0f : 0.0f;
 		mSmoothBob += (targetBob - mSmoothBob) * std::min(1.0f, dt * 10.0f);
@@ -1076,6 +1084,160 @@ void drawBlockSelectionOutline(const BlockPos& pos, const AABB& localShape,
 	glMatrixMode(GL_PROJECTION);
 	glPopMatrix();
 	glMatrixMode(GL_MODELVIEW);
+}
+
+void drawBlockBreakOverlay(const BlockPos& pos, const AABB& localShape, float progress,
+                           const glm::mat4& projection, const glm::mat4& view) {
+	if (progress <= 0.01f) return;
+	float p = std::max(0.0f, std::min(1.0f, progress));
+	const float eps = 0.004f;
+	float minX = pos.x + localShape.min.x - eps;
+	float minY = pos.y + localShape.min.y - eps;
+	float minZ = pos.z + localShape.min.z - eps;
+	float maxX = pos.x + localShape.max.x + eps;
+	float maxY = pos.y + localShape.max.y + eps;
+	float maxZ = pos.z + localShape.max.z + eps;
+
+	glUseProgram(0);
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glLoadMatrixf(glm::value_ptr(projection));
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+	glLoadMatrixf(glm::value_ptr(view));
+
+	glDisable(GL_TEXTURE_2D);
+	glDisable(GL_CULL_FACE);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDepthMask(GL_FALSE);
+	glColor4f(0.05f, 0.05f, 0.05f, 0.12f + p * 0.55f);
+
+	glBegin(GL_QUADS);
+	// Bottom (-Y) & Top (+Y)
+	glVertex3f(minX, minY, minZ); glVertex3f(maxX, minY, minZ); glVertex3f(maxX, minY, maxZ); glVertex3f(minX, minY, maxZ);
+	glVertex3f(minX, maxY, minZ); glVertex3f(minX, maxY, maxZ); glVertex3f(maxX, maxY, maxZ); glVertex3f(maxX, maxY, minZ);
+	// North (-Z) & South (+Z)
+	glVertex3f(minX, minY, minZ); glVertex3f(minX, maxY, minZ); glVertex3f(maxX, maxY, minZ); glVertex3f(maxX, minY, minZ);
+	glVertex3f(minX, minY, maxZ); glVertex3f(maxX, minY, maxZ); glVertex3f(maxX, maxY, maxZ); glVertex3f(minX, maxY, maxZ);
+	// West (-X) & East (+X)
+	glVertex3f(minX, minY, minZ); glVertex3f(minX, minY, maxZ); glVertex3f(minX, maxY, maxZ); glVertex3f(minX, maxY, minZ);
+	glVertex3f(maxX, minY, minZ); glVertex3f(maxX, maxY, minZ); glVertex3f(maxX, maxY, maxZ); glVertex3f(maxX, minY, maxZ);
+	glEnd();
+
+	glDepthMask(GL_TRUE);
+	glEnable(GL_CULL_FACE);
+	glDisable(GL_BLEND);
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	glMatrixMode(GL_MODELVIEW);
+	glPopMatrix();
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glMatrixMode(GL_MODELVIEW);
+}
+
+struct MiningTargetInfo {
+	bool canBreak = false;
+	bool canHarvest = false;
+	float breakTime = 0.25f;
+	bool effectiveTool = false;
+};
+
+MiningTargetInfo evaluateBlockMining(const Block* block, const ItemInstance& held) {
+	MiningTargetInfo out;
+	if (!block) return out;
+	float hardness = block->getDestroySpeed();
+	if (hardness < 0.0f) return out;
+	out.canBreak = true;
+
+	ToolInfo tool = getToolInfo(held);
+	const Material& mat = block->getMaterial();
+
+	auto isBlockOneOf = [&](std::initializer_list<const Block*> list) {
+		for (const Block* b : list) {
+			if (b && block->mID == b->mID) return true;
+		}
+		return false;
+	};
+
+	bool isPickaxeBlock = mat.isType(MaterialType::Stone) || mat.isType(MaterialType::Metal) ||
+		mat.isType(MaterialType::Ice) || mat.isType(MaterialType::PackedIce) || mat.isType(MaterialType::Piston) ||
+		isBlockOneOf({ Block::mFurnace, Block::mLitFurnace, Block::mStonecutterBench, Block::mCobblestoneWall,
+		               Block::mStoneSlab, Block::mObsidian, Block::mCoalOre, Block::mIronOre, Block::mGoldOre,
+		               Block::mDiamondOre, Block::mLapisOre, Block::mRedStoneOre, Block::mLitRedStoneOre,
+		               Block::mEmeraldOre, Block::mQuartzOre, Block::mRail, Block::mGoldenRail, Block::mDetectorRail });
+	bool isAxeBlock = mat.isType(MaterialType::Wood) ||
+		isBlockOneOf({ Block::mWorkBench, Block::mChest, Block::mTrappedChest, Block::mWoodPlanks, Block::mLog,
+		               Block::mLog2, Block::mWoodenSlab, Block::mBookshelf, Block::mFence, Block::mFenceGateOak,
+		               Block::mPumpkin, Block::mLitPumpkin, Block::mMelon });
+	bool isShovelBlock = mat.isType(MaterialType::Dirt) || mat.isType(MaterialType::Sand) ||
+		mat.isType(MaterialType::TopSnow) || mat.isType(MaterialType::Snow) || mat.isType(MaterialType::Clay) ||
+		isBlockOneOf({ Block::mGrass, Block::mDirt, Block::mSand, Block::mGravel, Block::mClay,
+		               Block::mSoulSand, Block::mFarmland, Block::mGrassPathBlock, Block::mMycelium });
+
+	if (tool.type == ToolType::Pickaxe && isPickaxeBlock) out.effectiveTool = true;
+	else if (tool.type == ToolType::Axe && isAxeBlock) out.effectiveTool = true;
+	else if (tool.type == ToolType::Shovel && isShovelBlock) out.effectiveTool = true;
+	else if (tool.type == ToolType::Sword && (block == Block::mWeb || mat.isType(MaterialType::Plant) || mat.isType(MaterialType::Vegetable) || mat.isType(MaterialType::Leaves))) out.effectiveTool = true;
+	else if (tool.type == ToolType::Shears && isBlockOneOf({ Block::mWool, Block::mLeaves, Block::mLeaves2, Block::mWeb, Block::mTallgrass })) out.effectiveTool = true;
+
+	int reqLevel = -1; // -1 = hand/any
+	if (block == Block::mObsidian) {
+		reqLevel = 3;
+	} else if (isBlockOneOf({ Block::mGoldOre, Block::mDiamondOre, Block::mEmeraldOre, Block::mRedStoneOre, Block::mLitRedStoneOre })) {
+		reqLevel = 2;
+	} else if (isBlockOneOf({ Block::mIronOre, Block::mLapisOre, Block::mLapisBlock })) {
+		reqLevel = 1;
+	} else if (!mat.isAlwaysDestroyable() || mat.isType(MaterialType::Stone) || mat.isType(MaterialType::Metal)) {
+		reqLevel = 0;
+	}
+
+	if (reqLevel < 0) {
+		out.canHarvest = true;
+	} else {
+		out.canHarvest = (tool.type == ToolType::Pickaxe && tool.harvestLevel >= reqLevel);
+	}
+
+	if (hardness <= 0.0001f) {
+		out.breakTime = 0.0f;
+	} else {
+		float speedMult = out.effectiveTool ? tool.speedMultiplier : 1.0f;
+		float divisor = out.canHarvest ? 1.5f : 5.0f;
+		out.breakTime = std::max(0.05f, hardness * divisor / speedMult);
+	}
+	return out;
+}
+
+bool areChunkNeighborsLoaded(ChunkSource& cs, const ChunkPos& cp) {
+	for (int dx = -1; dx <= 1; ++dx) {
+		for (int dz = -1; dz <= 1; ++dz) {
+			auto* lc = cs.getExistingChunk(ChunkPos(cp.x + dx, cp.z + dz));
+			if (!lc || lc->getState() != ChunkState::Loaded) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+void syncFurnaceBlockStates(BlockSource& region, GuiContext& ctx,
+                            std::unordered_map<ChunkPos, RenderChunk*[8]>& rc,
+                            std::unique_ptr<RenderChunkBuilder>& chunkBuilder,
+                            const Vec3& camPos) {
+	if (!Block::mFurnace || !Block::mLitFurnace) return;
+	for (const auto& kv : ctx.furnaces) {
+		BlockPos pos(kv.first.x, kv.first.y, kv.first.z);
+		if (!region.hasBlock(pos)) continue;
+		FullBlock fb = region.getBlockAndData(pos);
+		bool isBurning = kv.second.burnTime > 0.0f;
+		if (fb.id == Block::mFurnace->mID && isBurning) {
+			region.setBlockAndData(pos, FullBlock(Block::mLitFurnace->mID, fb.data), Block::UPDATE_ALL);
+			rebuildChunksForBlock(pos, rc, chunkBuilder, camPos);
+		} else if (fb.id == Block::mLitFurnace->mID && !isBurning) {
+			region.setBlockAndData(pos, FullBlock(Block::mFurnace->mID, fb.data), Block::UPDATE_ALL);
+			rebuildChunksForBlock(pos, rc, chunkBuilder, camPos);
+		}
+	}
 }
 
 bool openInteractiveBlockScreen(BlockSource& region, const BlockPos& pos, BlockID id, GuiContext& guiCtx) {
@@ -1966,6 +2128,11 @@ void renderThreadStuff()
 
 	std::vector<WorldItemEntity> worldItems;
 	bool hasInitialSpawn = false;
+	bool isMining = false;
+	BlockPos miningPos(0, -1, 0);
+	float miningProgress = 0.0f;
+	float hazardDamageCooldown = 0.0f;
+	float eatCooldown = 0.0f;
 	currentFrame = static_cast<float>(glfwGetTime());
 
 	auto saveActiveWorld = [&]() {
@@ -2007,6 +2174,10 @@ void renderThreadStuff()
 		needsReRendering2.clear();
 		loadedChunkSet.clear();
 		worldItems.clear();
+		isMining = false;
+		miningProgress = 0.0f;
+		hazardDamageCooldown = 0.0f;
+		eatCooldown = 0.0f;
 		chunkBuilder.reset();
 		c.setWorld(nullptr, nullptr);
 		commandContext.dim = nullptr;
@@ -2082,6 +2253,7 @@ void renderThreadStuff()
 			glfwSetWindowShouldClose(window, true);
 			continue;
 		}
+		glDepthMask(GL_TRUE);
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);//Set clear color to be brown with 0 alpha 
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);//Actually clears screen + depth buffer 
 
@@ -2119,6 +2291,73 @@ void renderThreadStuff()
 			if (gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
 				c.UpdateCam(deltaTime);
 
+				float survDt = std::min(std::max(deltaTime, 0.0001f), 0.1f);
+				if (eatCooldown > 0.0f) eatCooldown = std::max(0.0f, eatCooldown - survDt);
+				if (hazardDamageCooldown > 0.0f) hazardDamageCooldown = std::max(0.0f, hazardDamageCooldown - survDt);
+
+				if (!gGuiContext.isCreative && gGuiContext.health > 0) {
+					while (gGuiContext.exhaustion >= 4.0f) {
+						gGuiContext.exhaustion -= 4.0f;
+						if (gGuiContext.saturation > 0.0f) {
+							gGuiContext.saturation = std::max(0.0f, gGuiContext.saturation - 1.0f);
+						} else if (gGuiContext.hunger > 0) {
+							gGuiContext.hunger = std::max(0, gGuiContext.hunger - 1);
+						}
+					}
+					if (gGuiContext.hunger >= 18 && gGuiContext.health < 20) {
+						gGuiContext.healTimer += survDt;
+						if (gGuiContext.healTimer >= 3.5f) {
+							gGuiContext.healTimer = 0.0f;
+							gGuiContext.health = std::min(20, gGuiContext.health + 1);
+							gGuiContext.exhaustion += 3.0f;
+						}
+					} else {
+						gGuiContext.healTimer = 0.0f;
+					}
+					if (gGuiContext.hunger <= 0 && gGuiContext.health > 1) {
+						gGuiContext.starveTimer += survDt;
+						if (gGuiContext.starveTimer >= 4.0f) {
+							gGuiContext.starveTimer = 0.0f;
+							gGuiContext.applyDamage(1, true);
+						}
+					} else {
+						gGuiContext.starveTimer = 0.0f;
+					}
+
+					if (hazardDamageCooldown <= 0.0f) {
+						BlockSource& region = c.getRegion();
+						int fx = Math::floor(c.mPos.x);
+						int fy0 = Math::floor(c.mBB.min.y + 0.1f);
+						int fy1 = Math::floor(c.mBB.min.y + 1.0f);
+						int fz = Math::floor(c.mPos.z);
+						int hazDmg = 0;
+						for (int fy = fy0; fy <= fy1; ++fy) {
+							for (int ox = -1; ox <= 1; ++ox) {
+								for (int oz = -1; oz <= 1; ++oz) {
+									BlockPos bp(fx + ox, fy, fz + oz);
+									BlockID bid = region.getBlockID(bp);
+									const Block* b = bid > 0 ? Block::mBlocks[bid] : nullptr;
+									if (!b) continue;
+									AABB blkBB(static_cast<float>(bp.x), static_cast<float>(bp.y), static_cast<float>(bp.z),
+									           static_cast<float>(bp.x + 1), static_cast<float>(bp.y + 1), static_cast<float>(bp.z + 1));
+									if (b->getMaterial().isType(MaterialType::Lava) && blkBB.intersects(c.mBB)) {
+										hazDmg = std::max(hazDmg, 4);
+									} else if ((b == Block::mFire || b == Block::mCactus) && blkBB.expanded(Vec3(0.05f, 0.05f, 0.05f)).intersects(c.mBB)) {
+										hazDmg = std::max(hazDmg, 1);
+									}
+								}
+							}
+						}
+						if (hazDmg > 0) {
+							gGuiContext.applyDamage(hazDmg, false);
+							hazardDamageCooldown = 0.5f;
+							if (gGuiContext.health <= 0 && !gGuiContext.currentScreen) {
+								gGuiContext.setScreen(new DeathScreen());
+							}
+						}
+					}
+				}
+
 				if (glinput.NewKeyDown(GLFW_KEY_Q)) {
 					gGuiContext.ensureInventoryInitialized();
 					int slotIdx = std::max(0, std::min(8, gGuiContext.selectedHotbarSlot));
@@ -2155,88 +2394,177 @@ void renderThreadStuff()
 					c.triggerSwing();
 				}
 
-				if (hasTargetHit) {
-					BlockPos hitPos = targetHit.getBlock();
-					if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
-						FullBlock fb = region.getBlockAndData(hitPos);
-						const Block* block = fb.id > 0 ? Block::mBlocks[fb.id] : nullptr;
-						if (block && (gGuiContext.isCreative || block->getDestroySpeed() >= 0.0f)) {
-							static Random dropRng;
-							int dropId = block->getResource(dropRng, fb.data, 0);
-							int dropCount = block->getResourceCount(dropRng, fb.data, 0);
-							DataID dropData = (dropId == fb.id && block != Block::mFurnace && block != Block::mLitFurnace &&
-							                   block != Block::mChest && block != Block::mTrappedChest) ? fb.data : 0;
-							if (region.removeBlock(hitPos)) {
-								BlockCoordKey bkey{ hitPos.x, hitPos.y, hitPos.z };
-								auto dropContainerItem = [&](const ItemInstance& ci) {
-									if (ci.isNull() || ci.getStackSize() <= 0) return;
-									Vec3 dpos(hitPos.x + 0.5f, hitPos.y + 0.35f, hitPos.z + 0.5f);
-									Vec3 dvel((dropRng.nextFloat() - 0.5f) * 2.4f, 3.0f, (dropRng.nextFloat() - 0.5f) * 2.4f);
-									spawnWorldItem(worldItems, ci, dpos, dvel, 0.35f);
-								};
-								auto chestIt = gGuiContext.chests.find(bkey);
-								if (chestIt != gGuiContext.chests.end()) {
-									for (const auto& s : chestIt->second.slots) dropContainerItem(s);
-									gGuiContext.chests.erase(chestIt);
-								}
-								auto furnIt = gGuiContext.furnaces.find(bkey);
-								if (furnIt != gGuiContext.furnaces.end()) {
-									dropContainerItem(furnIt->second.input);
-									dropContainerItem(furnIt->second.fuel);
-									dropContainerItem(furnIt->second.output);
-									gGuiContext.furnaces.erase(furnIt);
-								}
-								if (!gGuiContext.isCreative && dropId > 0 && dropCount > 0) {
-									ItemInstance dropItem(dropId, dropCount, dropData);
-									if (!dropItem.isNull()) {
-										Vec3 dropPos(hitPos.x + 0.5f, hitPos.y + 0.35f, hitPos.z + 0.5f);
-										Vec3 dropVel((dropRng.nextFloat() - 0.5f) * 2.4f,
-										             3.2f + dropRng.nextFloat() * 1.0f,
-										             (dropRng.nextFloat() - 0.5f) * 2.4f);
-										spawnWorldItem(worldItems, dropItem, dropPos, dropVel, 0.35f);
-									}
-								}
-								rebuildChunksForBlock(hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
-								targetHit = region.clip(rayStart, rayEnd, false, false, 200, false);
-								hasTargetHit = targetHit.isHit() && targetHit.isTile();
+				gGuiContext.ensureInventoryInitialized();
+				int heldSlotIdx = std::max(0, std::min(8, gGuiContext.selectedHotbarSlot));
+				ItemInstance& held = gGuiContext.inventorySlots[heldSlotIdx];
+
+				auto performBreakBlock = [&](const BlockPos& hitPos, const FullBlock& fb, const Block* block, bool canHarvest) {
+					static Random dropRng;
+					int dropId = block->getResource(dropRng, fb.data, 0);
+					int dropCount = block->getResourceCount(dropRng, fb.data, 0);
+					DataID dropData = (dropId == fb.id && block != Block::mFurnace && block != Block::mLitFurnace &&
+					                   block != Block::mChest && block != Block::mTrappedChest) ? fb.data : 0;
+					if (region.removeBlock(hitPos)) {
+						BlockCoordKey bkey{ hitPos.x, hitPos.y, hitPos.z };
+						auto dropContainerItem = [&](const ItemInstance& ci) {
+							if (ci.isNull() || ci.getStackSize() <= 0) return;
+							Vec3 dpos(hitPos.x + 0.5f, hitPos.y + 0.35f, hitPos.z + 0.5f);
+							Vec3 dvel((dropRng.nextFloat() - 0.5f) * 2.4f, 3.0f, (dropRng.nextFloat() - 0.5f) * 2.4f);
+							spawnWorldItem(worldItems, ci, dpos, dvel, 0.35f);
+						};
+						auto chestIt = gGuiContext.chests.find(bkey);
+						if (chestIt != gGuiContext.chests.end()) {
+							for (const auto& s : chestIt->second.slots) dropContainerItem(s);
+							gGuiContext.chests.erase(chestIt);
+						}
+						auto furnIt = gGuiContext.furnaces.find(bkey);
+						if (furnIt != gGuiContext.furnaces.end()) {
+							dropContainerItem(furnIt->second.input);
+							dropContainerItem(furnIt->second.fuel);
+							dropContainerItem(furnIt->second.output);
+							gGuiContext.furnaces.erase(furnIt);
+						}
+						if (!gGuiContext.isCreative && canHarvest && dropId > 0 && dropCount > 0) {
+							ItemInstance dropItem(dropId, dropCount, dropData);
+							if (!dropItem.isNull()) {
+								Vec3 dropPos(hitPos.x + 0.5f, hitPos.y + 0.35f, hitPos.z + 0.5f);
+								Vec3 dropVel((dropRng.nextFloat() - 0.5f) * 2.4f,
+								             3.2f + dropRng.nextFloat() * 1.0f,
+								             (dropRng.nextFloat() - 0.5f) * 2.4f);
+								spawnWorldItem(worldItems, dropItem, dropPos, dropVel, 0.35f);
 							}
 						}
-					} else if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_RIGHT)) {
-						FullBlock fb = region.getBlockAndData(hitPos);
-						if (!c.isSneaking() && openInteractiveBlockScreen(region, hitPos, fb.id, gGuiContext)) {
-							c.triggerSwing();
+						if (!gGuiContext.isCreative && block->getDestroySpeed() > 0.0f) {
+							gGuiContext.exhaustion += 0.025f;
+							int maxDur = getItemMaxDurability(held);
+							if (maxDur > 0 && !held.isNull()) {
+								ToolInfo ti = getToolInfo(held);
+								int wear = (ti.type == ToolType::Sword) ? 2 : 1;
+								int nextAux = static_cast<int>(held.getAuxValue()) + wear;
+								if (nextAux > maxDur) {
+									held.setNull();
+								} else {
+									held.setAuxValue(static_cast<short>(nextAux));
+								}
+							}
+						}
+						rebuildChunksForBlock(hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+						targetHit = region.clip(rayStart, rayEnd, false, false, 200, false);
+						hasTargetHit = targetHit.isHit() && targetHit.isTile();
+					}
+				};
+
+				if (hasTargetHit && glinput.MouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
+					BlockPos hitPos = targetHit.getBlock();
+					FullBlock fb = region.getBlockAndData(hitPos);
+					const Block* block = fb.id > 0 ? Block::mBlocks[fb.id] : nullptr;
+					if (gGuiContext.isCreative) {
+						if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT) && block) {
+							performBreakBlock(hitPos, fb, block, false);
+						}
+						isMining = false;
+						miningProgress = 0.0f;
+					} else {
+						MiningTargetInfo mineInfo = evaluateBlockMining(block, held);
+						if (block && mineInfo.canBreak) {
+							if (!isMining || !(miningPos == hitPos)) {
+								isMining = true;
+								miningPos = hitPos;
+								miningProgress = 0.0f;
+							}
+							if (c.mSwingProgress <= 0.0f) {
+								c.triggerSwing();
+							}
+							if (mineInfo.breakTime <= 0.0f) {
+								if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
+									performBreakBlock(hitPos, fb, block, mineInfo.canHarvest);
+									miningProgress = 0.0f;
+								}
+							} else {
+								miningProgress += survDt / mineInfo.breakTime;
+								if (miningProgress >= 1.0f) {
+									performBreakBlock(hitPos, fb, block, mineInfo.canHarvest);
+									isMining = false;
+									miningProgress = 0.0f;
+								}
+							}
 						} else {
-							gGuiContext.ensureInventoryInitialized();
-							int slotIdx = std::max(0, std::min(8, gGuiContext.selectedHotbarSlot));
-							ItemInstance& held = gGuiContext.inventorySlots[slotIdx];
-							FacingID face = targetHit.getFacing();
-							if (!held.isNull() && held.getStackSize() > 0 && held.isBlock() && face < Facing::MAX) {
-								const Block* placeBlock = held.getBlock();
-								BlockPos placePos = hitPos + Facing::DIRECTION[face];
-								if (placeBlock && placePos.y >= 0 && placePos.y < 128) {
-									BlockID existingId = region.getBlockID(placePos);
-									const Block* existingBlock = Block::mBlocks[existingId];
-									bool canReplace = (existingId == 0) || (existingBlock && existingBlock->getMaterial().isReplaceable());
-									if (canReplace) {
-										AABB tmpBB;
-										bool overlapsPlayer = false;
-										if (placeBlock->isSolid() || !placeBlock->getAABB(region, placePos, tmpBB).isEmpty()) {
-											AABB placeBB(static_cast<float>(placePos.x), static_cast<float>(placePos.y), static_cast<float>(placePos.z),
-											             static_cast<float>(placePos.x + 1), static_cast<float>(placePos.y + 1), static_cast<float>(placePos.z + 1));
-											overlapsPlayer = placeBB.intersects(c.mBB);
-										}
-										if (!overlapsPlayer) {
-											DataID placeData = static_cast<DataID>(held.getAuxValue() & 0xF);
-											if (region.setBlockAndData(placePos, FullBlock(placeBlock->mID, placeData), Block::UPDATE_ALL)) {
-												c.triggerSwing();
-												if (!gGuiContext.isCreative) {
-													held.remove(1);
-													if (held.getStackSize() <= 0) {
-														held.setNull();
-													}
+							isMining = false;
+							miningProgress = 0.0f;
+						}
+					}
+				} else {
+					isMining = false;
+					miningProgress = 0.0f;
+				}
+
+				if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_RIGHT)) {
+					bool handledRightClick = false;
+					if (hasTargetHit && !c.isSneaking()) {
+						BlockPos hitPos = targetHit.getBlock();
+						FullBlock fb = region.getBlockAndData(hitPos);
+						if (openInteractiveBlockScreen(region, hitPos, fb.id, gGuiContext)) {
+							c.triggerSwing();
+							handledRightClick = true;
+						}
+					}
+
+					if (!handledRightClick && !held.isNull() && held.getStackSize() > 0) {
+						FoodInfo food = getFoodInfo(held);
+						if (food.isFood && !gGuiContext.isCreative && eatCooldown <= 0.0f &&
+						    (gGuiContext.hunger < 20 || food.alwaysEdible)) {
+							c.triggerSwing();
+							gGuiContext.hunger = std::min(20, gGuiContext.hunger + food.nutrition);
+							gGuiContext.saturation = std::min(static_cast<float>(gGuiContext.hunger),
+							                                  gGuiContext.saturation + food.saturation);
+							if (food.healHealth > 0) {
+								gGuiContext.health = std::min(20, gGuiContext.health + food.healHealth);
+							}
+							held.remove(1);
+							if (held.getStackSize() <= 0) {
+								held.setNull();
+							}
+							if (food.returnsBowl && Item::mBowl) {
+								ItemInstance bowl(Item::mBowl, 1, 0);
+								ItemInstance rem = gGuiContext.addItemToInventoryRemainder(bowl);
+								if (!rem.isNull() && rem.getStackSize() > 0) {
+									gGuiContext.pendingWorldDrops.push_back(rem);
+								}
+							}
+							eatCooldown = 0.25f;
+							handledRightClick = true;
+						}
+					}
+
+					if (!handledRightClick && hasTargetHit && !held.isNull() && held.getStackSize() > 0 && held.isBlock()) {
+						BlockPos hitPos = targetHit.getBlock();
+						FacingID face = targetHit.getFacing();
+						if (face < Facing::MAX) {
+							const Block* placeBlock = held.getBlock();
+							BlockPos placePos = hitPos + Facing::DIRECTION[face];
+							if (placeBlock && placePos.y >= 0 && placePos.y < 128) {
+								BlockID existingId = region.getBlockID(placePos);
+								const Block* existingBlock = Block::mBlocks[existingId];
+								bool canReplace = (existingId == 0) || (existingBlock && existingBlock->getMaterial().isReplaceable());
+								if (canReplace) {
+									AABB tmpBB;
+									bool overlapsPlayer = false;
+									if (placeBlock->isSolid() || !placeBlock->getAABB(region, placePos, tmpBB).isEmpty()) {
+										AABB placeBB(static_cast<float>(placePos.x), static_cast<float>(placePos.y), static_cast<float>(placePos.z),
+										             static_cast<float>(placePos.x + 1), static_cast<float>(placePos.y + 1), static_cast<float>(placePos.z + 1));
+										overlapsPlayer = placeBB.intersects(c.mBB);
+									}
+									if (!overlapsPlayer) {
+										DataID placeData = static_cast<DataID>(held.getAuxValue() & 0xF);
+										if (region.setBlockAndData(placePos, FullBlock(placeBlock->mID, placeData), Block::UPDATE_ALL)) {
+											c.triggerSwing();
+											if (!gGuiContext.isCreative) {
+												held.remove(1);
+												if (held.getStackSize() <= 0) {
+													held.setNull();
 												}
-												rebuildChunksForBlock(placePos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
 											}
+											rebuildChunksForBlock(placePos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
 										}
 									}
 								}
@@ -2244,11 +2572,15 @@ void renderThreadStuff()
 						}
 					}
 				}
+			} else {
+				isMining = false;
+				miningProgress = 0.0f;
 			}
 
 			if (!gGuiContext.loadingChunks) {
 				float clampedDt = std::min(std::max(deltaTime, 0.0001f), 0.1f);
 				tickFurnaces(gGuiContext, clampedDt);
+				syncFurnaceBlockStates(c.getRegion(), gGuiContext, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
 				bool allowPickup = (gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen);
 				updateWorldItemEntities(worldItems, deltaTime, c.getRegion(), c.mBB, gGuiContext, allowPickup);
 			}
@@ -2300,25 +2632,36 @@ void renderThreadStuff()
 
 			ChunkPos camChunkPos(Math::floor(c.mPos.x / 16.0f), Math::floor(c.mPos.z / 16.0f));
 			int renderDistance = 3;
-			int loadDistance = renderDistance + 1;
+			int loadDistance = renderDistance + 2;
+			ChunkSource& chunkSrc = commandContext.dim->getChunkSource();
+
+			auto queueChunkAndNeighbors = [&](const ChunkPos& cp) {
+				if (std::abs(cp.x - camChunkPos.x) <= renderDistance &&
+				    std::abs(cp.z - camChunkPos.z) <= renderDistance) {
+					needsReRendering2.insert(cp);
+				}
+				for (int i = 1; i < 9; i++) {
+					ChunkPos np = cp + offsets[i];
+					if (rc.find(np) != rc.end() ||
+					    (std::abs(np.x - camChunkPos.x) <= renderDistance &&
+					     std::abs(np.z - camChunkPos.z) <= renderDistance)) {
+						needsReRendering2.insert(np);
+					}
+				}
+			};
 
 			for (int x = -loadDistance; x <= loadDistance; x++) {
 				for (int z = -loadDistance; z <= loadDistance; z++) {
 					ChunkPos cp(camChunkPos.x + x, camChunkPos.z + z);
-					auto* lc = commandContext.dim->getChunkSource().getOrLoadChunk(cp, ChunkSource::LoadMode::Deferred);
+					auto* lc = chunkSrc.getExistingChunk(cp);
+					if (!lc) {
+						lc = chunkSrc.getOrLoadChunk(cp, ChunkSource::LoadMode::Deferred);
+					}
 					bool inRenderRange = (std::abs(x) <= renderDistance && std::abs(z) <= renderDistance);
 
 					if (lc && lc->getState() == ChunkState::Loaded) {
 						if (loadedChunkSet.insert(cp).second) {
-							if (inRenderRange) {
-								needsReRendering2.insert(cp);
-							}
-							for (int i = 1; i < 9; i++) {
-								ChunkPos np = cp + offsets[i];
-								if (rc.find(np) != rc.end()) {
-									needsReRendering2.insert(np);
-								}
-							}
+							queueChunkAndNeighbors(cp);
 						} else if (inRenderRange && rc.find(cp) == rc.end()) {
 							needsReRendering2.insert(cp);
 						}
@@ -2330,23 +2673,10 @@ void renderThreadStuff()
 
 			for (auto it = needsReRendering.begin(); it != needsReRendering.end(); ) {
 				ChunkPos pos = *it;
-				auto* lc = commandContext.dim->getChunkSource().getOrLoadChunk(pos, ChunkSource::LoadMode::None);
+				auto* lc = chunkSrc.getExistingChunk(pos);
 				if (lc && lc->getState() == ChunkState::Loaded) {
 					loadedChunkSet.insert(pos);
-					if (std::abs(pos.x - camChunkPos.x) <= renderDistance &&
-					    std::abs(pos.z - camChunkPos.z) <= renderDistance) {
-						needsReRendering2.insert(pos);
-					}
-					for (int i = 1; i < 9; i++) {
-						ChunkPos np = pos + offsets[i];
-						auto* nlc = commandContext.dim->getChunkSource().getOrLoadChunk(np, ChunkSource::LoadMode::None);
-						if (nlc && nlc->getState() == ChunkState::Loaded &&
-						    (rc.find(np) != rc.end() ||
-						     (std::abs(np.x - camChunkPos.x) <= renderDistance &&
-						      std::abs(np.z - camChunkPos.z) <= renderDistance))) {
-							needsReRendering2.insert(np);
-						}
-					}
+					queueChunkAndNeighbors(pos);
 					it = needsReRendering.erase(it);
 				} else {
 					++it;
@@ -2355,9 +2685,9 @@ void renderThreadStuff()
 
 			for (auto it = needsReRendering2.begin(); it != needsReRendering2.end(); ) {
 				ChunkPos pos = *it;
-				auto* lc = commandContext.dim->getChunkSource().getOrLoadChunk(pos, ChunkSource::LoadMode::None);
-				if (!lc || lc->getState() != ChunkState::Loaded) {
-					++it;
+				if (!areChunkNeighborsLoaded(chunkSrc, pos)) {
+					needsReRendering.insert(pos);
+					it = needsReRendering2.erase(it);
 					continue;
 				}
 				for (int i = 0; i < 8; i++) {
@@ -2400,6 +2730,20 @@ void renderThreadStuff()
 					(*sl)->myShader->setVector4("CHUNK_ORIGIN_AND_SCALE", chunkOrigin);
 				}
 			};
+
+			// Ensure every RenderChunk has a sorted index buffer before Pass 1 so Pass 1 never falls back to unindexed glDrawArrays
+			for (auto& lc : rc) {
+				for (int i = 0; i < 8; i++) {
+					RenderChunk* chunkPart = lc.second[i];
+					if (!chunkPart) continue;
+					chunkPart->updateFaceSortState(Vec3(renderCamPos.x, renderCamPos.y, renderCamPos.z));
+					if (chunkPart->isFaceSortDirty()) {
+						chunkPart->startFaceSort(make_unique<RenderChunkSorter>());
+						chunkPart->faceSort();
+						chunkPart->endFaceSort();
+					}
+				}
+			}
 
 			// Pass 1: Opaque, double-sided, and alpha-tested layers
 			static const TerrainLayer opaqueLayers[] = {
@@ -2461,12 +2805,6 @@ void renderThreadStuff()
 
 			for (const auto& entry : transparentChunks) {
 				RenderChunk* chunkPart = entry.chunk;
-				chunkPart->updateFaceSortState(Vec3(renderCamPos.x, renderCamPos.y, renderCamPos.z));
-				if (chunkPart->isFaceSortDirty()) {
-					chunkPart->startFaceSort(make_unique<RenderChunkSorter>());
-					chunkPart->faceSort();
-					chunkPart->endFaceSort();
-				}
 				setChunkOrigin(chunkPart->getPosition());
 
 				if (chunkPart->hasLayer(TerrainLayer::Blend)) {
@@ -2484,6 +2822,8 @@ void renderThreadStuff()
 					chunkPart->render(renderParams, currentFrame);
 				}
 			}
+			glDepthMask(GL_TRUE);
+			glDisable(GL_BLEND);
 
 			glActiveTexture(GL_TEXTURE0);
 
@@ -2504,6 +2844,9 @@ void renderThreadStuff()
 						localShape.set(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
 					}
 					drawBlockSelectionOutline(hitPos, localShape, projection, view);
+					if (isMining && miningPos == hitPos && miningProgress > 0.01f) {
+						drawBlockBreakOverlay(hitPos, localShape, miningProgress, projection, view);
+					}
 				}
 			}
 

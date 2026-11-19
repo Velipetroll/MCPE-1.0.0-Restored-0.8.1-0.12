@@ -24,6 +24,7 @@ namespace mce
 		std::string parentName;
 
 		void activate() const;
+		void setDepthWrite(bool enabled) { depthWrite = enabled; }
 
 		Shader* myShader;
 

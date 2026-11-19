@@ -6,6 +6,7 @@
 #include "world/item/Item.h"
 #include "world/level/block/Block.h"
 #include <algorithm>
+#include <cmath>
 
 void GuiContext::ensureInventoryInitialized() {
 	if (inventoryInitialized) return;
@@ -62,6 +63,46 @@ bool GuiContext::addItemToInventory(const ItemInstance& item) {
 	return rem.isNull() || rem.getStackSize() <= 0;
 }
 
+void GuiContext::resetSurvivalStats() {
+	health = 20;
+	hunger = 20;
+	saturation = 5.0f;
+	exhaustion = 0.0f;
+	healTimer = 0.0f;
+	starveTimer = 0.0f;
+}
+
+int GuiContext::applyDamage(int rawDamage, bool ignoreArmor) {
+	if (rawDamage <= 0 || isCreative) return 0;
+
+	int finalDamage = rawDamage;
+	if (!ignoreArmor) {
+		int defense = getTotalArmorDefense(armorSlots);
+		if (defense > 0) {
+			float mult = 1.0f - static_cast<float>(defense) * 0.04f;
+			finalDamage = std::max(1, static_cast<int>(std::round(static_cast<float>(rawDamage) * mult)));
+
+			int armorWear = std::max(1, rawDamage / 4);
+			for (auto& piece : armorSlots) {
+				if (piece.isNull()) continue;
+				int maxDur = getItemMaxDurability(piece);
+				if (maxDur > 0) {
+					int nextAux = static_cast<int>(piece.getAuxValue()) + armorWear;
+					if (nextAux > maxDur) {
+						piece.setNull();
+					} else {
+						piece.setAuxValue(static_cast<short>(nextAux));
+					}
+				}
+			}
+		}
+	}
+
+	health = std::max(0, health - finalDamage);
+	exhaustion = std::min(40.0f, exhaustion + 0.1f);
+	return finalDamage;
+}
+
 void GuiContext::setScreen(Screen* screen) {
 	if (currentScreen == screen) return;
 	delete currentScreen;
@@ -73,7 +114,7 @@ void GuiContext::setScreen(Screen* screen) {
 
 void GuiContext::startGame() {
 	if (state == GameState::StartMenu) {
-		health = 20;
+		resetSurvivalStats();
 	}
 	state = GameState::InGame;
 	setScreen(nullptr);

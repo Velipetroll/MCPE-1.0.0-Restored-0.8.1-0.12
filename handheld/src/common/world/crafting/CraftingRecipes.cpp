@@ -233,36 +233,77 @@ namespace {
 		ensureItem(Item::mIronIngot, "iron_ingot", 9);
 		ensureItem(Item::mGoldIngot, "gold_ingot", 10);
 		ensureItem(Item::mStick, "stick", 24, 64, true, false);
+		ensureItem(Item::mBowl, "bowl", 25);
+		ensureItem(Item::mFeather, "feather", 32);
+		ensureItem(Item::mSulphur, "gunpowder", 33);
 		ensureItem(Item::mWheat, "wheat", 40);
+		ensureItem(Item::mFlint, "flint", 62);
+		ensureItem(Item::mRedStone, "redstone", 75);
+		ensureItem(Item::mLeather, "leather", 78);
 		ensureItem(Item::mBrick, "brick", 80);
 		ensureItem(Item::mClay, "clay_ball", 81);
+		ensureItem(Item::mPaper, "paper", 83);
+		ensureItem(Item::mBook, "book", 84);
+		ensureItem(Item::mYellowDust, "glowstone_dust", 92);
+		ensureItem(Item::mDye_powder, "dye", 95);
+		ensureItem(Item::mBone, "bone", 96, 64, true, false);
+		ensureItem(Item::mSugar, "sugar", 97);
+		ensureItem(Item::mShears, "shears", 103, 1)->setMaxDamage(238);
+		ensureItem(Item::mEmerald, "emerald", 132);
+		ensureItem(Item::mNetherbrick, "netherbrick", 149);
+		ensureItem(Item::mNetherQuartz, "quartz", 150);
 
-		ensureItem(Item::mShovel_iron, "iron_shovel", 0, 1, true, false);
-		ensureItem(Item::mPickAxe_iron, "iron_pickaxe", 1, 1, true, false);
-		ensureItem(Item::mHatchet_iron, "iron_axe", 2, 1, true, false);
-		ensureItem(Item::mSword_iron, "iron_sword", 11, 1, true, false);
+		ensureItem(Item::mShovel_iron, "iron_shovel", 0, 1, true, false)->setMaxDamage(250);
+		ensureItem(Item::mPickAxe_iron, "iron_pickaxe", 1, 1, true, false)->setMaxDamage(250);
+		ensureItem(Item::mHatchet_iron, "iron_axe", 2, 1, true, false)->setMaxDamage(250);
+		ensureItem(Item::mSword_iron, "iron_sword", 11, 1, true, false)->setMaxDamage(250);
 
-		ensureItem(Item::mSword_wood, "wooden_sword", 12, 1, true, false);
-		ensureItem(Item::mShovel_wood, "wooden_shovel", 13, 1, true, false);
-		ensureItem(Item::mPickAxe_wood, "wooden_pickaxe", 14, 1, true, false);
-		ensureItem(Item::mHatchet_wood, "wooden_axe", 15, 1, true, false);
+		ensureItem(Item::mSword_wood, "wooden_sword", 12, 1, true, false)->setMaxDamage(59);
+		ensureItem(Item::mShovel_wood, "wooden_shovel", 13, 1, true, false)->setMaxDamage(59);
+		ensureItem(Item::mPickAxe_wood, "wooden_pickaxe", 14, 1, true, false)->setMaxDamage(59);
+		ensureItem(Item::mHatchet_wood, "wooden_axe", 15, 1, true, false)->setMaxDamage(59);
 
-		ensureItem(Item::mSword_stone, "stone_sword", 16, 1, true, false);
-		ensureItem(Item::mShovel_stone, "stone_shovel", 17, 1, true, false);
-		ensureItem(Item::mPickAxe_stone, "stone_pickaxe", 18, 1, true, false);
-		ensureItem(Item::mHatchet_stone, "stone_axe", 19, 1, true, false);
+		ensureItem(Item::mSword_stone, "stone_sword", 16, 1, true, false)->setMaxDamage(131);
+		ensureItem(Item::mShovel_stone, "stone_shovel", 17, 1, true, false)->setMaxDamage(131);
+		ensureItem(Item::mPickAxe_stone, "stone_pickaxe", 18, 1, true, false)->setMaxDamage(131);
+		ensureItem(Item::mHatchet_stone, "stone_axe", 19, 1, true, false)->setMaxDamage(131);
 
-		ensureItem(Item::mSword_diamond, "diamond_sword", 20, 1, true, false);
-		ensureItem(Item::mShovel_diamond, "diamond_shovel", 21, 1, true, false);
-		ensureItem(Item::mPickAxe_diamond, "diamond_pickaxe", 22, 1, true, false);
-		ensureItem(Item::mHatchet_diamond, "diamond_axe", 23, 1, true, false);
+		ensureItem(Item::mSword_diamond, "diamond_sword", 20, 1, true, false)->setMaxDamage(1561);
+		ensureItem(Item::mShovel_diamond, "diamond_shovel", 21, 1, true, false)->setMaxDamage(1561);
+		ensureItem(Item::mPickAxe_diamond, "diamond_pickaxe", 22, 1, true, false)->setMaxDamage(1561);
+		ensureItem(Item::mHatchet_diamond, "diamond_axe", 23, 1, true, false)->setMaxDamage(1561);
 
-		ensureItem(Item::mHelmet_iron, "iron_helmet", 50, 1);
-		ensureItem(Item::mChestplate_iron, "iron_chestplate", 51, 1);
-		ensureItem(Item::mLeggings_iron, "iron_leggings", 52, 1);
-		ensureItem(Item::mBoots_iron, "iron_boots", 53, 1);
+		ensureItem(Item::mSword_gold, "golden_sword", 27, 1, true, false)->setMaxDamage(32);
+		ensureItem(Item::mShovel_gold, "golden_shovel", 28, 1, true, false)->setMaxDamage(32);
+		ensureItem(Item::mPickAxe_gold, "golden_pickaxe", 29, 1, true, false)->setMaxDamage(32);
+		ensureItem(Item::mHatchet_gold, "golden_axe", 30, 1, true, false)->setMaxDamage(32);
 
-		// Register BlockItems for blocks used in crafting & inventory
+		ensureItem(Item::mHelmet_cloth, "leather_helmet", 42, 1)->setMaxDamage(55);
+		ensureItem(Item::mChestplate_cloth, "leather_chestplate", 43, 1)->setMaxDamage(80);
+		ensureItem(Item::mLeggings_cloth, "leather_leggings", 44, 1)->setMaxDamage(75);
+		ensureItem(Item::mBoots_cloth, "leather_boots", 45, 1)->setMaxDamage(65);
+
+		ensureItem(Item::mHelmet_chain, "chainmail_helmet", 46, 1)->setMaxDamage(165);
+		ensureItem(Item::mChestplate_chain, "chainmail_chestplate", 47, 1)->setMaxDamage(240);
+		ensureItem(Item::mLeggings_chain, "chainmail_leggings", 48, 1)->setMaxDamage(225);
+		ensureItem(Item::mBoots_chain, "chainmail_boots", 49, 1)->setMaxDamage(195);
+
+		ensureItem(Item::mHelmet_iron, "iron_helmet", 50, 1)->setMaxDamage(165);
+		ensureItem(Item::mChestplate_iron, "iron_chestplate", 51, 1)->setMaxDamage(240);
+		ensureItem(Item::mLeggings_iron, "iron_leggings", 52, 1)->setMaxDamage(225);
+		ensureItem(Item::mBoots_iron, "iron_boots", 53, 1)->setMaxDamage(195);
+
+		ensureItem(Item::mHelmet_diamond, "diamond_helmet", 54, 1)->setMaxDamage(363);
+		ensureItem(Item::mChestplate_diamond, "diamond_chestplate", 55, 1)->setMaxDamage(528);
+		ensureItem(Item::mLeggings_diamond, "diamond_leggings", 56, 1)->setMaxDamage(495);
+		ensureItem(Item::mBoots_diamond, "diamond_boots", 57, 1)->setMaxDamage(429);
+
+		ensureItem(Item::mHelmet_gold, "golden_helmet", 58, 1)->setMaxDamage(77);
+		ensureItem(Item::mChestplate_gold, "golden_chestplate", 59, 1)->setMaxDamage(112);
+		ensureItem(Item::mLeggings_gold, "golden_leggings", 60, 1)->setMaxDamage(105);
+		ensureItem(Item::mBoots_gold, "golden_boots", 61, 1)->setMaxDamage(91);
+
+		// Register BlockItems for blocks used in crafting & inventory, plus all remaining blocks for drops
 		ensureBlockItem(Block::mStone, "stone");
 		ensureBlockItem(Block::mCobblestone, "cobblestone");
 		ensureBlockItem(Block::mWoodPlanks, "planks");
@@ -280,6 +321,12 @@ namespace {
 		ensureBlockItem(Block::mCobblestoneWall, "cobblestone_wall");
 		ensureBlockItem(Block::mStoneSlab, "stone_slab");
 		ensureBlockItem(Block::mStonecutterBench, "stonecutter");
+
+		for (int i = 1; i < 256; ++i) {
+			if (Block::mBlocks[i] && !Item::mItems[i]) {
+				ensureBlockItem(Block::mBlocks[i], Block::mBlocks[i]->getDescriptionId().c_str());
+			}
+		}
 	}
 }
 
@@ -360,26 +407,44 @@ void Recipes::init() {
 	addToolSet(cobble, Item::mPickAxe_stone, Item::mHatchet_stone, Item::mShovel_stone, Item::mSword_stone);
 	addToolSet(iron, Item::mPickAxe_iron, Item::mHatchet_iron, Item::mShovel_iron, Item::mSword_iron);
 	addToolSet(diamond, Item::mPickAxe_diamond, Item::mHatchet_diamond, Item::mShovel_diamond, Item::mSword_diamond);
+	ItemInstance gold(Item::mGoldIngot, 1, 0);
+	addToolSet(gold, Item::mPickAxe_gold, Item::mHatchet_gold, Item::mShovel_gold, Item::mSword_gold);
 
-	// Iron Armor
-	addShaped(3, 2, {
-		iron, iron,  iron,
-		iron, empty, iron
-	}, ItemInstance(Item::mHelmet_iron, 1, 0), ItemCategory::Tools);
-	addShaped(3, 3, {
-		iron, empty, iron,
-		iron, iron,  iron,
-		iron, iron,  iron
-	}, ItemInstance(Item::mChestplate_iron, 1, 0), ItemCategory::Tools);
-	addShaped(3, 3, {
-		iron, iron,  iron,
-		iron, empty, iron,
-		iron, empty, iron
-	}, ItemInstance(Item::mLeggings_iron, 1, 0), ItemCategory::Tools);
-	addShaped(3, 2, {
-		iron, empty, iron,
-		iron, empty, iron
-	}, ItemInstance(Item::mBoots_iron, 1, 0), ItemCategory::Tools);
+	// Armor sets helper
+	auto addArmorSet = [&](const ItemInstance& mat, const Item* helm, const Item* chest, const Item* legs, const Item* boots) {
+		if (helm) {
+			addShaped(3, 2, {
+				mat, mat,   mat,
+				mat, empty, mat
+			}, ItemInstance(helm, 1, 0), ItemCategory::Tools);
+		}
+		if (chest) {
+			addShaped(3, 3, {
+				mat, empty, mat,
+				mat, mat,   mat,
+				mat, mat,   mat
+			}, ItemInstance(chest, 1, 0), ItemCategory::Tools);
+		}
+		if (legs) {
+			addShaped(3, 3, {
+				mat, mat,   mat,
+				mat, empty, mat,
+				mat, empty, mat
+			}, ItemInstance(legs, 1, 0), ItemCategory::Tools);
+		}
+		if (boots) {
+			addShaped(3, 2, {
+				mat, empty, mat,
+				mat, empty, mat
+			}, ItemInstance(boots, 1, 0), ItemCategory::Tools);
+		}
+	};
+
+	ItemInstance leather(Item::mLeather, 1, 0);
+	addArmorSet(leather, Item::mHelmet_cloth, Item::mChestplate_cloth, Item::mLeggings_cloth, Item::mBoots_cloth);
+	addArmorSet(iron, Item::mHelmet_iron, Item::mChestplate_iron, Item::mLeggings_iron, Item::mBoots_iron);
+	addArmorSet(gold, Item::mHelmet_gold, Item::mChestplate_gold, Item::mLeggings_gold, Item::mBoots_gold);
+	addArmorSet(diamond, Item::mHelmet_diamond, Item::mChestplate_diamond, Item::mLeggings_diamond, Item::mBoots_diamond);
 
 	// Bread (3x1)
 	addShaped(3, 1, { wheat, wheat, wheat }, ItemInstance(Item::mBread, 1, 0), ItemCategory::FoodArmor);
@@ -411,6 +476,7 @@ namespace {
 	const std::unordered_map<int, ItemVisualInfo>& getItemVisualMap() {
 		static std::unordered_map<int, ItemVisualInfo> map;
 		if (map.empty()) {
+			Recipes::getInstance()->init();
 			auto regBlock = [&](const Block* b, const char* name, const char* tex) {
 				if (b) map[b->getId()] = { name, tex };
 			};
@@ -419,33 +485,126 @@ namespace {
 			};
 
 			regBlock(Block::mStone, "Stone", "textures/blocks/stone.png");
+			regBlock(Block::mGrass, "Grass Block", "textures/blocks/grass_carried.png");
+			regBlock(Block::mDirt, "Dirt", "textures/blocks/dirt.png");
 			regBlock(Block::mCobblestone, "Cobblestone", "textures/blocks/cobblestone.png");
 			regBlock(Block::mWoodPlanks, "Oak Planks", "textures/blocks/planks_oak.png");
-			regBlock(Block::mLog, "Oak Log", "textures/blocks/log_oak.png");
+			regBlock(Block::mSapling, "Sapling", "textures/blocks/sapling_oak.png");
+			regBlock(Block::mBedrock, "Bedrock", "textures/blocks/bedrock.png");
 			regBlock(Block::mSand, "Sand", "textures/blocks/sand.png");
+			regBlock(Block::mGravel, "Gravel", "textures/blocks/gravel.png");
+			regBlock(Block::mGoldOre, "Gold Ore", "textures/blocks/gold_ore.png");
+			regBlock(Block::mIronOre, "Iron Ore", "textures/blocks/iron_ore.png");
+			regBlock(Block::mCoalOre, "Coal Ore", "textures/blocks/coal_ore.png");
+			regBlock(Block::mLog, "Oak Log", "textures/blocks/log_oak.png");
+			regBlock(Block::mLog2, "Acacia Log", "textures/blocks/log_acacia.png");
+			regBlock(Block::mLeaves, "Leaves", "textures/blocks/leaves_oak_carried.tga");
+			regBlock(Block::mLeaves2, "Leaves", "textures/blocks/leaves_acacia_carried.tga");
+			regBlock(Block::mSponge, "Sponge", "textures/blocks/sponge.png");
 			regBlock(Block::mGlass, "Glass", "textures/blocks/glass.png");
+			regBlock(Block::mLapisOre, "Lapis Lazuli Ore", "textures/blocks/lapis_ore.png");
+			regBlock(Block::mLapisBlock, "Lapis Lazuli Block", "textures/blocks/lapis_block.png");
 			regBlock(Block::mSandStone, "Sandstone", "textures/blocks/sandstone_normal.png");
+			regBlock(Block::mWool, "Wool", "textures/blocks/wool_colored_white.png");
+			regBlock(Block::mYellowFlower, "Dandelion", "textures/blocks/flower_dandelion.png");
+			regBlock(Block::mRedFlower, "Poppy", "textures/blocks/flower_rose.png");
+			regBlock(Block::mTallgrass, "Grass", "textures/blocks/tallgrass_carried.tga");
+			regBlock(Block::mMossyCobblestone, "Moss Stone", "textures/blocks/cobblestone_mossy.png");
+			regBlock(Block::mObsidian, "Obsidian", "textures/blocks/obsidian.png");
 			regBlock(Block::mTorch, "Torch", "textures/blocks/torch_on.png");
-			regBlock(Block::mChest, "Chest", "textures/blocks/planks_oak.png");
+			regBlock(Block::mChest, "Chest", "textures/blocks/chest_front.png");
+			regBlock(Block::mDiamondOre, "Diamond Ore", "textures/blocks/diamond_ore.png");
 			regBlock(Block::mWorkBench, "Crafting Table", "textures/blocks/crafting_table_top.png");
 			regBlock(Block::mFurnace, "Furnace", "textures/blocks/furnace_front_off.png");
+			regBlock(Block::mLitFurnace, "Furnace", "textures/blocks/furnace_front_on.png");
+			regBlock(Block::mRedStoneOre, "Redstone Ore", "textures/blocks/redstone_ore.png");
+			regBlock(Block::mLitRedStoneOre, "Redstone Ore", "textures/blocks/redstone_ore.png");
+			regBlock(Block::mIce, "Ice", "textures/blocks/ice.png");
+			regBlock(Block::mSnow, "Snow Block", "textures/blocks/snow.png");
+			regBlock(Block::mCactus, "Cactus", "textures/blocks/cactus_side.tga");
+			regBlock(Block::mClay, "Clay Block", "textures/blocks/clay.png");
+			regBlock(Block::mReeds, "Sugar Canes", "textures/items/reeds.png");
+			regBlock(Block::mPumpkin, "Pumpkin", "textures/blocks/pumpkin_face_off.png");
+			regBlock(Block::mNetherrack, "Netherrack", "textures/blocks/netherrack.png");
+			regBlock(Block::mSoulSand, "Soul Sand", "textures/blocks/soul_sand.png");
+			regBlock(Block::mGlowStone, "Glowstone", "textures/blocks/glowstone.png");
 			regBlock(Block::mStoneBrick, "Stone Bricks", "textures/blocks/stonebrick.png");
+			regBlock(Block::mMelon, "Melon", "textures/blocks/melon_side.png");
 			regBlock(Block::mGlassPane, "Glass Pane", "textures/blocks/glass.png");
 			regBlock(Block::mWoodenSlab, "Oak Wood Slab", "textures/blocks/planks_oak.png");
 			regBlock(Block::mStoneSlab, "Cobblestone Slab", "textures/blocks/cobblestone.png");
 			regBlock(Block::mCobblestoneWall, "Cobblestone Wall", "textures/blocks/cobblestone.png");
+			regBlock(Block::mBookshelf, "Bookshelf", "textures/blocks/bookshelf.png");
+			regBlock(Block::mTNT, "TNT", "textures/blocks/tnt_side.png");
+			regBlock(Block::mEmeraldOre, "Emerald Ore", "textures/blocks/emerald_ore.png");
+			regBlock(Block::mQuartzOre, "Nether Quartz Ore", "textures/blocks/quartz_ore.png");
+			regBlock(Block::mHardenedClay, "Hardened Clay", "textures/blocks/hardened_clay.png");
+			regBlock(Block::mCoalBlock, "Block of Coal", "textures/blocks/coal_block.png");
 			regBlock(Block::mStonecutterBench, "Stonecutter", "textures/blocks/stonecutter_top.png");
+			regBlock(Block::mBrick, "Bricks", "textures/blocks/brick.png");
 
+			// Materials & misc items
 			regItem(Item::mStick, "Stick", "textures/items/stick.png");
+			regItem(Item::mBowl, "Bowl", "textures/items/bowl.png");
 			regItem(Item::mCoal, "Coal", "textures/items/coal.png");
 			regItem(Item::mIronIngot, "Iron Ingot", "textures/items/iron_ingot.png");
 			regItem(Item::mGoldIngot, "Gold Ingot", "textures/items/gold_ingot.png");
 			regItem(Item::mDiamond, "Diamond", "textures/items/diamond.png");
 			regItem(Item::mWheat, "Wheat", "textures/items/wheat.png");
-			regItem(Item::mBread, "Bread", "textures/items/bread.png");
 			regItem(Item::mClay, "Clay", "textures/items/clay_ball.png");
 			regItem(Item::mBrick, "Brick", "textures/items/brick.png");
+			regItem(Item::mFlint, "Flint", "textures/items/flint.png");
+			regItem(Item::mLeather, "Leather", "textures/items/leather.png");
+			regItem(Item::mFeather, "Feather", "textures/items/feather.png");
+			regItem(Item::mSulphur, "Gunpowder", "textures/items/gunpowder.png");
+			regItem(Item::mRedStone, "Redstone", "textures/items/redstone_dust.png");
+			regItem(Item::mYellowDust, "Glowstone Dust", "textures/items/glowstone_dust.png");
+			regItem(Item::mDye_powder, "Dye", "textures/items/dye_powder_white.png");
+			regItem(Item::mBone, "Bone", "textures/items/bone.png");
+			regItem(Item::mSugar, "Sugar", "textures/items/sugar.png");
+			regItem(Item::mPaper, "Paper", "textures/items/paper.png");
+			regItem(Item::mBook, "Book", "textures/items/book_normal.png");
+			regItem(Item::mEmerald, "Emerald", "textures/items/emerald.png");
+			regItem(Item::mNetherbrick, "Nether Brick", "textures/items/netherbrick.png");
+			regItem(Item::mNetherQuartz, "Nether Quartz", "textures/items/quartz.png");
+			regItem(Item::mSeeds_wheat, "Wheat Seeds", "textures/items/seeds_wheat.png");
+			regItem(Item::mShears, "Shears", "textures/items/shears.png");
 
+			// Food items
+			regItem(Item::mApple, "Apple", "textures/items/apple.png");
+			regItem(Item::mApple_gold, "Golden Apple", "textures/items/apple_golden.png");
+			regItem(Item::mApple_enchanted, "Enchanted Golden Apple", "textures/items/apple_golden.png");
+			regItem(Item::mMushroomStew, "Mushroom Stew", "textures/items/mushroom_stew.png");
+			regItem(Item::mBread, "Bread", "textures/items/bread.png");
+			regItem(Item::mPorkChop_raw, "Raw Porkchop", "textures/items/porkchop_raw.png");
+			regItem(Item::mPorkChop_cooked, "Cooked Porkchop", "textures/items/porkchop_cooked.png");
+			regItem(Item::mFish_raw_cod, "Raw Fish", "textures/items/fish_raw.png");
+			regItem(Item::mFish_cooked_cod, "Cooked Fish", "textures/items/fish_cooked.png");
+			regItem(Item::mFish_raw_salmon, "Raw Salmon", "textures/items/fish_salmon_raw.png");
+			regItem(Item::mFish_cooked_salmon, "Cooked Salmon", "textures/items/fish_salmon_cooked.png");
+			regItem(Item::mCookie, "Cookie", "textures/items/cookie.png");
+			regItem(Item::mMelon, "Melon", "textures/items/melon.png");
+			regItem(Item::mBeef_raw, "Raw Beef", "textures/items/beef_raw.png");
+			regItem(Item::mBeef_cooked, "Steak", "textures/items/beef_cooked.png");
+			regItem(Item::mChicken_raw, "Raw Chicken", "textures/items/chicken_raw.png");
+			regItem(Item::mChicken_cooked, "Cooked Chicken", "textures/items/chicken_cooked.png");
+			regItem(Item::mRotten_flesh, "Rotten Flesh", "textures/items/rotten_flesh.png");
+			regItem(Item::mSpider_eye, "Spider Eye", "textures/items/spider_eye.png");
+			regItem(Item::mCarrot, "Carrot", "textures/items/carrot.png");
+			regItem(Item::mPotato, "Potato", "textures/items/potato.png");
+			regItem(Item::mPotatoBaked, "Baked Potato", "textures/items/potato_baked.png");
+			regItem(Item::mPoisonous_potato, "Poisonous Potato", "textures/items/potato_poisonous.png");
+			regItem(Item::mGoldenCarrot, "Golden Carrot", "textures/items/carrot_golden.png");
+			regItem(Item::mPumpkinPie, "Pumpkin Pie", "textures/items/pumpkin_pie.png");
+			regItem(Item::mRabbitRaw, "Raw Rabbit", "textures/items/rabbit_raw.png");
+			regItem(Item::mRabbitCooked, "Cooked Rabbit", "textures/items/rabbit_cooked.png");
+			regItem(Item::mRabbitStew, "Rabbit Stew", "textures/items/rabbit_stew.png");
+			regItem(Item::mMutton_raw, "Raw Mutton", "textures/items/mutton_raw.png");
+			regItem(Item::mMutton_cooked, "Cooked Mutton", "textures/items/mutton_cooked.png");
+			regItem(Item::mBeetroot, "Beetroot", "textures/items/beetroot.png");
+			regItem(Item::mBeetrootSoup, "Beetroot Soup", "textures/items/beetroot_soup.png");
+
+			// Tools & Weapons
 			regItem(Item::mPickAxe_wood, "Wooden Pickaxe", "textures/items/wood_pickaxe.png");
 			regItem(Item::mHatchet_wood, "Wooden Axe", "textures/items/wood_axe.png");
 			regItem(Item::mShovel_wood, "Wooden Shovel", "textures/items/wood_shovel.png");
@@ -466,10 +625,36 @@ namespace {
 			regItem(Item::mShovel_diamond, "Diamond Shovel", "textures/items/diamond_shovel.png");
 			regItem(Item::mSword_diamond, "Diamond Sword", "textures/items/diamond_sword.png");
 
+			regItem(Item::mPickAxe_gold, "Golden Pickaxe", "textures/items/gold_pickaxe.png");
+			regItem(Item::mHatchet_gold, "Golden Axe", "textures/items/gold_axe.png");
+			regItem(Item::mShovel_gold, "Golden Shovel", "textures/items/gold_shovel.png");
+			regItem(Item::mSword_gold, "Golden Sword", "textures/items/gold_sword.png");
+
+			// Armor
+			regItem(Item::mHelmet_cloth, "Leather Cap", "textures/items/leather_helmet.tga");
+			regItem(Item::mChestplate_cloth, "Leather Tunic", "textures/items/leather_chestplate.png");
+			regItem(Item::mLeggings_cloth, "Leather Pants", "textures/items/leather_leggings.tga");
+			regItem(Item::mBoots_cloth, "Leather Boots", "textures/items/leather_boots.tga");
+
+			regItem(Item::mHelmet_chain, "Chain Helmet", "textures/items/chainmail_helmet.png");
+			regItem(Item::mChestplate_chain, "Chain Chestplate", "textures/items/chainmail_chestplate.png");
+			regItem(Item::mLeggings_chain, "Chain Leggings", "textures/items/chainmail_leggings.png");
+			regItem(Item::mBoots_chain, "Chain Boots", "textures/items/chainmail_boots.png");
+
 			regItem(Item::mHelmet_iron, "Iron Helmet", "textures/items/iron_helmet.png");
 			regItem(Item::mChestplate_iron, "Iron Chestplate", "textures/items/iron_chestplate.png");
 			regItem(Item::mLeggings_iron, "Iron Leggings", "textures/items/iron_leggings.png");
 			regItem(Item::mBoots_iron, "Iron Boots", "textures/items/iron_boots.png");
+
+			regItem(Item::mHelmet_diamond, "Diamond Helmet", "textures/items/diamond_helmet.png");
+			regItem(Item::mChestplate_diamond, "Diamond Chestplate", "textures/items/diamond_chestplate.png");
+			regItem(Item::mLeggings_diamond, "Diamond Leggings", "textures/items/diamond_leggings.png");
+			regItem(Item::mBoots_diamond, "Diamond Boots", "textures/items/diamond_boots.png");
+
+			regItem(Item::mHelmet_gold, "Golden Helmet", "textures/items/gold_helmet.png");
+			regItem(Item::mChestplate_gold, "Golden Chestplate", "textures/items/gold_chestplate.png");
+			regItem(Item::mLeggings_gold, "Golden Leggings", "textures/items/gold_leggings.png");
+			regItem(Item::mBoots_gold, "Golden Boots", "textures/items/gold_boots.png");
 		}
 		return map;
 	}
@@ -477,12 +662,19 @@ namespace {
 
 std::string getItemDisplayName(const ItemInstance& item) {
 	if (item.isNull()) return "";
+	int id = item.getId();
+	if (Item::mCoal && id == Item::mCoal->getId() && item.getAuxValue() == 1) {
+		return "Charcoal";
+	}
+	if (Item::mDye_powder && id == Item::mDye_powder->getId() && item.getAuxValue() == 4) {
+		return "Lapis Lazuli";
+	}
 	const auto& map = getItemVisualMap();
-	auto it = map.find(item.getId());
+	auto it = map.find(id);
 	if (it != map.end()) {
 		return it->second.name;
 	}
-	return "Item #" + std::to_string(item.getId());
+	return "Item #" + std::to_string(id);
 }
 
 std::string getItemDescription(const ItemInstance& item) {
@@ -501,18 +693,26 @@ std::string getItemDescription(const ItemInstance& item) {
 	if (Block::mStoneSlab && id == Block::mStoneSlab->getId()) return "Half-height stone building block.";
 	if (Block::mWoodenSlab && id == Block::mWoodenSlab->getId()) return "Half-height wooden building block.";
 	if (Block::mGlassPane && id == Block::mGlassPane->getId()) return "Thin transparent window.";
-	if (Item::mBread && id == Item::mBread->getId()) return "Restores hunger.";
-	if (Item::mHelmet_iron && id == Item::mHelmet_iron->getId()) return "Protects your head.";
-	if (Item::mChestplate_iron && id == Item::mChestplate_iron->getId()) return "Protects your chest.";
-	if (Item::mLeggings_iron && id == Item::mLeggings_iron->getId()) return "Protects your legs.";
-	if (Item::mBoots_iron && id == Item::mBoots_iron->getId()) return "Protects your feet.";
+	if (getFoodInfo(item).isFood) return "Restores hunger.";
+	int armorSlot = getArmorSlotForItem(item);
+	if (armorSlot == 0) return "Protects your head.";
+	if (armorSlot == 1) return "Protects your chest.";
+	if (armorSlot == 2) return "Protects your legs.";
+	if (armorSlot == 3) return "Protects your feet.";
 	return "Craftable item.";
 }
 
 std::string getItemTexturePath(const ItemInstance& item) {
 	if (item.isNull()) return "";
+	int id = item.getId();
+	if (Item::mCoal && id == Item::mCoal->getId() && item.getAuxValue() == 1) {
+		return "textures/items/charcoal.png";
+	}
+	if (Item::mDye_powder && id == Item::mDye_powder->getId() && item.getAuxValue() == 4) {
+		return "textures/items/dye_powder_blue.png";
+	}
 	const auto& map = getItemVisualMap();
-	auto it = map.find(item.getId());
+	auto it = map.find(id);
 	if (it != map.end()) {
 		return it->second.texture;
 	}
@@ -527,7 +727,12 @@ BlockRenderInfo getBlockRenderInfo(const ItemInstance& item) {
 
 	// Flat 2D blocks in inventory
 	if ((Block::mTorch && id == Block::mTorch->getId()) ||
-	    (Block::mGlassPane && id == Block::mGlassPane->getId())) {
+	    (Block::mGlassPane && id == Block::mGlassPane->getId()) ||
+	    (Block::mSapling && id == Block::mSapling->getId()) ||
+	    (Block::mYellowFlower && id == Block::mYellowFlower->getId()) ||
+	    (Block::mRedFlower && id == Block::mRedFlower->getId()) ||
+	    (Block::mTallgrass && id == Block::mTallgrass->getId()) ||
+	    (Block::mReeds && id == Block::mReeds->getId())) {
 		return info;
 	}
 
@@ -537,17 +742,32 @@ BlockRenderInfo getBlockRenderInfo(const ItemInstance& item) {
 	info.frontTex = baseTex;
 	info.sideTex = baseTex;
 
-	if (Block::mLog && id == Block::mLog->getId()) {
+	if (Block::mGrass && id == Block::mGrass->getId()) {
+		info.topTex = "textures/blocks/grass_carried.png";
+		info.frontTex = "textures/blocks/grass_side_carried.png";
+		info.sideTex = "textures/blocks/grass_side_carried.png";
+	} else if (Block::mLog && id == Block::mLog->getId()) {
 		info.topTex = "textures/blocks/log_oak_top.png";
 		info.frontTex = "textures/blocks/log_oak.png";
 		info.sideTex = "textures/blocks/log_oak.png";
+	} else if (Block::mLog2 && id == Block::mLog2->getId()) {
+		info.topTex = "textures/blocks/log_acacia_top.png";
+		info.frontTex = "textures/blocks/log_acacia.png";
+		info.sideTex = "textures/blocks/log_acacia.png";
+	} else if (Block::mChest && id == Block::mChest->getId()) {
+		info.topTex = "textures/blocks/chest_top.png";
+		info.frontTex = "textures/blocks/chest_front.png";
+		info.sideTex = "textures/blocks/chest_side.png";
 	} else if (Block::mWorkBench && id == Block::mWorkBench->getId()) {
 		info.topTex = "textures/blocks/crafting_table_top.png";
 		info.frontTex = "textures/blocks/crafting_table_front.png";
 		info.sideTex = "textures/blocks/crafting_table_side.png";
-	} else if (Block::mFurnace && id == Block::mFurnace->getId()) {
+	} else if ((Block::mFurnace && id == Block::mFurnace->getId()) ||
+	           (Block::mLitFurnace && id == Block::mLitFurnace->getId())) {
 		info.topTex = "textures/blocks/furnace_top.png";
-		info.frontTex = "textures/blocks/furnace_front_off.png";
+		info.frontTex = (Block::mLitFurnace && id == Block::mLitFurnace->getId())
+			? "textures/blocks/furnace_front_on.png"
+			: "textures/blocks/furnace_front_off.png";
 		info.sideTex = "textures/blocks/furnace_side.png";
 	} else if (Block::mSandStone && id == Block::mSandStone->getId()) {
 		info.topTex = "textures/blocks/sandstone_top.png";
@@ -564,43 +784,222 @@ BlockRenderInfo getBlockRenderInfo(const ItemInstance& item) {
 		info.sideTex = "textures/blocks/stone_slab_side.png";
 	} else if (Block::mWoodenSlab && id == Block::mWoodenSlab->getId()) {
 		info.isSlab = true;
-	} else if (Block::mGlass && id == Block::mGlass->getId()) {
+	} else if (Block::mBookshelf && id == Block::mBookshelf->getId()) {
+		info.topTex = "textures/blocks/planks_oak.png";
+		info.frontTex = "textures/blocks/bookshelf.png";
+		info.sideTex = "textures/blocks/bookshelf.png";
+	} else if (Block::mTNT && id == Block::mTNT->getId()) {
+		info.topTex = "textures/blocks/tnt_top.png";
+		info.frontTex = "textures/blocks/tnt_side.png";
+		info.sideTex = "textures/blocks/tnt_side.png";
+	} else if (Block::mPumpkin && id == Block::mPumpkin->getId()) {
+		info.topTex = "textures/blocks/pumpkin_top.png";
+		info.frontTex = "textures/blocks/pumpkin_face_off.png";
+		info.sideTex = "textures/blocks/pumpkin_side.png";
+	} else if (Block::mMelon && id == Block::mMelon->getId()) {
+		info.topTex = "textures/blocks/melon_top.png";
+		info.frontTex = "textures/blocks/melon_side.png";
+		info.sideTex = "textures/blocks/melon_side.png";
+	} else if (Block::mCactus && id == Block::mCactus->getId()) {
+		info.topTex = "textures/blocks/cactus_top.tga";
+		info.frontTex = "textures/blocks/cactus_side.tga";
+		info.sideTex = "textures/blocks/cactus_side.tga";
+	} else if ((Block::mGlass && id == Block::mGlass->getId()) ||
+	           (Block::mIce && id == Block::mIce->getId()) ||
+	           (Block::mLeaves && id == Block::mLeaves->getId()) ||
+	           (Block::mLeaves2 && id == Block::mLeaves2->getId())) {
 		info.isTransparent = true;
 	}
 
 	return info;
 }
 
+namespace {
+	struct ArmorMeta {
+		const Item* item;
+		int slot;
+		int defense;
+		int maxDurability;
+	};
+
+	const std::vector<ArmorMeta>& getArmorTable() {
+		static std::vector<ArmorMeta> table;
+		if (table.empty()) {
+			Recipes::getInstance()->init();
+			table = {
+				{ Item::mHelmet_cloth, 0, 1, 55 },
+				{ Item::mChestplate_cloth, 1, 3, 80 },
+				{ Item::mLeggings_cloth, 2, 2, 75 },
+				{ Item::mBoots_cloth, 3, 1, 65 },
+				{ Item::mHelmet_chain, 0, 2, 165 },
+				{ Item::mChestplate_chain, 1, 5, 240 },
+				{ Item::mLeggings_chain, 2, 4, 225 },
+				{ Item::mBoots_chain, 3, 1, 195 },
+				{ Item::mHelmet_iron, 0, 2, 165 },
+				{ Item::mChestplate_iron, 1, 6, 240 },
+				{ Item::mLeggings_iron, 2, 5, 225 },
+				{ Item::mBoots_iron, 3, 2, 195 },
+				{ Item::mHelmet_gold, 0, 2, 77 },
+				{ Item::mChestplate_gold, 1, 5, 112 },
+				{ Item::mLeggings_gold, 2, 3, 105 },
+				{ Item::mBoots_gold, 3, 1, 91 },
+				{ Item::mHelmet_diamond, 0, 3, 363 },
+				{ Item::mChestplate_diamond, 1, 8, 528 },
+				{ Item::mLeggings_diamond, 2, 6, 495 },
+				{ Item::mBoots_diamond, 3, 3, 429 },
+			};
+		}
+		return table;
+	}
+}
+
 int getArmorSlotForItem(const ItemInstance& item) {
 	if (item.isNull()) return -1;
 	int id = item.getId();
-	if ((Item::mHelmet_cloth && id == Item::mHelmet_cloth->getId()) ||
-	    (Item::mHelmet_chain && id == Item::mHelmet_chain->getId()) ||
-	    (Item::mHelmet_iron && id == Item::mHelmet_iron->getId()) ||
-	    (Item::mHelmet_diamond && id == Item::mHelmet_diamond->getId()) ||
-	    (Item::mHelmet_gold && id == Item::mHelmet_gold->getId())) {
-		return 0;
-	}
-	if ((Item::mChestplate_cloth && id == Item::mChestplate_cloth->getId()) ||
-	    (Item::mChestplate_chain && id == Item::mChestplate_chain->getId()) ||
-	    (Item::mChestplate_iron && id == Item::mChestplate_iron->getId()) ||
-	    (Item::mChestplate_diamond && id == Item::mChestplate_diamond->getId()) ||
-	    (Item::mChestplate_gold && id == Item::mChestplate_gold->getId())) {
-		return 1;
-	}
-	if ((Item::mLeggings_cloth && id == Item::mLeggings_cloth->getId()) ||
-	    (Item::mLeggings_chain && id == Item::mLeggings_chain->getId()) ||
-	    (Item::mLeggings_iron && id == Item::mLeggings_iron->getId()) ||
-	    (Item::mLeggings_diamond && id == Item::mLeggings_diamond->getId()) ||
-	    (Item::mLeggings_gold && id == Item::mLeggings_gold->getId())) {
-		return 2;
-	}
-	if ((Item::mBoots_cloth && id == Item::mBoots_cloth->getId()) ||
-	    (Item::mBoots_chain && id == Item::mBoots_chain->getId()) ||
-	    (Item::mBoots_iron && id == Item::mBoots_iron->getId()) ||
-	    (Item::mBoots_diamond && id == Item::mBoots_diamond->getId()) ||
-	    (Item::mBoots_gold && id == Item::mBoots_gold->getId())) {
-		return 3;
+	for (const auto& entry : getArmorTable()) {
+		if (entry.item && id == entry.item->getId()) return entry.slot;
 	}
 	return -1;
+}
+
+int getArmorDefensePoints(const ItemInstance& item) {
+	if (item.isNull()) return 0;
+	int id = item.getId();
+	for (const auto& entry : getArmorTable()) {
+		if (entry.item && id == entry.item->getId()) return entry.defense;
+	}
+	return 0;
+}
+
+int getTotalArmorDefense(const std::array<ItemInstance, 4>& armorSlots) {
+	int total = 0;
+	for (const auto& slot : armorSlots) {
+		total += getArmorDefensePoints(slot);
+	}
+	return std::min(20, total);
+}
+
+ToolInfo getToolInfo(const ItemInstance& item) {
+	ToolInfo info;
+	if (item.isNull()) return info;
+	Recipes::getInstance()->init();
+	int id = item.getId();
+
+	struct ToolEntry {
+		const Item* item;
+		ToolType type;
+		int harvestLevel;
+		float speed;
+		int maxDurability;
+	};
+	static const ToolEntry tools[] = {
+		{ Item::mPickAxe_wood, ToolType::Pickaxe, 0, 2.0f, 59 },
+		{ Item::mPickAxe_stone, ToolType::Pickaxe, 1, 4.0f, 131 },
+		{ Item::mPickAxe_iron, ToolType::Pickaxe, 2, 6.0f, 250 },
+		{ Item::mPickAxe_diamond, ToolType::Pickaxe, 3, 8.0f, 1561 },
+		{ Item::mPickAxe_gold, ToolType::Pickaxe, 0, 12.0f, 32 },
+
+		{ Item::mHatchet_wood, ToolType::Axe, 0, 2.0f, 59 },
+		{ Item::mHatchet_stone, ToolType::Axe, 1, 4.0f, 131 },
+		{ Item::mHatchet_iron, ToolType::Axe, 2, 6.0f, 250 },
+		{ Item::mHatchet_diamond, ToolType::Axe, 3, 8.0f, 1561 },
+		{ Item::mHatchet_gold, ToolType::Axe, 0, 12.0f, 32 },
+
+		{ Item::mShovel_wood, ToolType::Shovel, 0, 2.0f, 59 },
+		{ Item::mShovel_stone, ToolType::Shovel, 1, 4.0f, 131 },
+		{ Item::mShovel_iron, ToolType::Shovel, 2, 6.0f, 250 },
+		{ Item::mShovel_diamond, ToolType::Shovel, 3, 8.0f, 1561 },
+		{ Item::mShovel_gold, ToolType::Shovel, 0, 12.0f, 32 },
+
+		{ Item::mSword_wood, ToolType::Sword, 0, 1.5f, 59 },
+		{ Item::mSword_stone, ToolType::Sword, 1, 1.5f, 131 },
+		{ Item::mSword_iron, ToolType::Sword, 2, 1.5f, 250 },
+		{ Item::mSword_diamond, ToolType::Sword, 3, 1.5f, 1561 },
+		{ Item::mSword_gold, ToolType::Sword, 0, 1.5f, 32 },
+
+		{ Item::mShears, ToolType::Shears, 0, 5.0f, 238 },
+	};
+	for (const auto& t : tools) {
+		if (t.item && id == t.item->getId()) {
+			info.type = t.type;
+			info.harvestLevel = t.harvestLevel;
+			info.speedMultiplier = t.speed;
+			info.maxDurability = t.maxDurability;
+			return info;
+		}
+	}
+	return info;
+}
+
+int getItemMaxDurability(const ItemInstance& item) {
+	if (item.isNull()) return 0;
+	ToolInfo t = getToolInfo(item);
+	if (t.maxDurability > 0) return t.maxDurability;
+	int id = item.getId();
+	for (const auto& entry : getArmorTable()) {
+		if (entry.item && id == entry.item->getId()) return entry.maxDurability;
+	}
+	return 0;
+}
+
+FoodInfo getFoodInfo(const ItemInstance& item) {
+	FoodInfo info;
+	if (item.isNull()) return info;
+	Recipes::getInstance()->init();
+	int id = item.getId();
+
+	struct FoodEntry {
+		const Item* item;
+		int nutrition;
+		float saturation;
+		int healHealth;
+		bool alwaysEdible;
+		bool returnsBowl;
+	};
+	static const FoodEntry foods[] = {
+		{ Item::mApple, 4, 2.4f, 0, false, false },
+		{ Item::mApple_gold, 4, 9.6f, 4, true, false },
+		{ Item::mApple_enchanted, 4, 9.6f, 10, true, false },
+		{ Item::mBread, 5, 6.0f, 0, false, false },
+		{ Item::mPorkChop_raw, 3, 1.8f, 0, false, false },
+		{ Item::mPorkChop_cooked, 8, 12.8f, 0, false, false },
+		{ Item::mBeef_raw, 3, 1.8f, 0, false, false },
+		{ Item::mBeef_cooked, 8, 12.8f, 0, false, false },
+		{ Item::mChicken_raw, 2, 1.2f, 0, false, false },
+		{ Item::mChicken_cooked, 6, 7.2f, 0, false, false },
+		{ Item::mMutton_raw, 2, 1.2f, 0, false, false },
+		{ Item::mMutton_cooked, 6, 9.6f, 0, false, false },
+		{ Item::mRabbitRaw, 3, 1.8f, 0, false, false },
+		{ Item::mRabbitCooked, 5, 6.0f, 0, false, false },
+		{ Item::mRabbitStew, 10, 12.0f, 0, false, true },
+		{ Item::mMushroomStew, 6, 7.2f, 0, false, true },
+		{ Item::mBeetroot, 1, 1.2f, 0, false, false },
+		{ Item::mBeetrootSoup, 6, 7.2f, 0, false, true },
+		{ Item::mFish_raw_cod, 2, 0.4f, 0, false, false },
+		{ Item::mFish_cooked_cod, 5, 6.0f, 0, false, false },
+		{ Item::mFish_raw_salmon, 2, 0.4f, 0, false, false },
+		{ Item::mFish_cooked_salmon, 6, 9.6f, 0, false, false },
+		{ Item::mCookie, 2, 0.4f, 0, false, false },
+		{ Item::mMelon, 2, 1.2f, 0, false, false },
+		{ Item::mCarrot, 3, 3.6f, 0, false, false },
+		{ Item::mGoldenCarrot, 6, 14.4f, 0, false, false },
+		{ Item::mPotato, 1, 0.6f, 0, false, false },
+		{ Item::mPotatoBaked, 5, 6.0f, 0, false, false },
+		{ Item::mPoisonous_potato, 2, 1.2f, 0, false, false },
+		{ Item::mPumpkinPie, 8, 4.8f, 0, false, false },
+		{ Item::mRotten_flesh, 4, 0.8f, 0, false, false },
+		{ Item::mSpider_eye, 2, 3.2f, 0, false, false },
+	};
+	for (const auto& f : foods) {
+		if (f.item && id == f.item->getId()) {
+			info.isFood = true;
+			info.nutrition = f.nutrition;
+			info.saturation = f.saturation;
+			info.healHealth = f.healHealth;
+			info.alwaysEdible = f.alwaysEdible;
+			info.returnsBowl = f.returnsBowl;
+			return info;
+		}
+	}
+	return info;
 }

@@ -171,15 +171,32 @@ public:
 	void setupPositions() override;
 	void render(int mouseX, int mouseY, float partialTicks) override;
 	void mouseClicked(int x, int y, int button) override;
+	void mouseReleased(int x, int y, int button) override;
 	void buttonClicked(Button* button) override;
 	void keyPressed(int key) override;
-	bool renderGameBehind() const override { return true; }
+	bool renderGameBehind() const override;
 
 private:
 	void closeScreen();
+	void getTouchSlotRects(int& inX, int& inY, int& fuelX, int& fuelY, int& outX, int& outY) const;
 	BlockCoordKey mPos{};
 	ItemInstance mCarriedItem;
 	Button* mCloseButton = nullptr;
+
+	// Touch UI state
+	Button* mHeader = nullptr;
+	Button* mBackButton = nullptr;
+	int mSelectedSlot = 0; // 0 = Ingredient, 1 = Fuel
+	int mPaneX = 10;
+	int mPaneY = 32;
+	int mPaneW = 0;
+	int mPaneH = 0;
+	int mPaneCols = 1;
+	int mScrollY = 0;
+	bool mDragging = false;
+	bool mDidDrag = false;
+	int mLastDragY = 0;
+	int mPressStartY = 0;
 };
 
 class ChestScreen : public Screen {

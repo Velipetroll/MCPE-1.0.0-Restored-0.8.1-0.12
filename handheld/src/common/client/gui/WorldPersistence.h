@@ -17,6 +17,8 @@ struct WorldMetadata {
 	double playerPitch = 0.0;
 
 	int health = 20;
+	int hunger = 20;
+	float saturation = 5.0f;
 	int selectedHotbarSlot = 0;
 	bool hasInventory = false;
 	std::array<ItemInstance, 36> inventorySlots;
