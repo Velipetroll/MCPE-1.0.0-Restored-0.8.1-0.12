@@ -38,10 +38,11 @@ void ChatScreen::setupPositions() {
 
 void ChatScreen::sendMessage() {
 	if (context && !mInputText.empty()) {
-		std::string name = context->options ? context->options->username : "Player";
-		context->chatHistory.push_back("<" + name + "> " + mInputText);
-		if (context->chatHistory.size() > 12) {
-			context->chatHistory.erase(context->chatHistory.begin());
+		if (mInputText[0] == '/') {
+			context->executeCommand(mInputText);
+		} else {
+			std::string name = context->options ? context->options->username : "Player";
+			context->addChatMessage("<" + name + "> " + mInputText);
 		}
 		mInputText.clear();
 	}
@@ -97,4 +98,10 @@ void ChatScreen::buttonClicked(Button* button) {
 	} else if (button->id == 2) {
 		context->resumeGame();
 	}
+}
+
+bool ChatScreen::handleBackEvent(bool /*isDown*/) {
+	if (!context) return false;
+	context->resumeGame();
+	return true;
 }

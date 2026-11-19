@@ -10,6 +10,7 @@ public:
 	void setupPositions() override;
 	void render(int mouseX, int mouseY, float partialTicks) override;
 	void buttonClicked(Button* button) override;
+	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override { return true; }
 
 private:

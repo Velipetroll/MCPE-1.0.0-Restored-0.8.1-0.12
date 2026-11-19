@@ -133,3 +133,9 @@ void PauseScreen::buttonClicked(Button* button) {
 		context->quitToTitle();
 	}
 }
+
+bool PauseScreen::handleBackEvent(bool /*isDown*/) {
+	if (!context) return false;
+	context->resumeGame();
+	return true;
+}

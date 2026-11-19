@@ -20,6 +20,7 @@ public:
 	void render(int mouseX, int mouseY, float partialTicks) override;
 	void buttonClicked(Button* button) override;
 	void mouseClicked(int x, int y, int button) override;
+	bool handleBackEvent(bool isDown = false) override;
 
 private:
 	std::vector<WorldEntry> mWorlds;

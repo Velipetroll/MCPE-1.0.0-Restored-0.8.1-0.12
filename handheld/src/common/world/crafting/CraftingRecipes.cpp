@@ -1258,3 +1258,52 @@ FoodInfo getFoodInfo(const ItemInstance& item) {
 	}
 	return info;
 }
+
+static std::string normalizeItemKey(const std::string& s) {
+	std::string out;
+	out.reserve(s.size());
+	for (unsigned char c : s) {
+		if (c == ' ' || c == '-') out.push_back('_');
+		else out.push_back(static_cast<char>(std::tolower(c)));
+	}
+	if (out.rfind("minecraft:", 0) == 0) {
+		out = out.substr(10);
+	}
+	return out;
+}
+
+ItemInstance findItemOrBlockByName(const std::string& query, int count, int aux) {
+	Recipes::getInstance()->init();
+	std::string key = normalizeItemKey(query);
+	if (key.empty()) return ItemInstance();
+
+	// Numeric ID lookup
+	bool allDigits = true;
+	for (unsigned char c : key) {
+		if (!std::isdigit(c)) { allDigits = false; break; }
+	}
+	if (allDigits) {
+		int id = std::atoi(key.c_str());
+		if (id > 0 && id < 256 && Block::mBlocks[id]) {
+			return ItemInstance(Block::mBlocks[id], count, aux);
+		}
+		if (id >= 256 && id < 4096 && Item::mItems[id]) {
+			return ItemInstance(Item::mItems[id], count, aux);
+		}
+		return ItemInstance();
+	}
+
+	for (int id = 1; id < 256; ++id) {
+		if (Block::mBlocks[id]) {
+			ItemInstance cand(Block::mBlocks[id], count, aux);
+			if (normalizeItemKey(getItemDisplayName(cand)) == key) return cand;
+		}
+	}
+	for (int id = 256; id < 512; ++id) {
+		if (Item::mItems[id]) {
+			ItemInstance cand(Item::mItems[id], count, aux);
+			if (normalizeItemKey(getItemDisplayName(cand)) == key) return cand;
+		}
+	}
+	return ItemInstance();
+}

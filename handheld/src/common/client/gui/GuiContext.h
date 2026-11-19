@@ -104,11 +104,22 @@ struct GuiContext {
 	std::unordered_map<BlockCoordKey, ChestData, BlockCoordHash> chests;
 	std::unordered_map<BlockCoordKey, FurnaceData, BlockCoordHash> furnaces;
 
+	bool pendingTeleport = false;
+	float pendingTpX = 0.0f;
+	float pendingTpY = 0.0f;
+	float pendingTpZ = 0.0f;
+	struct PendingMobSpawn { std::string type; float x = 0.0f; float y = 0.0f; float z = 0.0f; };
+	std::vector<PendingMobSpawn> pendingMobSpawns;
+	struct PendingSetBlock { int x = 0; int y = 0; int z = 0; int blockId = 0; int aux = 0; };
+	std::vector<PendingSetBlock> pendingSetBlocks;
+
 	void ensureInventoryInitialized();
 	ItemInstance addItemToInventoryRemainder(const ItemInstance& item);
 	bool addItemToInventory(const ItemInstance& item);
 	void resetSurvivalStats();
 	int applyDamage(int rawDamage, bool ignoreArmor = false);
+	void addChatMessage(const std::string& msg);
+	void executeCommand(const std::string& cmdLine);
 
 	void setScreen(Screen* screen);
 	void startGame();

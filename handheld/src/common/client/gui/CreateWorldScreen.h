@@ -13,6 +13,7 @@ public:
 	void buttonClicked(Button* button) override;
 	void mouseClicked(int x, int y, int button) override;
 	void keyPressed(int key) override;
+	bool handleBackEvent(bool isDown = false) override;
 
 private:
 	std::string mWorldName = "New World";

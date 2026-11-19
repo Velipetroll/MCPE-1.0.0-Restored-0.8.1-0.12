@@ -152,3 +152,4 @@ int getTotalArmorDefense(const std::array<ItemInstance, 4>& armorSlots);
 int getItemMaxDurability(const ItemInstance& item);
 ToolInfo getToolInfo(const ItemInstance& item);
 FoodInfo getFoodInfo(const ItemInstance& item);
+ItemInstance findItemOrBlockByName(const std::string& query, int count = 1, int aux = 0);

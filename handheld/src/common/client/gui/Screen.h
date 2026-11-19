@@ -29,6 +29,7 @@ public:
 	virtual void mouseReleased(int x, int y, int button);
 	virtual void mouseScrolled(double yoffset) {}
 	virtual void keyPressed(int key);
+	virtual bool handleBackEvent(bool isDown = false) { return false; }
 	virtual bool renderGameBehind() const { return false; }
 
 	void renderMenuBackground(float partialTicks);

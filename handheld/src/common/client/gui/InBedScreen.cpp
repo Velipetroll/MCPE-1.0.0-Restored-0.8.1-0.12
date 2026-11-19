@@ -54,3 +54,9 @@ void InBedScreen::buttonClicked(Button* button) {
 		context->resumeGame();
 	}
 }
+
+bool InBedScreen::handleBackEvent(bool /*isDown*/) {
+	if (!context) return false;
+	context->resumeGame();
+	return true;
+}

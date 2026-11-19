@@ -148,6 +148,10 @@ void AddExternalServerScreen::mouseClicked(int x, int y, int button) {
 }
 
 void AddExternalServerScreen::keyPressed(int key) {
+	if (key == 256 /* GLFW_KEY_ESCAPE */) {
+		handleBackEvent(true);
+		return;
+	}
 	std::string& target = (mFocusedField == 0) ? mServerName : ((mFocusedField == 1) ? mAddress : mPort);
 	if (key == 259 /* GLFW_KEY_BACKSPACE */) {
 		if (!target.empty()) target.pop_back();
@@ -169,4 +173,15 @@ void AddExternalServerScreen::buttonClicked(Button* button) {
 			context->setScreen(new SelectWorldScreen());
 		}
 	}
+}
+
+bool AddExternalServerScreen::handleBackEvent(bool /*isDown*/) {
+	if (!context) return false;
+	bool touch = context->options && context->options->useTouchUI;
+	if (touch) {
+		context->setScreen(new PlayScreen(true));
+	} else {
+		context->setScreen(new SelectWorldScreen());
+	}
+	return true;
 }

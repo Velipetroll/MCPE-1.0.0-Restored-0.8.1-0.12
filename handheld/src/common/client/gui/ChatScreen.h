@@ -12,6 +12,7 @@ public:
 	void render(int mouseX, int mouseY, float partialTicks) override;
 	void buttonClicked(Button* button) override;
 	void keyPressed(int key) override;
+	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override { return true; }
 
 private:

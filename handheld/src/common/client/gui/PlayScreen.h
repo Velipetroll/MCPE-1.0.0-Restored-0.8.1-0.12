@@ -17,6 +17,7 @@ public:
 	void buttonClicked(Button* button) override;
 	void mouseClicked(int x, int y, int button) override;
 	void mouseReleased(int x, int y, int button) override;
+	bool handleBackEvent(bool isDown = false) override;
 
 private:
 	bool mLocalWorlds = true;

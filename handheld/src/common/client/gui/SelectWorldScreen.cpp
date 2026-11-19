@@ -259,3 +259,9 @@ void SelectWorldScreen::buttonClicked(Button* button) {
 		context->setScreen(new StartMenuScreen());
 	}
 }
+
+bool SelectWorldScreen::handleBackEvent(bool /*isDown*/) {
+	if (!context) return false;
+	context->setScreen(new StartMenuScreen());
+	return true;
+}

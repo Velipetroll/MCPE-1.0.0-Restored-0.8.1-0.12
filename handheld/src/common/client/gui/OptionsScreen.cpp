@@ -312,3 +312,13 @@ void OptionsScreen::buttonClicked(Button* button) {
 		updateButtonLabels();
 	}
 }
+
+bool OptionsScreen::handleBackEvent(bool /*isDown*/) {
+	if (!context) return false;
+	if (mFromPause) {
+		context->setScreen(new PauseScreen());
+	} else {
+		context->setScreen(new StartMenuScreen());
+	}
+	return true;
+}

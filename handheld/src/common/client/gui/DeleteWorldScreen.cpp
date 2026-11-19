@@ -69,3 +69,10 @@ void DeleteWorldScreen::buttonClicked(Button* button) {
 		context->setScreen(touch ? static_cast<Screen*>(new PlayScreen(true)) : static_cast<Screen*>(new SelectWorldScreen()));
 	}
 }
+
+bool DeleteWorldScreen::handleBackEvent(bool /*isDown*/) {
+	if (!context) return false;
+	bool touch = context->options && context->options->useTouchUI;
+	context->setScreen(touch ? static_cast<Screen*>(new PlayScreen(true)) : static_cast<Screen*>(new SelectWorldScreen()));
+	return true;
+}

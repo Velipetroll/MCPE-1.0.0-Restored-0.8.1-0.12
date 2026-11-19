@@ -16,6 +16,7 @@ public:
 	void mouseReleased(int x, int y, int button) override;
 	void buttonClicked(Button* button) override;
 	void keyPressed(int key) override;
+	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override;
 
 private:
@@ -62,6 +63,7 @@ public:
 	void mouseReleased(int x, int y, int button) override;
 	void buttonClicked(Button* button) override;
 	void keyPressed(int key) override;
+	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override;
 
 private:
@@ -97,6 +99,7 @@ public:
 	void mouseScrolled(double yoffset) override;
 	void buttonClicked(Button* button) override;
 	void keyPressed(int key) override;
+	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override;
 
 private:
@@ -157,6 +160,7 @@ public:
 	void mouseReleased(int x, int y, int button) override;
 	void buttonClicked(Button* button) override;
 	void keyPressed(int key) override;
+	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override;
 
 protected:
@@ -212,6 +216,7 @@ public:
 	void mouseReleased(int x, int y, int button) override;
 	void buttonClicked(Button* button) override;
 	void keyPressed(int key) override;
+	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override;
 
 private:
@@ -247,6 +252,7 @@ public:
 	void mouseClicked(int x, int y, int button) override;
 	void buttonClicked(Button* button) override;
 	void keyPressed(int key) override;
+	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override { return true; }
 
 private:
@@ -268,6 +274,7 @@ public:
 	void buttonClicked(Button* button) override;
 	void mouseClicked(int x, int y, int button) override;
 	void keyPressed(int key) override;
+	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override { return true; }
 
 private:

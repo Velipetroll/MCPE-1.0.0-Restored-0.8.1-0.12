@@ -175,7 +175,9 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 {
 	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
 		if (gGuiContext.currentScreen) {
-			gGuiContext.currentScreen->keyPressed(key);
+			if (!gGuiContext.currentScreen->handleBackEvent(true)) {
+				gGuiContext.currentScreen->keyPressed(key);
+			}
 		} else if (gGuiContext.state == GameState::InGame) {
 			gGuiContext.pauseGame();
 		} else if (gGuiContext.state == GameState::Paused) {
@@ -251,13 +253,14 @@ public:
 	double lastX;
 	double lastY;
 	bool firstMouse = true;
+	int mIgnoreMouseFrames = 0;
 	double yaw = 0;
 	double pitch = 0;
 
 	BlockSource* mRegion;//commandContext.dim->getChunkSource()
 	Level* mLevel;
 	Vec3 mPosDelta;
-	float mMaxAutoStep = 0.56f;
+	float mMaxAutoStep = 0.5f;
 	bool mCollidableMobNear = false;
 	float mLastPenetration = 0;
 	bool mHorizontalCollision = false;
@@ -273,6 +276,18 @@ public:
 	float mSmoothBob = 0.0f;
 	float mSwingProgress = 0.0f;
 	double mLastSpacePressTime = -1.0;
+	float mTickAccum = 0.0f;
+	glm::vec3 mPrevPos = glm::vec3(0.0f, 99.62f, 0.0f);
+	glm::vec3 mCurrPos = glm::vec3(0.0f, 99.62f, 0.0f);
+	float mPrevFeetY = 98.0f;
+	float mCurrFeetY = 98.0f;
+	float mRenderFeetY = 98.0f;
+	float mPrevWalkDist = 0.0f;
+	float mCurrWalkDist = 0.0f;
+	float mPrevSmoothBob = 0.0f;
+	float mCurrSmoothBob = 0.0f;
+	bool mWasJumpHeld = false;
+	int mFlyToggleTicks = 0;
 
 	void triggerSwing() {
 		mSwingProgress = 0.001f;
@@ -296,6 +311,8 @@ public:
 	{
 		mBB.set(-0.3f, 98.0f, -0.3f, 0.3f, 99.8f, 0.3f);
 		mPos = glm::vec3(0.0f, 98.0f + mHeightOffset, 0.0f);
+		mPrevPos = mCurrPos = mPos;
+		mPrevFeetY = mCurrFeetY = mRenderFeetY = 98.0f;
 	}
 
 	Camera(Level* level, Dimension* dim) : mPosDelta(0, 0, 0)
@@ -303,6 +320,8 @@ public:
 		setWorld(level, dim);
 		mBB.set(-0.3f, 98.0f, -0.3f, 0.3f, 99.8f, 0.3f);
 		mPos = glm::vec3(0.0f, 98.0f + mHeightOffset, 0.0f);
+		mPrevPos = mCurrPos = mPos;
+		mPrevFeetY = mCurrFeetY = mRenderFeetY = 98.0f;
 	}
 
 	void setWorld(Level* level, Dimension* dim)
@@ -315,6 +334,11 @@ public:
 	{
 		mBB.set(x - 0.3f, feetY, z - 0.3f, x + 0.3f, feetY + 1.8f, z + 0.3f);
 		mPos = glm::vec3(x, feetY + mHeightOffset, z);
+		mPrevPos = mCurrPos = mPos;
+		mPrevFeetY = mCurrFeetY = mRenderFeetY = feetY;
+		mPrevWalkDist = mCurrWalkDist = mWalkDist = 0.0f;
+		mPrevSmoothBob = mCurrSmoothBob = mSmoothBob = 0.0f;
+		mTickAccum = 0.0f;
 		mPosDelta = Vec3(0.0f, 0.0f, 0.0f);
 		mFallDistance = 0.0f;
 		mOnGround = false;
@@ -344,6 +368,11 @@ public:
 		mBB.set(0.5f - 0.3f, feetY, 0.5f - 0.3f,
 		        0.5f + 0.3f, feetY + 1.8f, 0.5f + 0.3f);
 		mPos = glm::vec3(0.5f, feetY + mHeightOffset, 0.5f);
+		mPrevPos = mCurrPos = mPos;
+		mPrevFeetY = mCurrFeetY = mRenderFeetY = feetY;
+		mPrevWalkDist = mCurrWalkDist = mWalkDist = 0.0f;
+		mPrevSmoothBob = mCurrSmoothBob = mSmoothBob = 0.0f;
+		mTickAccum = 0.0f;
 		mPosDelta = Vec3(0.0f, 0.0f, 0.0f);
 		mFallDistance = 0.0f;
 		mOnGround = false;
@@ -351,11 +380,23 @@ public:
 		mSlideOffset = Vec3(0.0f, 0.0f, 0.0f);
 	}
 
+	void teleportTo(float x, float eyeY, float z)
+	{
+		float feetY = eyeY - mHeightOffset;
+		mBB.set(x - 0.3f, feetY, z - 0.3f, x + 0.3f, feetY + 1.8f, z + 0.3f);
+		mPos = glm::vec3(x, eyeY, z);
+		mPrevPos = mCurrPos = mPos;
+		mPrevFeetY = mCurrFeetY = mRenderFeetY = feetY;
+		mTickAccum = 0.0f;
+		mPosDelta = Vec3(0.0f, 0.0f, 0.0f);
+		mFallDistance = 0.0f;
+	}
+
 	bool isInWater()
 	{
-		int bx = Math::floor(mPos.x);
+		int bx = Math::floor(mCurrPos.x);
 		int by = Math::floor(mBB.min.y + 0.3f);
-		int bz = Math::floor(mPos.z);
+		int bz = Math::floor(mCurrPos.z);
 		return getRegion().getMaterial(bx, by, bz).isType(MaterialType::Water);
 	}
 
@@ -383,35 +424,204 @@ public:
 		return glinput.KeyDown(GLFW_KEY_LEFT_SHIFT) || glinput.KeyDown(GLFW_KEY_RIGHT_SHIFT);
 	}
 
+	void moveRelative(float strafe, float forward, float speed)
+	{
+		float dist = std::sqrt(strafe * strafe + forward * forward);
+		if (dist < 0.01f) return;
+		if (dist < 1.0f) dist = 1.0f;
+		float scale = speed / dist;
+		float s = strafe * scale;
+		float f = forward * scale;
+		glm::vec3 right = glm::normalize(glm::cross(cameraMoveFront, cameraUp));
+		mPosDelta.x += f * cameraMoveFront.x + s * right.x;
+		mPosDelta.z += f * cameraMoveFront.z + s * right.z;
+	}
+
+	void stepPhysicsTick()
+	{
+		mPrevPos = mCurrPos;
+		mPrevFeetY = mCurrFeetY;
+		mPrevWalkDist = mCurrWalkDist;
+		mPrevSmoothBob = mCurrSmoothBob;
+
+		if (gGuiContext.isCreative) {
+			if (mOnGround && mIsFlying) {
+				mIsFlying = false;
+			}
+		} else {
+			mIsFlying = false;
+		}
+		mNoGravity = mIsFlying;
+
+		bool inWater = !mIsFlying && isInWater();
+		bool usingItemSlow = gBowPulling || (gItemUseSlowTimer > 0.0f);
+		bool sprinting = !usingItemSlow && (glinput.KeyDown(GLFW_KEY_LEFT_CONTROL) || glinput.KeyDown(GLFW_KEY_RIGHT_CONTROL));
+		bool sneaking = !mIsFlying && isSneaking();
+
+		// LocalPlayer::aiStep + KeyboardInput::tick
+		float moveStrafe = 0.0f;
+		float moveForward = 0.0f;
+		if (glinput.KeyDown(GLFW_KEY_W)) moveForward += 1.0f;
+		if (glinput.KeyDown(GLFW_KEY_S)) moveForward -= 1.0f;
+		if (glinput.KeyDown(GLFW_KEY_A)) moveStrafe -= 1.0f;
+		if (glinput.KeyDown(GLFW_KEY_D)) moveStrafe += 1.0f;
+
+		if (sneaking) {
+			moveStrafe *= 0.3f;
+			moveForward *= 0.3f;
+		}
+		if (usingItemSlow) {
+			moveStrafe *= 0.35f;
+			moveForward *= 0.35f;
+		}
+
+		float flyIdleMod = 1.0f;
+		if (mIsFlying) {
+			float maxIn = std::max(std::abs(moveStrafe), std::abs(moveForward));
+			if (maxIn < 0.01f) {
+				flyIdleMod = 0.75f;
+			}
+			if (glinput.KeyDown(GLFW_KEY_SPACE)) mPosDelta.y += 0.15f;
+			if (isSneaking()) mPosDelta.y -= 0.15f;
+		}
+
+		// Mob::aiStep jump + input damping
+		if (glinput.KeyDown(GLFW_KEY_SPACE) && !mIsFlying) {
+			if (inWater) {
+				mPosDelta.y += 0.04f;
+			} else if (mOnGround) {
+				mPosDelta.y = 0.42f;
+				mOnGround = false;
+				if (!gGuiContext.isCreative) {
+					gGuiContext.exhaustion += sprinting ? 0.6f : 0.25f;
+				}
+			}
+		}
+		moveStrafe *= 0.98f;
+		moveForward *= 0.98f;
+
+		float prevX = mCurrPos.x;
+		float prevZ = mCurrPos.z;
+
+		// Player::travel / Mob::travel (1:1 MCPE 0.8.1)
+		if (inWater) {
+			float startY = mCurrFeetY;
+			moveRelative(moveStrafe, moveForward, 0.02f);
+			move(mPosDelta);
+			mPosDelta.x *= 0.8f;
+			mPosDelta.y = mPosDelta.y * 0.8f - 0.02f;
+			mPosDelta.z *= 0.8f;
+			mFallDistance = 0.0f;
+			if (mHorizontalCollision &&
+			    mRegion->fetchCollisionShapes(getRegion(),
+			        mBB.cloneMove(Vec3(mPosDelta.x, mPosDelta.y + 0.6f - (mCurrFeetY - startY), mPosDelta.z)),
+			        nullptr, false, nullptr).empty()) {
+				mPosDelta.y = 0.3f;
+			}
+		} else if (mIsFlying) {
+			float savedY = mPosDelta.y;
+			float airAcc = sprinting ? 0.075f : 0.05f;
+			moveRelative(moveStrafe, moveForward, airAcc);
+			move(mPosDelta);
+			mPosDelta.y = savedY * 0.6f;
+			float drag = 0.91f * flyIdleMod;
+			mPosDelta.x *= drag;
+			mPosDelta.z *= drag;
+		} else {
+			float friction = 0.91f;
+			if (mOnGround) {
+				friction = 0.6f * 0.91f;
+				BlockID t = getRegion().getBlockID(
+					Math::floor(mCurrPos.x),
+					Math::floor(mBB.min.y - 0.5f),
+					Math::floor(mCurrPos.z)
+				);
+				if (t > 0 && Block::mBlocks[t]) {
+					friction = Block::mBlocks[t]->getFriction() * 0.91f;
+				}
+			}
+			float baseSpeed = 0.1f; // Player::getBaseSpeed() * Player::getWalkingSpeedModifier()
+			if (sprinting) baseSpeed *= 1.3f;
+			float acc = mOnGround
+				? (baseSpeed * (0.16277f / (friction * friction * friction)))
+				: (sprinting ? 0.026f : 0.02f);
+			moveRelative(moveStrafe, moveForward, acc);
+
+			float postFriction = 0.91f;
+			if (mOnGround) {
+				postFriction = 0.6f * 0.91f;
+				BlockID t = getRegion().getBlockID(
+					Math::floor(mCurrPos.x),
+					Math::floor(mBB.min.y - 0.5f),
+					Math::floor(mCurrPos.z)
+				);
+				if (t > 0 && Block::mBlocks[t]) {
+					postFriction = Block::mBlocks[t]->getFriction() * 0.91f;
+				}
+			}
+			move(mPosDelta);
+			mPosDelta.y = (mPosDelta.y - 0.08f) * 0.98f;
+			float horizDrag = postFriction * flyIdleMod;
+			mPosDelta.x *= horizDrag;
+			mPosDelta.z *= horizDrag;
+		}
+
+		float stepDx = mCurrPos.x - prevX;
+		float stepDz = mCurrPos.z - prevZ;
+		float horizStep = std::sqrt(stepDx * stepDx + stepDz * stepDz);
+		if (mOnGround && !mIsFlying) {
+			mCurrWalkDist += horizStep * 0.6f;
+		}
+		if (!gGuiContext.isCreative && !mIsFlying && horizStep > 0.0005f) {
+			float moveRate = sprinting ? 0.14f : (inWater ? 0.09f : 0.07f);
+			gGuiContext.exhaustion += horizStep * moveRate;
+		}
+		float targetBob = (mOnGround && !mIsFlying && horizStep > 0.001f) ? 1.0f : 0.0f;
+		mCurrSmoothBob += (targetBob - mCurrSmoothBob) * 0.4f;
+
+		if (mBB.min.y < -16.0f && !gGuiContext.isCreative && gGuiContext.health > 0) {
+			gGuiContext.health = 0;
+		}
+	}
+
 	void UpdateCam(float deltaTime)
 	{
-		float dt = std::min(std::max(deltaTime, 0.0001f), 0.05f);
-		float xposIn = glinput.mouseXPos;
-		float yposIn = glinput.mouseYPos;
+		float dt = std::min(std::max(deltaTime, 0.0001f), 0.1f);
+		double xposIn = glinput.mouseXPos;
+		double yposIn = glinput.mouseYPos;
 
-		if (firstMouse)
-		{
+		if (!gCursorLocked) {
+			firstMouse = true;
+		} else if (mIgnoreMouseFrames > 0) {
 			lastX = xposIn;
 			lastY = yposIn;
 			firstMouse = false;
+			--mIgnoreMouseFrames;
+		} else {
+			if (firstMouse)
+			{
+				lastX = xposIn;
+				lastY = yposIn;
+				firstMouse = false;
+			}
+
+			float xoffset = static_cast<float>(xposIn - lastX);
+			float yoffset = static_cast<float>(lastY - yposIn);
+			lastX = xposIn;
+			lastY = yposIn;
+
+			float sensitivity = 0.1f;
+			xoffset *= sensitivity;
+			yoffset *= sensitivity;
+
+			yaw += xoffset;
+			pitch += yoffset;
+
+			if (pitch > 89.0)
+				pitch = 89.0;
+			if (pitch < -89.0)
+				pitch = -89.0;
 		}
-
-		float xoffset = xposIn - lastX;
-		float yoffset = lastY - yposIn;
-		lastX = xposIn;
-		lastY = yposIn;
-
-		float sensitivity = 0.1f;
-		xoffset *= sensitivity;
-		yoffset *= sensitivity;
-
-		yaw += xoffset;
-		pitch += yoffset;
-
-		if (pitch > 89.0f)
-			pitch = 89.0f;
-		if (pitch < -89.0f)
-			pitch = -89.0f;
 
 		glm::vec3 direction;
 		direction.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
@@ -435,102 +645,10 @@ public:
 					mLastSpacePressTime = now;
 				}
 			}
-			if (mOnGround && mIsFlying) {
-				mIsFlying = false;
-			}
 		} else {
 			mIsFlying = false;
 		}
-		mNoGravity = mIsFlying;
 
-		bool inWater = !mIsFlying && isInWater();
-		float cameraSpeed = mOnGround ? 2.7f : (mIsFlying ? 1.15f : 0.46f);
-		if (inWater) cameraSpeed = 0.85f;
-
-		bool usingItemSlow = gBowPulling || (gItemUseSlowTimer > 0.0f);
-		bool sprinting = !usingItemSlow && (glinput.KeyDown(GLFW_KEY_LEFT_CONTROL) || glinput.KeyDown(GLFW_KEY_RIGHT_CONTROL));
-		if (sprinting) {
-			cameraSpeed *= mIsFlying ? 1.8f : 1.4f;
-		}
-		if (!mIsFlying && isSneaking()) {
-			cameraSpeed *= 0.4f;
-		}
-		if (usingItemSlow) {
-			cameraSpeed *= 0.2f;
-		}
-
-		const float MAGIC_FRICTION_CONSTANT = 0.91f;
-		const float MAGIC_FRICTION_MODIFIER = 0.6f;
-
-		float friction = MAGIC_FRICTION_CONSTANT;
-		if (inWater) {
-			friction = 0.8f;
-		} else if (mOnGround) {
-			friction = MAGIC_FRICTION_MODIFIER * MAGIC_FRICTION_CONSTANT;
-
-			BlockID t = getRegion().getBlockID(
-				Math::floor(mPos.x),
-				Math::floor(mBB.min.y - 0.1f),
-				Math::floor(mPos.z)
-			);
-
-			if (t > 0 && Block::mBlocks[t]) {
-				friction = Block::mBlocks[t]->getFriction() * MAGIC_FRICTION_CONSTANT;
-			}
-		}
-		float tickScale = dt / 0.05f;
-		friction = std::pow(friction, tickScale);
-
-		if (mIsFlying) {
-			if (glinput.KeyDown(GLFW_KEY_SPACE))
-				mPosDelta.y += 4.5f * dt;
-			if (isSneaking())
-				mPosDelta.y -= 4.5f * dt;
-			mPosDelta.y *= std::pow(0.6f, tickScale);
-		} else if (inWater) {
-			if (glinput.KeyDown(GLFW_KEY_SPACE))
-				mPosDelta.y += 0.85f * dt;
-			mFallDistance = 0.0f;
-		} else {
-			if (mOnGround && glinput.KeyDown(GLFW_KEY_SPACE)) {
-				mPosDelta.y = 0.44f;
-				mOnGround = false;
-				if (!gGuiContext.isCreative) {
-					gGuiContext.exhaustion += sprinting ? 0.6f : 0.25f;
-				}
-			}
-		}
-
-		glm::vec3 mmPos(0, 0, 0);
-		if (glinput.KeyDown(GLFW_KEY_W))
-			mmPos += cameraMoveFront;
-		if (glinput.KeyDown(GLFW_KEY_S))
-			mmPos -= cameraMoveFront;
-		if (glinput.KeyDown(GLFW_KEY_A))
-			mmPos -= glm::normalize(glm::cross(cameraMoveFront, cameraUp));
-		if (glinput.KeyDown(GLFW_KEY_D))
-			mmPos += glm::normalize(glm::cross(cameraMoveFront, cameraUp));
-		if (glm::dot(mmPos, mmPos) > 0.0001f) {
-			mmPos = glm::normalize(mmPos) * cameraSpeed;
-			mPosDelta += Vec3(mmPos.x, mmPos.y, mmPos.z) * dt;
-		}
-
-		float prevX = mPos.x;
-		float prevZ = mPos.z;
-		move(mPosDelta * dt * 20.0f);
-
-		float stepDx = mPos.x - prevX;
-		float stepDz = mPos.z - prevZ;
-		float horizStep = std::sqrt(stepDx * stepDx + stepDz * stepDz);
-		if (mOnGround && !mIsFlying) {
-			mWalkDist += horizStep * 0.6f;
-		}
-		if (!gGuiContext.isCreative && !mIsFlying && horizStep > 0.0005f) {
-			float moveRate = sprinting ? 0.14f : (inWater ? 0.09f : 0.07f);
-			gGuiContext.exhaustion += horizStep * moveRate;
-		}
-		float targetBob = (mOnGround && !mIsFlying && horizStep > 0.001f) ? 1.0f : 0.0f;
-		mSmoothBob += (targetBob - mSmoothBob) * std::min(1.0f, dt * 10.0f);
 		if (mSwingProgress > 0.0f) {
 			mSwingProgress += dt * 4.2f;
 			if (mSwingProgress >= 1.0f) {
@@ -538,23 +656,19 @@ public:
 			}
 		}
 
-		mPosDelta.x *= friction;
-		mPosDelta.z *= friction;
-
-		// Apply gravity after moving (matches Minecraft tick order so jumps clear 1-block ledges at any FPS)
-		if (!mIsFlying) {
-			if (inWater) {
-				mPosDelta.y -= 0.02f * tickScale;
-				mPosDelta.y *= std::pow(0.8f, tickScale);
-			} else {
-				mPosDelta.y -= 0.08f * tickScale;
-				mPosDelta.y *= std::pow(0.98f, tickScale);
-			}
+		constexpr float TICK_DT = 0.05f;
+		mTickAccum += dt;
+		if (mTickAccum > 0.25f) mTickAccum = 0.25f;
+		while (mTickAccum >= TICK_DT) {
+			mTickAccum -= TICK_DT;
+			stepPhysicsTick();
 		}
 
-		if (mBB.min.y < -16.0f && !gGuiContext.isCreative && gGuiContext.health > 0) {
-			gGuiContext.health = 0;
-		}
+		float alpha = mTickAccum / TICK_DT;
+		mPos = glm::mix(mPrevPos, mCurrPos, alpha);
+		mRenderFeetY = mPrevFeetY + (mCurrFeetY - mPrevFeetY) * alpha;
+		mWalkDist = mPrevWalkDist + (mCurrWalkDist - mPrevWalkDist) * alpha;
+		mSmoothBob = mPrevSmoothBob + (mCurrSmoothBob - mPrevSmoothBob) * alpha;
 	}
 };
 
@@ -578,9 +692,12 @@ void Camera::move(const Vec3& posIn) {
 
 	if (mNoPhysics) {
 		moveBBs(speed);
-		mPos.x = (mBB.min.x + mBB.max.x) / 2.0f;
-		mPos.y = mBB.min.y + mHeightOffset - mSlideOffset.y;
-		mPos.z = (mBB.min.z + mBB.max.z) / 2.0f;
+		mCurrFeetY = mBB.min.y;
+		mCurrPos.x = (mBB.min.x + mBB.max.x) / 2.0f;
+		mCurrPos.y = mBB.min.y + mHeightOffset - mSlideOffset.y;
+		mCurrPos.z = (mBB.min.z + mBB.max.z) / 2.0f;
+		mPos = mCurrPos;
+		mRenderFeetY = mCurrFeetY;
 		return;
 	}
 
@@ -821,9 +938,12 @@ void Camera::move(const Vec3& posIn) {
 	{
 		//ScopedProfile("rest");
 
-		mPos.x = (mBB.min.x + mBB.max.x) / 2.0f;
-		mPos.y = mBB.min.y + mHeightOffset - mSlideOffset.y - ((!mIsFlying && isSneaking()) ? 0.08f : 0.0f);
-		mPos.z = (mBB.min.z + mBB.max.z) / 2.0f;
+		mCurrFeetY = mBB.min.y;
+		mCurrPos.x = (mBB.min.x + mBB.max.x) / 2.0f;
+		mCurrPos.y = mBB.min.y + mHeightOffset - mSlideOffset.y - ((!mIsFlying && isSneaking()) ? 0.08f : 0.0f);
+		mCurrPos.z = (mBB.min.z + mBB.max.z) / 2.0f;
+		mPos = mCurrPos;
+		mRenderFeetY = mCurrFeetY;
 
 		mHorizontalCollision = (xaOrg != speed.x) || (zaOrg != speed.z);
 		mVerticalCollision = (yaOrg != speed.y);
@@ -2173,7 +2293,7 @@ void renderWorldSteve3D(const Camera& c,
 	float swingAngle = (sw > 0.0f) ? (-std::sin(std::sqrt(sw) * 3.14159265f) * 85.0f) : 0.0f;
 	bool sneaking = !c.mIsFlying && (glinput.KeyDown(GLFW_KEY_LEFT_SHIFT) || glinput.KeyDown(GLFW_KEY_RIGHT_SHIFT));
 
-	glTranslatef(c.mPos.x, c.mBB.min.y, c.mPos.z);
+	glTranslatef(c.mPos.x, c.mRenderFeetY, c.mPos.z);
 	glRotatef(90.0f - static_cast<float>(c.yaw), 0.0f, 1.0f, 0.0f);
 	glScalef(scale, scale, scale);
 	if (sneaking) {
@@ -2610,6 +2730,28 @@ void renderThreadStuff()
 			gGuiContext.statusBannerTimer = std::max(0.0f, gGuiContext.statusBannerTimer - clampedFrameDt);
 		}
 
+		static bool gManualCursorUnlock = false;
+		if (gGuiContext.state != GameState::InGame || gGuiContext.currentScreen != nullptr) {
+			gManualCursorUnlock = false;
+		}
+		auto syncCursorLock = [&]() {
+			bool wantLock = (gGuiContext.state == GameState::InGame && gGuiContext.currentScreen == nullptr && !gManualCursorUnlock);
+			if (wantLock != gCursorLocked) {
+				gCursorLocked = wantLock;
+				glfwSetInputMode(window, GLFW_CURSOR, gCursorLocked ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+				if (gCursorLocked) {
+					double cx = 0.0, cy = 0.0;
+					glfwGetCursorPos(window, &cx, &cy);
+					glinput.mouseXPos = cx;
+					glinput.mouseYPos = cy;
+					c.lastX = cx;
+					c.lastY = cy;
+					c.firstMouse = true;
+					c.mIgnoreMouseFrames = 2;
+				}
+			}
+		};
+
 		bool renderWorld = ((gGuiContext.state == GameState::InGame) ||
 		                    (gGuiContext.currentScreen && gGuiContext.currentScreen->renderGameBehind())) &&
 		                   commandContext.level != nullptr && commandContext.dim != nullptr;
@@ -2741,6 +2883,7 @@ void renderThreadStuff()
 			HitResult targetHit;
 			bool hasTargetHit = false;
 			bool mobInFront = false;
+			syncCursorLock();
 			if (gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
 				c.UpdateCam(deltaTime);
 
@@ -2807,6 +2950,10 @@ void renderThreadStuff()
 							hazardDamageCooldown = 0.5f;
 						}
 					}
+				}
+				if (gGuiContext.pendingTeleport) {
+					c.teleportTo(gGuiContext.pendingTpX, gGuiContext.pendingTpY, gGuiContext.pendingTpZ);
+					gGuiContext.pendingTeleport = false;
 				}
 				if (!gGuiContext.isCreative && gGuiContext.health <= 0 && !gGuiContext.currentScreen) {
 					triggerPlayerDeath();
@@ -2923,7 +3070,7 @@ void renderThreadStuff()
 						} else if (block == Block::mTNT) {
 							pr = 0.80f; pg = 0.20f; pb = 0.15f;
 						}
-						ParticleSystem::spawnBlockBreak(static_cast<float>(hitPos.x), static_cast<float>(hitPos.y), static_cast<float>(hitPos.z), pr, pg, pb);
+						ParticleSystem::spawnBlockBreak(static_cast<float>(hitPos.x), static_cast<float>(hitPos.y), static_cast<float>(hitPos.z), pr, pg, pb, &region);
 						if (hasBedSecond) {
 							region.removeBlock(bedSecondPos);
 						}
@@ -3006,6 +3153,22 @@ void renderThreadStuff()
 									miningProgress = 0.0f;
 								}
 							} else {
+								static float crackParticleAccum = 0.0f;
+								crackParticleAccum += survDt;
+								if (crackParticleAccum >= 0.09f) {
+									crackParticleAccum = 0.0f;
+									float pr = 0.55f, pg = 0.55f, pb = 0.55f;
+									if (block == Block::mGrass || block == Block::mLeaves || block == Block::mLeaves2) {
+										pr = 0.30f; pg = 0.65f; pb = 0.25f;
+									} else if (block == Block::mDirt || block == Block::mLog || block == Block::mWoodPlanks) {
+										pr = 0.55f; pg = 0.38f; pb = 0.22f;
+									} else if (block == Block::mSand || block == Block::mSandStone) {
+										pr = 0.85f; pg = 0.80f; pb = 0.55f;
+									} else if (block == Block::mTNT) {
+										pr = 0.80f; pg = 0.20f; pb = 0.15f;
+									}
+									ParticleSystem::spawnBlockCrack(static_cast<float>(hitPos.x), static_cast<float>(hitPos.y), static_cast<float>(hitPos.z), targetHit.getFacing(), pr, pg, pb, &region);
+								}
 								miningProgress += survDt / mineInfo.breakTime;
 								if (miningProgress >= 1.0f) {
 									performBreakBlock(hitPos, fb, block, mineInfo.canHarvest);
@@ -3068,7 +3231,65 @@ void renderThreadStuff()
 
 				if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_RIGHT)) {
 					bool handledRightClick = false;
-					if (hasTargetHit && !c.isSneaking()) {
+					if (mobInFront && !held.isNull() && held.getStackSize() > 0) {
+						if (Item::mShears && held.getItem() == Item::mShears) {
+							static Random shearRng;
+							if (mobManager.shearSheep(targetMobIdx, [&](const ItemInstance& dropItem, const Vec3& dropPos) {
+								    Vec3 dvel((shearRng.nextFloat() - 0.5f) * 2.4f, 2.8f + shearRng.nextFloat() * 0.8f, (shearRng.nextFloat() - 0.5f) * 2.4f);
+								    spawnWorldItem(worldItems, dropItem, dropPos, dvel, 0.25f);
+							    })) {
+								SoundEngine::play(SoundEngine::SND_DIG, 0.8f, 1.2f);
+								c.triggerSwing();
+								if (!gGuiContext.isCreative) {
+									int maxDur = getItemMaxDurability(held);
+									if (maxDur > 0) {
+										int nextAux = static_cast<int>(held.getAuxValue()) + 1;
+										if (nextAux > maxDur) held.setNull();
+										else held.setAuxValue(static_cast<short>(nextAux));
+									}
+								}
+								handledRightClick = true;
+							}
+						} else if (Item::mBucket && held.getItem() == Item::mBucket && held.getAuxValue() == 0 && !gGuiContext.isCreative) {
+							// MCPE 0.8.1 Cow::interactWithPlayer: fill empty bucket with milk (aux = 1)
+							if (mobManager.milkCow(targetMobIdx)) {
+								SoundEngine::play(SoundEngine::SND_EAT, 0.7f, 1.1f);
+								c.triggerSwing();
+								ItemInstance milkBucket(Item::mBucket, 1, 1);
+								if (held.getStackSize() <= 1) {
+									held = milkBucket;
+								} else {
+									held.remove(1);
+									gGuiContext.addItemToInventory(milkBucket);
+								}
+								handledRightClick = true;
+							}
+						}
+						if (!handledRightClick) {
+							// MCPE 0.8.1 Animal::interactWithPlayer: feed animal -> 7 PT_HEART particles & love mode
+							if (mobManager.feedAnimal(targetMobIdx, held, [&](const Vec3& pos, float hw, float h, int count) {
+								    for (int k = 0; k < count; ++k) {
+									    float hx = pos.x + (ParticleSystem::rand01() * 2.0f - 1.0f) * hw;
+									    float hy = pos.y + 0.5f + ParticleSystem::rand01() * h;
+									    float hz = pos.z + (ParticleSystem::rand01() * 2.0f - 1.0f) * hw;
+									    ParticleSystem::spawnHeart(hx, hy, hz,
+									                               ParticleSystem::randSigned() * 0.02f,
+									                               ParticleSystem::randSigned() * 0.02f,
+									                               ParticleSystem::randSigned() * 0.02f,
+									                               &c.getRegion());
+								    }
+							    })) {
+								SoundEngine::play(SoundEngine::SND_EAT, 0.65f, 1.15f);
+								c.triggerSwing();
+								if (!gGuiContext.isCreative) {
+									held.remove(1);
+									if (held.getStackSize() <= 0) held.setNull();
+								}
+								handledRightClick = true;
+							}
+						}
+					}
+					if (!handledRightClick && hasTargetHit && !c.isSneaking()) {
 						BlockPos hitPos = targetHit.getBlock();
 						FullBlock fb = region.getBlockAndData(hitPos);
 						const Block* hitBlk = fb.id > 0 ? Block::mBlocks[fb.id] : nullptr;
@@ -3339,22 +3560,21 @@ void renderThreadStuff()
 				bool allowPickup = (gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen);
 				updateWorldItemEntities(worldItems, deltaTime, c.getRegion(), c.mBB, gGuiContext, allowPickup);
 				SoundEngine::setMasterVolume(gGuiOptions.soundVolume);
-				ParticleSystem::tick(clampedDt);
+				ParticleSystem::tick(clampedDt, &c.getRegion());
 				{
-					static float stepDistAccum = 0.0f;
-					if (c.mOnGround && gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
-						float hSpeed = std::sqrt(c.mPosDelta.x * c.mPosDelta.x + c.mPosDelta.z * c.mPosDelta.z);
-						if (hSpeed > 0.01f) {
-							stepDistAccum += hSpeed;
-							if (stepDistAccum >= 1.85f) {
-								stepDistAccum = 0.0f;
-								SoundEngine::play(SoundEngine::SND_STEP, 0.35f, 0.9f + (std::rand() % 20) * 0.01f);
-							}
+					static float lastStepWalkDist = 0.0f;
+					if (c.mWalkDist < lastStepWalkDist) {
+						lastStepWalkDist = c.mWalkDist;
+					}
+					if (c.mOnGround && !c.mIsFlying && gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
+						if (c.mWalkDist - lastStepWalkDist >= 1.1f) {
+							lastStepWalkDist = c.mWalkDist;
+							SoundEngine::play(SoundEngine::SND_STEP, 0.35f, 0.9f + (std::rand() % 20) * 0.01f);
 						}
 					}
 				}
 
-				// Ambient torch / lit furnace particles near player
+				// Ambient torch / lit furnace particles near player (1:1 MCPE 0.8.1 TorchTile/FurnaceTile::animateTick)
 				static float ambientParticleAccum = 0.0f;
 				ambientParticleAccum += clampedDt;
 				if (ambientParticleAccum >= 0.18f) {
@@ -3368,11 +3588,36 @@ void renderThreadStuff()
 						int ry = py + (std::rand() % 9) - 4;
 						int rz = pz + (std::rand() % 13) - 6;
 						if (ry < 1 || ry > 126) continue;
-						BlockID bid = reg.getBlockID(BlockPos(rx, ry, rz));
-						if (Block::mTorch && bid == Block::mTorch->mID) {
-							ParticleSystem::spawnTorchSmoke(rx + 0.5f, ry + 0.72f, rz + 0.5f);
-						} else if (Block::mLitFurnace && bid == Block::mLitFurnace->mID) {
-							ParticleSystem::spawnFurnaceSmoke(rx + 0.5f, ry + 1.05f, rz + 0.5f);
+						BlockPos bpos(rx, ry, rz);
+						FullBlock fb = reg.getBlockAndData(bpos);
+						if (Block::mTorch && fb.id == Block::mTorch->mID) {
+							float tx = rx + 0.5f;
+							float ty = ry + 0.7f;
+							float tz = rz + 0.5f;
+							switch (fb.data & 7) {
+								case TorchBlock::TORCH_WEST:  tx -= 0.27f; ty += 0.22f; break;
+								case TorchBlock::TORCH_EAST:  tx += 0.27f; ty += 0.22f; break;
+								case TorchBlock::TORCH_NORTH: tz -= 0.27f; ty += 0.22f; break;
+								case TorchBlock::TORCH_SOUTH: tz += 0.27f; ty += 0.22f; break;
+								default: break;
+							}
+							ParticleSystem::spawnTorchSmoke(tx, ty, tz, &reg);
+						} else if (Block::mLitFurnace && fb.id == Block::mLitFurnace->mID) {
+							int dir = Block::mLitFurnace->getBlockState(BlockState::FacingDirection).get<int>(fb.data);
+							float fx = rx + 0.5f;
+							float fy = ry + (ParticleSystem::rand01() * 6.0f) * 0.0625f;
+							float fz = rz + 0.5f;
+							float ss = ParticleSystem::rand01() * 0.6f - 0.3f;
+							if (dir == Facing::WEST) {
+								fx -= 0.52f; fz += ss;
+							} else if (dir == Facing::EAST) {
+								fx += 0.52f; fz += ss;
+							} else if (dir == Facing::NORTH) {
+								fx += ss; fz -= 0.52f;
+							} else {
+								fx += ss; fz += 0.52f;
+							}
+							ParticleSystem::spawnFurnaceSmoke(fx, fy, fz, &reg);
 						}
 					}
 				}
@@ -3389,7 +3634,7 @@ void renderThreadStuff()
 					[&](const Vec3& expPos, float radius) {
 						static Random expRng;
 						SoundEngine::play(SoundEngine::SND_EXPLODE, 1.0f);
-						ParticleSystem::spawnExplosion(expPos.x, expPos.y, expPos.z);
+						ParticleSystem::spawnExplosion(expPos.x, expPos.y, expPos.z, radius, &c.getRegion());
 						BlockSource& reg = c.getRegion();
 						int r = static_cast<int>(std::ceil(radius));
 						int cx = Math::floor(expPos.x);
@@ -3423,6 +3668,22 @@ void renderThreadStuff()
 						static Random mobDropRng2;
 						Vec3 dvel((mobDropRng2.nextFloat() - 0.5f) * 2.4f, 3.0f, (mobDropRng2.nextFloat() - 0.5f) * 2.4f);
 						spawnWorldItem(worldItems, dropItem, dropPos, dvel, 0.25f);
+					},
+					&gGuiContext.inventorySlots[std::max(0, std::min(8, gGuiContext.selectedHotbarSlot))],
+					[&](const Vec3& pos, float hw, float h) {
+						ParticleSystem::spawnDeathPoof(pos.x, pos.y, pos.z, hw, h, &c.getRegion());
+					},
+					[&](const Vec3& pos, float hw, float h, int count) {
+						for (int k = 0; k < count; ++k) {
+							float hx = pos.x + (ParticleSystem::rand01() * 2.0f - 1.0f) * hw;
+							float hy = pos.y + 0.5f + ParticleSystem::rand01() * h;
+							float hz = pos.z + (ParticleSystem::rand01() * 2.0f - 1.0f) * hw;
+							ParticleSystem::spawnHeart(hx, hy, hz,
+							                           ParticleSystem::randSigned() * 0.02f,
+							                           ParticleSystem::randSigned() * 0.02f,
+							                           ParticleSystem::randSigned() * 0.02f,
+							                           &c.getRegion());
+						}
 					});
 
 				// Update arrows
@@ -3512,7 +3773,7 @@ void renderThreadStuff()
 						if (t.fuse <= 0.0f) {
 							static Random tntRng;
 							SoundEngine::play(SoundEngine::SND_EXPLODE, 1.0f);
-							ParticleSystem::spawnExplosion(t.x, t.y + 0.5f, t.z);
+							ParticleSystem::spawnExplosion(t.x, t.y + 0.5f, t.z, 3.8f, &reg);
 							int cx = Math::floor(t.x), cy = Math::floor(t.y + 0.5f), cz = Math::floor(t.z);
 							float radius = 3.8f;
 							int r = 4;
@@ -3927,20 +4188,11 @@ void renderThreadStuff()
 		glEnable(GL_DEPTH_TEST);
 		glEnable(GL_CULL_FACE);
 
-		bool wantLock = (gGuiContext.state == GameState::InGame && gGuiContext.currentScreen == nullptr);
-		if (wantLock != gCursorLocked) {
-			gCursorLocked = wantLock;
-			glfwSetInputMode(window, GLFW_CURSOR, gCursorLocked ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
-			if (gCursorLocked) {
-				c.firstMouse = true;
-			}
-		}
-
-		if (glinput.NewKeyDown(GLFW_KEY_U))
+		if (glinput.NewKeyDown(GLFW_KEY_U) && gGuiContext.state == GameState::InGame && gGuiContext.currentScreen == nullptr)
 		{
-			gCursorLocked = !gCursorLocked;
-			glfwSetInputMode(window, GLFW_CURSOR, gCursorLocked ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+			gManualCursorUnlock = !gManualCursorUnlock;
 		}
+		syncCursorLock();
 		glinput.Clear();
 
 		glfwSwapBuffers(window);

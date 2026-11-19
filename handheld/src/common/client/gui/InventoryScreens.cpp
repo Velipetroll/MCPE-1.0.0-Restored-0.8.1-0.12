@@ -261,7 +261,32 @@ namespace {
 		}
 	}
 
-	void drawTexturedBox3D(float x0, float y0, float z0, float w, float h, float d, int u, int v, float texW = 64.0f, float texH = 64.0f) {
+	std::string getArmorModelTexturePath(const ItemInstance& item, bool layer2) {
+		if (item.isNull()) return "";
+		int id = item.getId();
+		auto eq = [&](const Item* it) { return it && id == it->getId(); };
+		if (eq(Item::mHelmet_cloth) || eq(Item::mChestplate_cloth) || eq(Item::mLeggings_cloth) || eq(Item::mBoots_cloth)) {
+			return layer2 ? "textures/models/armor/cloth_2.png" : "textures/models/armor/cloth_1.png";
+		}
+		if (eq(Item::mHelmet_chain) || eq(Item::mChestplate_chain) || eq(Item::mLeggings_chain) || eq(Item::mBoots_chain)) {
+			return layer2 ? "textures/models/armor/chain_2.png" : "textures/models/armor/chain_1.png";
+		}
+		if (eq(Item::mHelmet_iron) || eq(Item::mChestplate_iron) || eq(Item::mLeggings_iron) || eq(Item::mBoots_iron)) {
+			return layer2 ? "textures/models/armor/iron_2.png" : "textures/models/armor/iron_1.png";
+		}
+		if (eq(Item::mHelmet_gold) || eq(Item::mChestplate_gold) || eq(Item::mLeggings_gold) || eq(Item::mBoots_gold)) {
+			return layer2 ? "textures/models/armor/gold_2.png" : "textures/models/armor/gold_1.png";
+		}
+		if (eq(Item::mHelmet_diamond) || eq(Item::mChestplate_diamond) || eq(Item::mLeggings_diamond) || eq(Item::mBoots_diamond)) {
+			return layer2 ? "textures/models/armor/diamond_2.png" : "textures/models/armor/diamond_1.png";
+		}
+		return "";
+	}
+
+	void drawTexturedBox3DUV(float x0, float y0, float z0,
+	                         float w, float h, float d,
+	                         int u, int v, int iw, int ih, int id,
+	                         float texW = 64.0f, float texH = 64.0f) {
 		float x1 = x0 + w;
 		float y1 = y0 + h;
 		float z1 = z0 + d;
@@ -281,10 +306,6 @@ namespace {
 			glTexCoord2f(u0, v0); glVertex3f(dx, dy, dz);
 		};
 
-		int iw = static_cast<int>(w);
-		int ih = static_cast<int>(h);
-		int id = static_cast<int>(d);
-
 		glBegin(GL_QUADS);
 		// Front (+Z)
 		quad(x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1, u + id, v + id, iw, ih);
@@ -299,6 +320,10 @@ namespace {
 		// Bottom (-Y)
 		quad(x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1, u + id + iw, v, iw, id);
 		glEnd();
+	}
+
+	void drawTexturedBox3D(float x0, float y0, float z0, float w, float h, float d, int u, int v, float texW = 64.0f, float texH = 64.0f) {
+		drawTexturedBox3DUV(x0, y0, z0, w, h, d, u, v, static_cast<int>(w), static_cast<int>(h), static_cast<int>(d), texW, texH);
 	}
 
 	void renderSteve3D(const Screen* s, int boxX, int boxY, int boxW, int boxH, int mouseX, int mouseY, bool followMouse) {
@@ -341,6 +366,8 @@ namespace {
 		glClear(GL_DEPTH_BUFFER_BIT);
 		glDisable(GL_CULL_FACE);
 		glEnable(GL_TEXTURE_2D);
+		glEnable(GL_ALPHA_TEST);
+		glAlphaFunc(GL_GREATER, 0.1f);
 		glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
 		glPushMatrix();
@@ -388,10 +415,74 @@ namespace {
 		glRotatef(-headYaw, 0.0f, 1.0f, 0.0f);
 		glRotatef(-headPitch, 1.0f, 0.0f, 0.0f);
 		drawTexturedBox3D(-4.0f, 0.0f, -4.0f, 8.0f, 8.0f, 8.0f, 0, 0);
+
+		if (s && s->context) {
+			std::string helmTex = getArmorModelTexturePath(s->context->armorSlots[0], false);
+			if (!helmTex.empty() && s->bindTexture(helmTex)) {
+				drawTexturedBox3DUV(-4.5f, -0.5f, -4.5f, 9.0f, 9.0f, 9.0f, 0, 0, 8, 8, 8, 64.0f, 32.0f);
+			}
+		}
 		glPopMatrix();
+
+		if (s && s->context) {
+			// Armor slot 1: Chestplate (torso + sleeves)
+			std::string chestTex = getArmorModelTexturePath(s->context->armorSlots[1], false);
+			if (!chestTex.empty() && s->bindTexture(chestTex)) {
+				drawTexturedBox3DUV(-4.5f, 11.5f, -2.5f, 9.0f, 13.0f, 5.0f, 16, 16, 8, 12, 4, 64.0f, 32.0f);
+
+				glPushMatrix();
+				glTranslatef(-6.0f, 22.0f, 0.0f);
+				glRotatef(limbSwing, 1.0f, 0.0f, 0.0f);
+				glRotatef(4.0f, 0.0f, 0.0f, -1.0f);
+				drawTexturedBox3DUV(-2.5f, -10.5f, -2.5f, 5.0f, 13.0f, 5.0f, 40, 16, 4, 12, 4, 64.0f, 32.0f);
+				glPopMatrix();
+
+				glPushMatrix();
+				glTranslatef(6.0f, 22.0f, 0.0f);
+				glRotatef(-limbSwing, 1.0f, 0.0f, 0.0f);
+				glRotatef(4.0f, 0.0f, 0.0f, 1.0f);
+				drawTexturedBox3DUV(-2.5f, -10.5f, -2.5f, 5.0f, 13.0f, 5.0f, 40, 16, 4, 12, 4, 64.0f, 32.0f);
+				glPopMatrix();
+			}
+
+			// Armor slot 2: Leggings (waist + legs, layer 2)
+			std::string legsTex = getArmorModelTexturePath(s->context->armorSlots[2], true);
+			if (!legsTex.empty() && s->bindTexture(legsTex)) {
+				drawTexturedBox3DUV(-4.25f, 11.75f, -2.25f, 8.5f, 12.5f, 4.5f, 16, 16, 8, 12, 4, 64.0f, 32.0f);
+
+				glPushMatrix();
+				glTranslatef(-2.0f, 12.0f, 0.0f);
+				glRotatef(-limbSwing, 1.0f, 0.0f, 0.0f);
+				drawTexturedBox3DUV(-2.25f, -12.25f, -2.25f, 4.5f, 12.5f, 4.5f, 0, 16, 4, 12, 4, 64.0f, 32.0f);
+				glPopMatrix();
+
+				glPushMatrix();
+				glTranslatef(2.0f, 12.0f, 0.0f);
+				glRotatef(limbSwing, 1.0f, 0.0f, 0.0f);
+				drawTexturedBox3DUV(-2.25f, -12.25f, -2.25f, 4.5f, 12.5f, 4.5f, 0, 16, 4, 12, 4, 64.0f, 32.0f);
+				glPopMatrix();
+			}
+
+			// Armor slot 3: Boots
+			std::string bootsTex = getArmorModelTexturePath(s->context->armorSlots[3], false);
+			if (!bootsTex.empty() && s->bindTexture(bootsTex)) {
+				glPushMatrix();
+				glTranslatef(-2.0f, 12.0f, 0.0f);
+				glRotatef(-limbSwing, 1.0f, 0.0f, 0.0f);
+				drawTexturedBox3DUV(-2.5f, -12.4f, -2.5f, 5.0f, 12.8f, 5.0f, 0, 16, 4, 12, 4, 64.0f, 32.0f);
+				glPopMatrix();
+
+				glPushMatrix();
+				glTranslatef(2.0f, 12.0f, 0.0f);
+				glRotatef(limbSwing, 1.0f, 0.0f, 0.0f);
+				drawTexturedBox3DUV(-2.5f, -12.4f, -2.5f, 5.0f, 12.8f, 5.0f, 0, 16, 4, 12, 4, 64.0f, 32.0f);
+				glPopMatrix();
+			}
+		}
 
 		glPopMatrix();
 
+		glDisable(GL_ALPHA_TEST);
 		glDisable(GL_DEPTH_TEST);
 		glDepthMask(GL_FALSE);
 		glEnable(GL_BLEND);
@@ -821,14 +912,19 @@ void InventoryScreen::buttonClicked(Button* button) {
 
 void InventoryScreen::keyPressed(int key) {
 	if (key == 69 /* GLFW_KEY_E */ || key == 256 /* GLFW_KEY_ESCAPE */) {
-		if (isTouchUI(context)) {
-			if (context) context->startGame();
-		} else {
-			returnItemsAndClose();
-		}
+		handleBackEvent(true);
 		return;
 	}
 	Screen::keyPressed(key);
+}
+
+bool InventoryScreen::handleBackEvent(bool /*isDown*/) {
+	if (isTouchUI(context)) {
+		if (context) context->startGame();
+	} else {
+		returnItemsAndClose();
+	}
+	return true;
 }
 
 // --- ArmorScreen ---
@@ -994,10 +1090,15 @@ void ArmorScreen::buttonClicked(Button* button) {
 
 void ArmorScreen::keyPressed(int key) {
 	if (key == 256 /* ESCAPE */ || key == 69 /* E */) {
-		if (context) context->setScreen(new InventoryScreen());
+		handleBackEvent(true);
 		return;
 	}
 	Screen::keyPressed(key);
+}
+
+bool ArmorScreen::handleBackEvent(bool /*isDown*/) {
+	if (context) context->setScreen(new InventoryScreen());
+	return true;
 }
 
 // --- CreativeInventoryScreen ---
@@ -1809,11 +1910,16 @@ void CreativeInventoryScreen::buttonClicked(Button* button) {
 
 void CreativeInventoryScreen::keyPressed(int key) {
 	if (key == 69 || key == 256) {
-		mCarriedItem.setNull();
-		if (context) context->startGame();
+		handleBackEvent(true);
 		return;
 	}
 	Screen::keyPressed(key);
+}
+
+bool CreativeInventoryScreen::handleBackEvent(bool /*isDown*/) {
+	mCarriedItem.setNull();
+	if (context) context->startGame();
+	return true;
 }
 
 // --- PaneCraftingScreen ---
@@ -2195,10 +2301,15 @@ void PaneCraftingScreen::buttonClicked(Button* button) {
 
 void PaneCraftingScreen::keyPressed(int key) {
 	if (key == 256 /* ESCAPE */ || key == 69 /* E */) {
-		closeScreen();
+		handleBackEvent(true);
 		return;
 	}
 	Screen::keyPressed(key);
+}
+
+bool PaneCraftingScreen::handleBackEvent(bool /*isDown*/) {
+	closeScreen();
+	return true;
 }
 
 // --- WorkbenchScreen ---
@@ -2717,10 +2828,15 @@ void FurnaceScreen::buttonClicked(Button* button) {
 
 void FurnaceScreen::keyPressed(int key) {
 	if (key == 256 /* ESCAPE */ || key == 69 /* E */) {
-		closeScreen();
+		handleBackEvent(true);
 		return;
 	}
 	Screen::keyPressed(key);
+}
+
+bool FurnaceScreen::handleBackEvent(bool /*isDown*/) {
+	closeScreen();
+	return true;
 }
 
 // --- ChestScreen ---
@@ -2835,10 +2951,15 @@ void ChestScreen::buttonClicked(Button* button) {
 
 void ChestScreen::keyPressed(int key) {
 	if (key == 256 /* ESCAPE */ || key == 69 /* E */) {
-		closeScreen();
+		handleBackEvent(true);
 		return;
 	}
 	Screen::keyPressed(key);
+}
+
+bool ChestScreen::handleBackEvent(bool /*isDown*/) {
+	closeScreen();
+	return true;
 }
 
 // --- TextEditScreen ---
@@ -2882,6 +3003,10 @@ void TextEditScreen::mouseClicked(int x, int y, int button) {
 }
 
 void TextEditScreen::keyPressed(int key) {
+	if (key == 256 /* ESCAPE */) {
+		handleBackEvent(true);
+		return;
+	}
 	if (key == 259 /* BACKSPACE */) {
 		if (!mLines[mActiveLine].empty()) mLines[mActiveLine].pop_back();
 	} else if (key == 257 /* ENTER */) {
@@ -2890,6 +3015,11 @@ void TextEditScreen::keyPressed(int key) {
 		if (mLines[mActiveLine].size() < 15) mLines[mActiveLine].push_back(static_cast<char>(key));
 	}
 	Screen::keyPressed(key);
+}
+
+bool TextEditScreen::handleBackEvent(bool /*isDown*/) {
+	if (context) context->startGame();
+	return true;
 }
 
 void TextEditScreen::buttonClicked(Button* button) {
