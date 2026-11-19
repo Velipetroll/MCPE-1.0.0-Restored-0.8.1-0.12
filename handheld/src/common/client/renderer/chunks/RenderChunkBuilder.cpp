@@ -216,6 +216,7 @@ void RenderChunkBuilder::_buildRanges() {
 	offset = _setRenderLayerRange(BlockRenderLayer::RENDERLAYER_BLEND, offset, mQueues[BlockRenderLayer::RENDERLAYER_BLEND].getIndexCount());
 	offset = _setRenderLayerRange(BlockRenderLayer::RENDERLAYER_WATER, offset, mQueues[BlockRenderLayer::RENDERLAYER_WATER].getIndexCount());
 	offset = _setRenderLayerRange(BlockRenderLayer::RENDERLAYER_OPAQUE, offset, mQueues[BlockRenderLayer::RENDERLAYER_OPAQUE].getIndexCount());
+	offset = _setRenderLayerRange(BlockRenderLayer::RENDERLAYER_LAVA, offset, mQueues[BlockRenderLayer::RENDERLAYER_LAVA].getIndexCount());
 	offset = _setRenderLayerRange(BlockRenderLayer::RENDERLAYER_ENDPORTAL, offset, mQueues[BlockRenderLayer::RENDERLAYER_ENDPORTAL].getIndexCount());
 	offset = _setRenderLayerRange(BlockRenderLayer::RENDERLAYER_OPTIONAL_ALPHATEST, offset, mQueues[BlockRenderLayer::RENDERLAYER_OPTIONAL_ALPHATEST].getIndexCount());
 	offset = _setRenderLayerRange(BlockRenderLayer::RENDERLAYER_ALPHATEST, offset, mQueues[BlockRenderLayer::RENDERLAYER_ALPHATEST].getIndexCount());

@@ -46,6 +46,9 @@ const AABB& LadderBlock::getVisualShape(DataID data, AABB& bufferAABB, bool isCl
 	case Facing::EAST:
 		bufferAABB.set(Vec3::ZERO, Vec3(r, 1, 1));
 		break;
+	default:
+		bufferAABB.set(Vec3(0, 0, 1 - r), Vec3::ONE);
+		break;
 	}
 
 	return bufferAABB;

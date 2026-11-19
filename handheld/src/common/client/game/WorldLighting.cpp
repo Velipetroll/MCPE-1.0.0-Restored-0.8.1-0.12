@@ -109,14 +109,49 @@ void runBlockBfs(BlockSource& region,
 
 } // namespace
 
-void propagateChunkLighting(BlockSource& region, const ChunkPos& cp) {
+void propagateChunkLighting(BlockSource& region,
+                            const ChunkPos& cp,
+                            std::unordered_set<ChunkPos>* outTouchedChunks) {
 	LevelChunk* lc = region.getChunk(cp);
 	if (!lc) return;
 
 	const LightLayer& skyLayer = region.getDimension().getSkyLightLayer();
-	int baseX = cp.x * 16;
-	int baseZ = cp.z * 16;
-	int allocH = std::min(126, static_cast<int>(lc->getAllocatedHeight()) + 1);
+	const int baseX = cp.x * 16;
+	const int baseZ = cp.z * 16;
+	const int maxH = std::max(0, static_cast<int>(region.getMaxHeight()) - 1);
+
+	// Recompute vertical skylight columns for this chunk from maxH down to 0
+	// so stale skylight 15s trapped under overhangs, trees, or omitted subchunks are cleared.
+	for (int lx = 0; lx < 16; ++lx) {
+		for (int lz = 0; lz < 16; ++lz) {
+			int curSky = 15;
+			for (int y = maxH; y >= 0; --y) {
+				ChunkBlockPos cbp(lx, y, lz);
+				BlockID id = lc->getBlock(cbp);
+				int trans = static_cast<int>(Block::mLightBlock[id]);
+				if (trans >= 15) {
+					curSky = 0;
+				} else {
+					curSky = std::max(0, curSky - trans);
+				}
+
+				uint8_t oldSky = static_cast<uint8_t>(lc->getBrightness(skyLayer, cbp));
+				if (oldSky != static_cast<uint8_t>(curSky)) {
+					lc->setBrightness(skyLayer, cbp, Brightness(static_cast<uint8_t>(curSky)));
+					if (outTouchedChunks) outTouchedChunks->insert(cp);
+				}
+
+				uint8_t emit = static_cast<uint8_t>(Block::mLightEmission[id]);
+				if (emit > 0) {
+					uint8_t oldBlk = static_cast<uint8_t>(lc->getBrightness(LightLayer::BLOCK, cbp));
+					if (emit > oldBlk) {
+						lc->setBrightness(LightLayer::BLOCK, cbp, Brightness(emit));
+						if (outTouchedChunks) outTouchedChunks->insert(cp);
+					}
+				}
+			}
+		}
+	}
 
 	std::queue<LightNode> skyQ;
 	std::queue<LightNode> blkQ;
@@ -130,7 +165,7 @@ void propagateChunkLighting(BlockSource& region, const ChunkPos& cp) {
 			LevelChunk* colLc = (lx >= 0 && lx < 16 && lz >= 0 && lz < 16) ? lc : region.getChunk(colPos);
 			if (!colLc) continue;
 
-			int colTop = std::min(126, std::max(allocH, static_cast<int>(colLc->getAllocatedHeight()) + 1));
+			int colTop = std::min(maxH, static_cast<int>(colLc->getAllocatedHeight()) + 1);
 			for (int y = 0; y <= colTop; ++y) {
 				ChunkBlockPos cbp(wx & 15, y, wz & 15);
 				BlockID id = colLc->getBlock(cbp);
@@ -139,6 +174,7 @@ void propagateChunkLighting(BlockSource& region, const ChunkPos& cp) {
 					uint8_t curBlk = static_cast<uint8_t>(colLc->getBrightness(LightLayer::BLOCK, cbp));
 					if (emit > curBlk) {
 						colLc->setBrightness(LightLayer::BLOCK, cbp, Brightness(emit));
+						if (outTouchedChunks) outTouchedChunks->insert(ChunkPos(colPos));
 					}
 					blkQ.push({ wx, y, wz, std::max(emit, curBlk) });
 				} else if (lx < 0 || lx >= 16 || lz < 0 || lz >= 16) {
@@ -150,19 +186,21 @@ void propagateChunkLighting(BlockSource& region, const ChunkPos& cp) {
 
 				uint8_t sky = static_cast<uint8_t>(colLc->getBrightness(skyLayer, cbp));
 				if (sky > 1 && Block::mLightBlock[id] < Brightness::MAX) {
-					// Seed if adjacent block is darker so BFS fills overhangs/caves
+					// Seed if any of the 6-neighbors is darker so BFS fills overhangs/caves
 					bool needSeed = false;
 					if (lx < 0 || lx >= 16 || lz < 0 || lz >= 16) {
 						needSeed = true;
 					} else {
-						for (int i = 0; i < 4; ++i) {
+						for (int i = 0; i < 6; ++i) {
 							int ax = wx + kDirs[i][0];
+							int ay = y + kDirs[i][1];
 							int az = wz + kDirs[i][2];
+							if (ay < 0 || ay > maxH) continue;
 							if (ax < baseX || ax >= baseX + 16 || az < baseZ || az >= baseZ + 16) {
 								needSeed = true;
 								break;
 							}
-							uint8_t ns = static_cast<uint8_t>(colLc->getBrightness(skyLayer, ChunkBlockPos(ax & 15, y, az & 15)));
+							uint8_t ns = static_cast<uint8_t>(colLc->getBrightness(skyLayer, ChunkBlockPos(ax & 15, ay, az & 15)));
 							if (ns + 1 < sky) {
 								needSeed = true;
 								break;
@@ -181,8 +219,8 @@ void propagateChunkLighting(BlockSource& region, const ChunkPos& cp) {
 	const int maxX = baseX + 30;
 	const int minZ = baseZ - 15;
 	const int maxZ = baseZ + 30;
-	runSkyBfs(region, skyLayer, skyQ, minX, maxX, 0, 127, minZ, maxZ, nullptr);
-	runBlockBfs(region, blkQ, minX, maxX, 0, 127, minZ, maxZ, nullptr);
+	runSkyBfs(region, skyLayer, skyQ, minX, maxX, 0, maxH, minZ, maxZ, outTouchedChunks);
+	runBlockBfs(region, blkQ, minX, maxX, 0, maxH, minZ, maxZ, outTouchedChunks);
 }
 
 void updateLocalLighting(BlockSource& region,

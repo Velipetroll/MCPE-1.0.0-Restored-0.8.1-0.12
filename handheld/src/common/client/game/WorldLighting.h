@@ -8,7 +8,9 @@ class BlockSource;
 
 namespace WorldLighting {
 
-void propagateChunkLighting(BlockSource& region, const ChunkPos& cp);
+void propagateChunkLighting(BlockSource& region,
+                            const ChunkPos& cp,
+                            std::unordered_set<ChunkPos>* outTouchedChunks = nullptr);
 
 void updateLocalLighting(BlockSource& region,
                          const BlockPos& center,

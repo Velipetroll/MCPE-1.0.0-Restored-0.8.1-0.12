@@ -23,7 +23,9 @@ void RenderChunkSorter::setupIndexRanges(RangeIndices terrainLayerRange[], Range
 	terrainLayerRange[enum_cast(TerrainLayer::DoubleSide)] = renderLayerRange[BlockRenderLayer::RENDERLAYER_DOUBLE_SIDED];
 	terrainLayerRange[enum_cast(TerrainLayer::Blend)] = renderLayerRange[BlockRenderLayer::RENDERLAYER_BLEND];
 	terrainLayerRange[enum_cast(TerrainLayer::Water)] = renderLayerRange[BlockRenderLayer::RENDERLAYER_WATER];
-	terrainLayerRange[enum_cast(TerrainLayer::Opaque)] = renderLayerRange[BlockRenderLayer::RENDERLAYER_OPAQUE];
+	terrainLayerRange[enum_cast(TerrainLayer::Opaque)].mStart = renderLayerRange[BlockRenderLayer::RENDERLAYER_OPAQUE].mStart;
+	terrainLayerRange[enum_cast(TerrainLayer::Opaque)].mCount = renderLayerRange[BlockRenderLayer::RENDERLAYER_OPAQUE].mCount +
+		renderLayerRange[BlockRenderLayer::RENDERLAYER_LAVA].mCount;
 	terrainLayerRange[enum_cast(TerrainLayer::Alpha)].mStart = renderLayerRange[BlockRenderLayer::RENDERLAYER_OPTIONAL_ALPHATEST].mStart;
 	terrainLayerRange[enum_cast(TerrainLayer::Alpha)].mCount = renderLayerRange[BlockRenderLayer::RENDERLAYER_OPTIONAL_ALPHATEST].mCount +
 		renderLayerRange[BlockRenderLayer::RENDERLAYER_ALPHATEST].mCount;
@@ -33,6 +35,7 @@ void RenderChunkSorter::setupIndexRanges(RangeIndices terrainLayerRange[], Range
 	terrainLayerRange[enum_cast(TerrainLayer::Far)].mCount = renderLayerRange[BlockRenderLayer::RENDERLAYER_BLEND].mCount +
 		renderLayerRange[BlockRenderLayer::RENDERLAYER_WATER].mCount +
 		renderLayerRange[BlockRenderLayer::RENDERLAYER_OPAQUE].mCount +
+		renderLayerRange[BlockRenderLayer::RENDERLAYER_LAVA].mCount +
 		renderLayerRange[BlockRenderLayer::RENDERLAYER_OPTIONAL_ALPHATEST].mCount;
 	terrainLayerRange[enum_cast(TerrainLayer::OpaqueSeasons)] = renderLayerRange[BlockRenderLayer::RENDERLAYER_SEASONS_OPAQUE];
 	terrainLayerRange[enum_cast(TerrainLayer::AlphaSeasons)] = renderLayerRange[BlockRenderLayer::RENDERLAYER_SEASONS_OPTIONAL_ALPHATEST];

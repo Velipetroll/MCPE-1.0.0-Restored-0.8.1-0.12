@@ -17,6 +17,9 @@ IceBlock::IceBlock(const std::string& nameId, int id, bool packed)
 	setTicking(!packed);
 	setSolid(packed);
 	setPushesOutItems(true);
+	if (!packed) {
+		mRenderLayer = RENDERLAYER_BLEND;
+	}
 }
 
 bool IceBlock::playerWillDestroy(Player& player, const BlockPos& pos, int data) const {
@@ -59,4 +62,12 @@ void IceBlock::tick(BlockSource& region, const BlockPos& pos, Random& random) co
 
 	spawnResources(region, pos, region.getData(pos), 1.0f);
 	region.setBlock(pos, Block::mFlowingWater->mID, Block::UPDATE_ALL);
+}
+
+bool IceBlock::shouldRenderFace(BlockSource& region, const BlockPos& pos, FacingID face, const AABB& shape) const {
+	if (!isSolid() && region.getBlockID(pos) == mID) {
+		return false;
+	}
+
+	return Block::shouldRenderFace(region, pos, face, shape);
 }

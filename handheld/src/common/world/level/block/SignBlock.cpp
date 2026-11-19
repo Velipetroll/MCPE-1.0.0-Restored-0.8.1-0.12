@@ -23,6 +23,9 @@ SignBlock::SignBlock(const std::string& nameId, int id, bool onGround)
 }
 
 const AABB& SignBlock::getVisualShape(BlockSource& region, const BlockPos& pos, AABB& bufferAABB, bool isClipping) const {
+	if (mOnGround) {
+		return Block::getVisualShape(region, pos, bufferAABB, isClipping);
+	}
 	getShape(getFace(region.getData(pos)), bufferAABB);
 	return bufferAABB;
 }

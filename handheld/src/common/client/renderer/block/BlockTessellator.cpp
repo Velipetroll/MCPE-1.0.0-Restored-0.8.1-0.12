@@ -58,8 +58,6 @@
 #include "Components/PointLightComponent.h"
 #endif
 
-#define DISABLEN
-
 Vec2 toUV(BrightnessPair coords) {
 	return{ coords.block / 16.f, coords.sky / 16.f };
 }
@@ -258,6 +256,11 @@ bool BlockTessellator::tessellateInWorld(const Block& block, const BlockPos& pos
 	bool ret = false;
 
 	switch(blockShape) {
+	case BlockShape::INVISIBLE:
+		if (block.isType(Block::mSign) || block.isType(Block::mWallSign) || block.isType(Block::mSkull) || block.isType(Block::mItemFrame)) {
+			ret = tessellateBlockInWorld(block, pos, data);
+		}
+		break;
 	case BlockShape::BLOCK:
 	case BlockShape::BLOCK_HALF:
 		ret = tessellateBlockInWorld(block, pos, data);
@@ -321,6 +324,10 @@ bool BlockTessellator::tessellateInWorld(const Block& block, const BlockPos& pos
 		break;
 	case BlockShape::TREE:
 		ret = tessellateTreeInWorld(block, pos, data);
+		break;
+	case BlockShape::CHEST:
+	case BlockShape::SKULL:
+		ret = tessellateBlockInWorld(block, pos, data);
 		break;
 	case BlockShape::BED:
 		ret = tessellateBedInWorld(block, pos, data);
@@ -946,9 +953,6 @@ bool BlockTessellator::tessellateCrossPolyInWorld(const Block& block, const Bloc
 }
 
 bool BlockTessellator::tessellateDoublePlantInWorld(const DoublePlantBlock& block, const BlockPos& p, DataID data, bool preferPoly, bool renderBothSides) {
-#ifdef DISABLEN
-	return false;
-#endif
 	static const FacingID SUNFLOWER_ADDITIONAL = Facing::NORTH;
 	static const FacingID PLANT_TOP = Facing::UP;
 	static const FacingID PLANT_BOTTOM = Facing::DOWN;
@@ -967,26 +971,39 @@ bool BlockTessellator::tessellateDoublePlantInWorld(const DoublePlantBlock& bloc
 	int type = ((const DoublePlantBlock*)Block::mDoublePlant)->getType(*mRegion, p);
 	bool isTop = Block::mDoublePlant->getBlockState(BlockState::UpperBlockBit).getBool(data);
 	const TextureUVCoordinateSet& stem = blockGraphics.getTexture(isTop ? PLANT_TOP : PLANT_BOTTOM, type);
-	if(preferPoly) {
-		tessellateCrossPolyTexture(stem, v, renderBothSides, block);
-	} else {
-		tessellateCrossTexture(stem, v, renderBothSides, block);
-	}
+	tessellateCrossTexture(stem, v, renderBothSides, block);
 
 	if(isTop && type == enum_cast(DoublePlantType::Sunflower)) {
 		float angle = Math::cos(seed * .8f) * Math::PI * 0.1f;
+		float cosA = std::cos(angle);
+		float sinA = std::sin(angle);
 		const float bOff = -0.3f;
 		const float tOff = 0.05f;
 		const static int FRONT = Facing::DOWN;
 		const static int BACK = Facing::UP;
 		const TextureUVCoordinateSet& sunflowerFront = blockGraphics.getTexture(SUNFLOWER_ADDITIONAL, FRONT);
 		const TextureUVCoordinateSet& sunflowerBack = blockGraphics.getTexture(SUNFLOWER_ADDITIONAL, BACK);
-		BlockTextureTessellator::render(mTessellator, Vec3(v.x + 0.5f, v.y, v.z + tOff), sunflowerFront, true, 0, angle, Vec3(0, 0, bOff));
-		BlockTextureTessellator::render(mTessellator, Vec3(v.x - 0.5f, v.y, v.z + tOff * 1.3f), sunflowerBack, true, 0, angle + 180.0f, Vec3(0, 0, bOff));
+
+		float cx = v.x + 0.5f;
+		float cz = v.z + 0.5f;
+		float dx = 0.5f * cosA;
+		float dz = -0.5f * sinA;
+		float frontZ = tOff;
+		float backZ = tOff * 1.3f;
+
+		// Front sunflower face (tilted slightly upward toward +Z)
+		mTessellator.vertexUV(cx - dx, v.y + 1.0f, cz - dz + frontZ, sunflowerFront._u0, sunflowerFront._v0);
+		mTessellator.vertexUV(cx - dx, v.y,        cz - dz + frontZ + bOff, sunflowerFront._u0, sunflowerFront._v1);
+		mTessellator.vertexUV(cx + dx, v.y,        cz + dz + frontZ + bOff, sunflowerFront._u1, sunflowerFront._v1);
+		mTessellator.vertexUV(cx + dx, v.y + 1.0f, cz + dz + frontZ, sunflowerFront._u1, sunflowerFront._v0);
+
+		// Back sunflower face
+		mTessellator.vertexUV(cx + dx, v.y + 1.0f, cz + dz + backZ, sunflowerBack._u0, sunflowerBack._v0);
+		mTessellator.vertexUV(cx + dx, v.y,        cz + dz + backZ + bOff, sunflowerBack._u0, sunflowerBack._v1);
+		mTessellator.vertexUV(cx - dx, v.y,        cz - dz + backZ + bOff, sunflowerBack._u1, sunflowerBack._v1);
+		mTessellator.vertexUV(cx - dx, v.y + 1.0f, cz - dz + backZ, sunflowerBack._u1, sunflowerBack._v0);
 	}
 
-//  const TextureUVCoordinateSet& tex = mUseFixedTexture ? mFixedTexture : block.getTexture(0);
-//  tessellateCrossPolyTexture(tex, getData(x, y, z), xt, yt, zt);
 	return true;
 }
 
@@ -1261,11 +1278,7 @@ void BlockTessellator::tessellateCrossTexture(const TextureUVCoordinateSet& tex,
 }
 
 void BlockTessellator::tessellateCrossPolyTexture(const TextureUVCoordinateSet& tex, const Vec3& pos, bool renderBothSides, const Block& block) {
-#ifdef DISABLEN
-	return;
-#endif
-	BlockTextureTessellator::render(mTessellator, pos, tex, true, tex.pixelWidth(), 45, Vec3::ZERO, renderBothSides, mUseNormals);
-	BlockTextureTessellator::render(mTessellator, pos, tex, true, tex.pixelWidth(), 135, Vec3::ZERO, renderBothSides, mUseNormals);
+	tessellateCrossTexture(tex, pos, renderBothSides, block);
 }
 
 void BlockTessellator::tessellateStemTexture(const Block& block, DataID data, float h, float x, float y, float z) {
@@ -2343,9 +2356,6 @@ bool BlockTessellator::tessellateVineInWorld(const Block& block, const BlockPos&
 }
 
 bool BlockTessellator::tessellateCocoaInWorld(const CocoaBlock& block, const BlockPos& p, DataID data) {
-#ifdef DISABLEN
-	return false;
-#endif
 	mTessellator.color(Color::WHITE);
 	_tex1(toUV(getLightColor(p)));
 
@@ -2455,16 +2465,36 @@ bool BlockTessellator::tessellateCocoaInWorld(const CocoaBlock& block, const Blo
 
 	// stalk
 	TextureUVCoordinateSet stalk = cocoaTex.subTexture(12 * scale, 0, 4 * (int)scale, 4 * (int)scale);
-	float offset = (4.0f / 16.0f);
+	float sx0 = p.x + 0.5f;
+	float sz0 = p.z + 0.5f;
+	float sx1 = sx0;
+	float sz1 = sz0;
+	if (dir == Direction::NORTH) {
+		sz0 = p.z + 4.0f / 16.0f;
+		sz1 = float(p.z);
+	} else if (dir == Direction::WEST) {
+		sx0 = p.x + 4.0f / 16.0f;
+		sx1 = float(p.x);
+	} else if (dir == Direction::SOUTH) {
+		sz0 = p.z + 12.0f / 16.0f;
+		sz1 = p.z + 1.0f;
+	} else if (dir == Direction::EAST) {
+		sx0 = p.x + 12.0f / 16.0f;
+		sx1 = p.x + 1.0f;
+	}
 
-	if(dir == Direction::NORTH) {
-		BlockTextureTessellator::render(mTessellator, Vec3((float)p.x, (float)p.y, (float)p.z - offset), stalk, true, 0, 270.0f, Vec3::ZERO, false, false, tex.pixelWidth());
-	} else if(dir == Direction::WEST) {
-		BlockTextureTessellator::render(mTessellator, Vec3((float)p.x - offset, (float)p.y, (float)p.z), stalk, true, 0, 0, Vec3::ZERO, false, false, tex.pixelWidth());
-	} else if(dir == Direction::SOUTH) {
-		BlockTextureTessellator::render(mTessellator, Vec3((float)p.x, (float)p.y, (float)p.z + offset), stalk, true, 0, 90, Vec3::ZERO, false, false, tex.pixelWidth());
-	} else if(dir == Direction::EAST) {
-		BlockTextureTessellator::render(mTessellator, Vec3((float)p.x + offset, (float)p.y, (float)p.z), stalk, true, 0, 180, Vec3::ZERO, false, false, tex.pixelWidth());
+	if (sx0 != sx1 || sz0 != sz1) {
+		float sy0 = p.y + 1.0f;
+		float sy1 = p.y + 12.0f / 16.0f;
+		mTessellator.vertexUV(sx0, sy0, sz0, stalk._u0, stalk._v0);
+		mTessellator.vertexUV(sx0, sy1, sz0, stalk._u0, stalk._v1);
+		mTessellator.vertexUV(sx1, sy1, sz1, stalk._u1, stalk._v1);
+		mTessellator.vertexUV(sx1, sy0, sz1, stalk._u1, stalk._v0);
+
+		mTessellator.vertexUV(sx1, sy0, sz1, stalk._u1, stalk._v0);
+		mTessellator.vertexUV(sx1, sy1, sz1, stalk._u1, stalk._v1);
+		mTessellator.vertexUV(sx0, sy1, sz0, stalk._u0, stalk._v1);
+		mTessellator.vertexUV(sx0, sy0, sz0, stalk._u0, stalk._v0);
 	}
 
 	return true;
@@ -3355,8 +3385,7 @@ void BlockTessellator::appendTessellatedBlock(const FullBlock& fullBlock) {
 		tessellateCrossTexture(block, fullBlock.data, Vec3(-0.5f, -0.5f, -0.5f), true);
 	} else if (blockShape == BlockShape::CROSS_TEXTURE_POLY) {
 		const TextureUVCoordinateSet& tex = blockGraphics.getTexture(Facing::DOWN, dataVariant);
-		auto& vec = BlockTextureTessellator::getTessellatedTexturesInfo(tex.sourceFileLocation);
-		mTessellator.begin(vec.size() * 4 * 2);
+		mTessellator.begin(4 * 2);
 		tessellateCrossPolyTexture(tex, { -0.5f, -0.5f, -0.5f }, true, block);
 	} else if (blockShape == BlockShape::STEM) {
 		mTessellator.begin(4 * 2);
@@ -5320,47 +5349,26 @@ bool BlockTessellator::tessellateCauldronInWorld(const Block& b, const BlockPos&
 		renderWest(b, p, texSide);
 	}
 
+	bool rendered = (mRenderingLayer == BlockRenderLayer::RENDERLAYER_OPAQUE);
 	if (data > 0) {
-		int requiredRenderLayer = BlockRenderLayer::RENDERLAYER_OPAQUE;
-
-		//TODO: rherlitz
-// 		CauldronBlockEntity* cauldronEntity = nullptr;
-// 		if(mRegion) {
-// 			// region will be null if this block can be pushed.
-// 			cauldronEntity = static_cast<CauldronBlockEntity*>(mRegion->getBlockEntity(p));
-// 		}
-// 
- 		int textureIndex = CAULDRON_WATER;
-// 		// Don't add the water into the block tessellation if there's a potion in the cauldron as that will be drawn by the BlockEntity
-// 		if (cauldronEntity != nullptr) {
-// 			if (cauldronEntity->getPotionId() >= 0) {
-// 				mTessellator.color(cauldronEntity->getPotionColor());
-// 			}
-// 			else if (cauldronEntity->hasCustomColor()) {
-// 				mTessellator.color(cauldronEntity->getCustomColor());
-// 			}
-// 			else {
-// 				textureIndex = STILL_WATER;
-// 				mTessellator.color(CauldronBlockEntity::WATER_COLOR);
-// 				requiredRenderLayer = BlockRenderLayer::RENDERLAYER_BLEND;
-// 			}
-// 		}
-// 		else {
-// 			textureIndex = STILL_WATER;
-// 			mTessellator.color(CauldronBlockEntity::WATER_COLOR);
-// 			requiredRenderLayer = BlockRenderLayer::RENDERLAYER_BLEND;
-// 		}
+		int requiredRenderLayer = BlockRenderLayer::RENDERLAYER_BLEND;
+		int textureIndex = STILL_WATER;
 
 		if (requiredRenderLayer == mRenderingLayer) {
+			_tex1(toUV(getLightColor(p)));
+			Color waterColor = mRegion ? mRegion->getBiome(p).mWaterColor : Biome::DEFAULT_WATER_COLOR;
+			waterColor.a = 0.85f;
+			mTessellator.color(waterColor);
+
 			auto& texWater = blockGraphics.getTexture(textureIndex);
-		
 			float height = 3.0f / 16.0f + CauldronBlock::getWaterLevel(data) * 2.0f / 16.0f;
 			mCurrentShape.set(Vec3(2.0f / 16.0f, height, 2.0f / 16.0f), Vec3(14.0f / 16.0f, height, 14.0f / 16.0f));
 			renderFaceUp(b, p, texWater);
+			rendered = true;
 		}
 	}
 
-	return true;
+	return rendered;
 }
 
 bool BlockTessellator::tessellateRepeaterInWorld(const Block& block, const BlockPos& p, int data) {

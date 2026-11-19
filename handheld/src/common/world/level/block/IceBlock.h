@@ -19,4 +19,6 @@ public:
 	int getResourceCount(Random& random, int data, int bonusLootLevel = 0) const override;
 
 	void tick(BlockSource& region, const BlockPos& pos, Random& random) const override;
+
+	bool shouldRenderFace(BlockSource& region, const BlockPos& pos, FacingID face, const AABB& shape) const override;
 };

@@ -412,9 +412,15 @@ void RenderChunk::updateFaceSortState(BlockPos cameraPos) {
 		return;
 	}
 
-	// Determine chunk position relative to the camera
-	BlockPos chunkPos = mPosition / RENDERCHUNK_SIDE;
-	BlockPos camPos = BlockPos((float)cameraPos.x / RENDERCHUNK_SIDE, (float)cameraPos.y / RENDERCHUNK_SIDE, (float)cameraPos.z / RENDERCHUNK_SIDE);
+	// Determine chunk position relative to the camera using floor division so negative coordinates align with chunk boundaries
+	BlockPos chunkPos(
+		Math::floor((float)mPosition.x / RENDERCHUNK_SIDE),
+		Math::floor((float)mPosition.y / RENDERCHUNK_SIDE),
+		Math::floor((float)mPosition.z / RENDERCHUNK_SIDE));
+	BlockPos camPos(
+		Math::floor((float)cameraPos.x / RENDERCHUNK_SIDE),
+		Math::floor((float)cameraPos.y / RENDERCHUNK_SIDE),
+		Math::floor((float)cameraPos.z / RENDERCHUNK_SIDE));
 	BlockPos cameraDelta = chunkPos - camPos;
 
 	// Clamp the camera delta.  
@@ -464,46 +470,18 @@ void RenderChunk::sortFaces() {
 	int idx = 0;
 	for (int rangeIdx = 0; rangeIdx < BlockRenderLayer::_RENDERLAYER_COUNT; rangeIdx++) {
 
-		// Determine which faces to render
-		int faceTypesToRender[7];
-		unsigned int numFaceTypesToRender = 0;
-		if (rangeIdx == BlockRenderLayer::RENDERLAYER_ALPHATEST ||
-			rangeIdx == BlockRenderLayer::RENDERLAYER_ALPHATEST_SINGLE_SIDE ||
-			rangeIdx == BlockRenderLayer::RENDERLAYER_OPTIONAL_ALPHATEST ||
-			rangeIdx == BlockRenderLayer::RENDERLAYER_SEASONS_OPTIONAL_ALPHATEST) {
-
-			// Render all alpha tested faces
-			faceTypesToRender[numFaceTypesToRender++] = Facing::EAST;
-			faceTypesToRender[numFaceTypesToRender++] = Facing::WEST;
-			faceTypesToRender[numFaceTypesToRender++] = Facing::UP;
-			faceTypesToRender[numFaceTypesToRender++] = Facing::DOWN;
-			faceTypesToRender[numFaceTypesToRender++] = Facing::SOUTH;
-			faceTypesToRender[numFaceTypesToRender++] = Facing::NORTH;
-			faceTypesToRender[numFaceTypesToRender++] = Facing::NOT_DEFINED;
-
-		}
-		else {
-			//theaperturecat
-			/*faceTypesToRender[numFaceTypesToRender++] = Facing::EAST;
-			faceTypesToRender[numFaceTypesToRender++] = Facing::WEST;
-			faceTypesToRender[numFaceTypesToRender++] = Facing::UP;
-			faceTypesToRender[numFaceTypesToRender++] = Facing::DOWN;
-			faceTypesToRender[numFaceTypesToRender++] = Facing::SOUTH;
-			faceTypesToRender[numFaceTypesToRender++] = Facing::NORTH;*/
-			
-			
-			
-			// include front faces
-			if (mLastSortCameraDelta.x <= 0)	faceTypesToRender[numFaceTypesToRender++] = Facing::EAST;
-			if (mLastSortCameraDelta.x >= 0)	faceTypesToRender[numFaceTypesToRender++] = Facing::WEST;
-			if (mLastSortCameraDelta.y <= 0)	faceTypesToRender[numFaceTypesToRender++] = Facing::UP;
-			if (mLastSortCameraDelta.y >= 0)	faceTypesToRender[numFaceTypesToRender++] = Facing::DOWN;
-			if (mLastSortCameraDelta.z <= 0)	faceTypesToRender[numFaceTypesToRender++] = Facing::SOUTH;
-			if (mLastSortCameraDelta.z >= 0)	faceTypesToRender[numFaceTypesToRender++] = Facing::NORTH;
-
-			// include all faces that don't have a defined direction
-			faceTypesToRender[numFaceTypesToRender++] = Facing::NOT_DEFINED;
-		}
+		// Emit all 7 face buckets across every layer; hardware backface culling handles single-sided faces
+		// while preventing sub-block/double-sided/translucent faces from vanishing in negative coords or during sort transitions.
+		int faceTypesToRender[7] = {
+			Facing::EAST,
+			Facing::WEST,
+			Facing::UP,
+			Facing::DOWN,
+			Facing::SOUTH,
+			Facing::NORTH,
+			Facing::NOT_DEFINED
+		};
+		const unsigned int numFaceTypesToRender = 7;
 
 		// record the start index for the sorted indices for this render layer 
 		mSortedRenderLayerIndexRange[rangeIdx].mStart = idx;

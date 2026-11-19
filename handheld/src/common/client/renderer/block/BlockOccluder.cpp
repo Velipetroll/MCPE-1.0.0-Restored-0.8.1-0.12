@@ -41,7 +41,7 @@ void BlockOccluder::_updateRenderFace(const Block& block, const BlockPos& p, con
 		_setOccluded(face, _shouldOccludeSlab(face, shape, p));
 	else if (block.hasProperty(BlockProperty::Leaf))
 		_setOccluded(face, _shouldOccludeLeaves(face, shape, p));
-	else if (block.mID == Block::mGlass->mID)
+	else if (block.mID == Block::mGlass->mID || block.mID == Block::mIce->mID)
 		_setOccluded(face, _shouldOccludeGlass(face, shape, p));
 	else if (block.hasProperty(BlockProperty::ThinConnects2D))
 		_setOccluded(face, _shouldOccludeThinFence(face, shape, p));

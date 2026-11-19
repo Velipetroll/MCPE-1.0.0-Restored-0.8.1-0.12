@@ -1,5 +1,7 @@
 #include "rendermaterial.h"
 
+#include <algorithm>
+#include <vector>
 #include "Debug/Log.h"
 
 namespace mce
@@ -19,11 +21,24 @@ namespace mce
 		std::string vertexPath = getNodeValue("vertexShader").asString();
 		std::string fragmentPath = getNodeValue("fragmentShader").asString();
 
-		std::vector<std::string> defines;
-
-		for (auto& n : getNodeValue("defines"))
+		std::vector<const RenderMaterial*> chain;
+		for (const RenderMaterial* cur = this; cur != nullptr; cur = cur->parent)
 		{
-			defines.push_back(n.asString());
+			chain.push_back(cur);
+		}
+
+		std::vector<std::string> defines;
+		for (auto it = chain.rbegin(); it != chain.rend(); ++it)
+		{
+			Json::Value defs = (*it)->myroot.get("defines", Json::Value());
+			for (auto& n : defs)
+			{
+				std::string d = n.asString();
+				if (!d.empty() && std::find(defines.begin(), defines.end(), d) == defines.end())
+				{
+					defines.push_back(d);
+				}
+			}
 		}
 
 		//std::vector<std::string> defines = getNodeValue("defines")//getNodeValue("defines").getMemberNames();
@@ -35,48 +50,52 @@ namespace mce
 		}
 		myShader = new Shader(fragmentPath,vertexPath,vertexFields,defines);
 
-		for (auto& str : getNodeValue("states"))
+		for (auto it = chain.rbegin(); it != chain.rend(); ++it)
 		{
-			if (str == "InvertCulling")
+			Json::Value states = (*it)->myroot.get("states", Json::Value());
+			for (auto& str : states)
 			{
-				cullMode = CullMode::INVERT;
-			}
-			else if (str == "DisableCulling")
-			{
-				cullMode = CullMode::DISABLED;
-			}
-			else if (str == "Blending")
-			{
-				blending = true;
-			}
-			else if (str == "EnableStencilTest")
-			{
-				stencilTest = true;
-			}
-			else if (str == "DisableDepthWrite")
-			{
-				depthWrite = false;
-			}
-			else if (str == "StencilWrite")
-			{
-				stencilWrite = true;
-			}
-			else if (str == "DisableAlphaWrite")
-			{
+				if (str == "InvertCulling")
+				{
+					cullMode = CullMode::INVERT;
+				}
+				else if (str == "DisableCulling")
+				{
+					cullMode = CullMode::DISABLED;
+				}
+				else if (str == "Blending")
+				{
+					blending = true;
+				}
+				else if (str == "EnableStencilTest")
+				{
+					stencilTest = true;
+				}
+				else if (str == "DisableDepthWrite")
+				{
+					depthWrite = false;
+				}
+				else if (str == "StencilWrite")
+				{
+					stencilWrite = true;
+				}
+				else if (str == "DisableAlphaWrite")
+				{
 
-			}
-			else if (str == "DisableColorWrite")
-			{
+				}
+				else if (str == "DisableColorWrite")
+				{
 
-			}
-			else if (str == "EnableAlphaToCoverage")
-			{
-				//?
-			}
-			else
-			{
-				LOGW("Unknown material state %s\n",str.asCString());
-				assert(0);
+				}
+				else if (str == "EnableAlphaToCoverage")
+				{
+					//?
+				}
+				else
+				{
+					LOGW("Unknown material state %s\n",str.asCString());
+					assert(0);
+				}
 			}
 		}
 		Json::Value dfunc = getNodeValue("depthFunc");

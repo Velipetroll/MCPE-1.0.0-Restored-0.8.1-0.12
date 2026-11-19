@@ -42,6 +42,11 @@
 #include "world/level/block/TrapDoorBlock.h"
 #include "world/level/block/FenceGateBlock.h"
 #include "world/level/block/TorchBlock.h"
+#include "world/level/block/VineBlock.h"
+#include "world/level/block/LeverBlock.h"
+#include "world/level/block/RotatedPillarBlock.h"
+#include "world/level/block/SlabBlock.h"
+#include "world/Direction.h"
 #include "world/level/GameType.h"
 #include "world/level/material/Material.h"
 #include "util/Random.h"
@@ -171,6 +176,15 @@ struct CCTX
 
 extern CCTX commandContext;
 
+void char_callback(GLFWwindow* window, unsigned int codepoint)
+{
+	if (gGuiContext.currentScreen) {
+		gGuiContext.currentScreen->charTyped(codepoint);
+	} else if (gGuiContext.state == GameState::InGame && codepoint == '/') {
+		gGuiContext.setScreen(new ChatScreen("/"));
+	}
+}
+
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
 	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
@@ -286,6 +300,15 @@ public:
 	float mCurrWalkDist = 0.0f;
 	float mPrevSmoothBob = 0.0f;
 	float mCurrSmoothBob = 0.0f;
+	float mWalkAnimPos = 0.0f;
+	float mPrevWalkAnimPos = 0.0f;
+	float mCurrWalkAnimPos = 0.0f;
+	float mWalkAnimSpeed = 0.0f;
+	float mPrevWalkAnimSpeed = 0.0f;
+	float mCurrWalkAnimSpeed = 0.0f;
+	float mBodyYaw = 0.0f;
+	float mPrevBodyYaw = 0.0f;
+	float mCurrBodyYaw = 0.0f;
 	bool mWasJumpHeld = false;
 	int mFlyToggleTicks = 0;
 
@@ -338,6 +361,9 @@ public:
 		mPrevFeetY = mCurrFeetY = mRenderFeetY = feetY;
 		mPrevWalkDist = mCurrWalkDist = mWalkDist = 0.0f;
 		mPrevSmoothBob = mCurrSmoothBob = mSmoothBob = 0.0f;
+		mPrevWalkAnimPos = mCurrWalkAnimPos = mWalkAnimPos = 0.0f;
+		mPrevWalkAnimSpeed = mCurrWalkAnimSpeed = mWalkAnimSpeed = 0.0f;
+		mPrevBodyYaw = mCurrBodyYaw = mBodyYaw = static_cast<float>(yawIn);
 		mTickAccum = 0.0f;
 		mPosDelta = Vec3(0.0f, 0.0f, 0.0f);
 		mFallDistance = 0.0f;
@@ -372,6 +398,9 @@ public:
 		mPrevFeetY = mCurrFeetY = mRenderFeetY = feetY;
 		mPrevWalkDist = mCurrWalkDist = mWalkDist = 0.0f;
 		mPrevSmoothBob = mCurrSmoothBob = mSmoothBob = 0.0f;
+		mPrevWalkAnimPos = mCurrWalkAnimPos = mWalkAnimPos = 0.0f;
+		mPrevWalkAnimSpeed = mCurrWalkAnimSpeed = mWalkAnimSpeed = 0.0f;
+		mPrevBodyYaw = mCurrBodyYaw = mBodyYaw = static_cast<float>(yaw);
 		mTickAccum = 0.0f;
 		mPosDelta = Vec3(0.0f, 0.0f, 0.0f);
 		mFallDistance = 0.0f;
@@ -443,6 +472,9 @@ public:
 		mPrevFeetY = mCurrFeetY;
 		mPrevWalkDist = mCurrWalkDist;
 		mPrevSmoothBob = mCurrSmoothBob;
+		mPrevWalkAnimPos = mCurrWalkAnimPos;
+		mPrevWalkAnimSpeed = mCurrWalkAnimSpeed;
+		mPrevBodyYaw = mCurrBodyYaw;
 
 		if (gGuiContext.isCreative) {
 			if (mOnGround && mIsFlying) {
@@ -576,8 +608,48 @@ public:
 			float moveRate = sprinting ? 0.14f : (inWater ? 0.09f : 0.07f);
 			gGuiContext.exhaustion += horizStep * moveRate;
 		}
-		float targetBob = (mOnGround && !mIsFlying && horizStep > 0.001f) ? 1.0f : 0.0f;
+		float targetBob = (mOnGround && !mIsFlying) ? std::min(horizStep * 10.0f, 1.0f) : 0.0f;
 		mCurrSmoothBob += (targetBob - mCurrSmoothBob) * 0.4f;
+
+		// MCPE 0.8.1 Mob::tick (L358-406) body yaw tracking + Mob::updateWalkAnim (L1047-1088)
+		auto wrapDeg = [](float d) {
+			while (d < -180.0f) d += 360.0f;
+			while (d >= 180.0f) d -= 360.0f;
+			return d;
+		};
+		float headYawDeg = static_cast<float>(yaw);
+		float targetBodyYaw = mCurrBodyYaw;
+		if (horizStep > 0.02f) {
+			targetBodyYaw = std::atan2(stepDz, stepDx) * (180.0f / 3.14159265f);
+		}
+		if (mSwingProgress > 0.0f || gBowPulling) {
+			targetBodyYaw = headYawDeg;
+		}
+		float j = wrapDeg(targetBodyYaw - mCurrBodyYaw);
+		float newBodyYaw = mCurrBodyYaw + j * 0.3f;
+		float k = wrapDeg(headYawDeg - newBodyYaw);
+		if (k < -75.0f) k = -75.0f;
+		if (k >= 75.0f) k = 75.0f;
+		newBodyYaw = headYawDeg - k;
+		if (k * k > 2500.0f) {
+			newBodyYaw += k * 0.2f;
+		}
+		mCurrBodyYaw = newBodyYaw;
+		while (mCurrBodyYaw - mPrevBodyYaw < -180.0f) mPrevBodyYaw -= 360.0f;
+		while (mCurrBodyYaw - mPrevBodyYaw >= 180.0f) mPrevBodyYaw += 360.0f;
+
+		float walkMult = 1.0f;
+		if (!mOnGround && mPosDelta.y > 0.0f) {
+			walkMult *= 0.35f;
+		}
+		float v9 = horizStep * 4.0f;
+		if (v9 == 0.0f) {
+			v9 = std::abs(wrapDeg(mCurrBodyYaw - mPrevBodyYaw)) * 0.15f;
+			if (v9 > 0.5f) v9 = 0.5f;
+		}
+		if (v9 > 1.0f) v9 = 1.0f;
+		mCurrWalkAnimSpeed += (v9 * walkMult - mCurrWalkAnimSpeed) * 0.4f;
+		mCurrWalkAnimPos += mCurrWalkAnimSpeed;
 
 		if (mBB.min.y < -16.0f && !gGuiContext.isCreative && gGuiContext.health > 0) {
 			gGuiContext.health = 0;
@@ -669,6 +741,12 @@ public:
 		mRenderFeetY = mPrevFeetY + (mCurrFeetY - mPrevFeetY) * alpha;
 		mWalkDist = mPrevWalkDist + (mCurrWalkDist - mPrevWalkDist) * alpha;
 		mSmoothBob = mPrevSmoothBob + (mCurrSmoothBob - mPrevSmoothBob) * alpha;
+		mWalkAnimSpeed = std::min(1.0f, mPrevWalkAnimSpeed + (mCurrWalkAnimSpeed - mPrevWalkAnimSpeed) * alpha);
+		mWalkAnimPos = mCurrWalkAnimPos - (1.0f - alpha) * mCurrWalkAnimSpeed;
+		float bodyDiff = mCurrBodyYaw - mPrevBodyYaw;
+		while (bodyDiff < -180.0f) bodyDiff += 360.0f;
+		while (bodyDiff >= 180.0f) bodyDiff -= 360.0f;
+		mBodyYaw = mPrevBodyYaw + bodyDiff * alpha;
 	}
 };
 
@@ -1106,6 +1184,7 @@ GLFWwindow* renderThreadInit()
 
 	glfwSetCursorPosCallback(window, mouse_callback);
 	glfwSetKeyCallback(window, key_callback);
+	glfwSetCharCallback(window, char_callback);
 	glfwSetMouseButtonCallback(window, mouse_button_callback);
 	glfwSetScrollCallback(window, scroll_callback);
 
@@ -1264,7 +1343,8 @@ void drawBlockBreakOverlay(const BlockPos& pos, const AABB& localShape, float pr
                            const glm::mat4& projection, const glm::mat4& view) {
 	if (progress <= 0.01f) return;
 	float p = std::max(0.0f, std::min(1.0f, progress));
-	const float eps = 0.004f;
+	int stage = std::max(0, std::min(9, static_cast<int>(p * 10.0f)));
+	const float eps = 0.002f;
 	float minX = pos.x + localShape.min.x - eps;
 	float minY = pos.y + localShape.min.y - eps;
 	float minZ = pos.z + localShape.min.z - eps;
@@ -1280,29 +1360,54 @@ void drawBlockBreakOverlay(const BlockPos& pos, const AABB& localShape, float pr
 	glPushMatrix();
 	glLoadMatrixf(glm::value_ptr(view));
 
-	glDisable(GL_TEXTURE_2D);
+	glActiveTexture(GL_TEXTURE0);
+	GuiComponent::bindTexture("textures/environment/destroy_stage_" + std::to_string(stage) + ".png");
 	glDisable(GL_CULL_FACE);
 	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glBlendFunc(GL_DST_COLOR, GL_ZERO);
 	glDepthMask(GL_FALSE);
-	glColor4f(0.05f, 0.05f, 0.05f, 0.12f + p * 0.55f);
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
 	glBegin(GL_QUADS);
 	// Bottom (-Y) & Top (+Y)
-	glVertex3f(minX, minY, minZ); glVertex3f(maxX, minY, minZ); glVertex3f(maxX, minY, maxZ); glVertex3f(minX, minY, maxZ);
-	glVertex3f(minX, maxY, minZ); glVertex3f(minX, maxY, maxZ); glVertex3f(maxX, maxY, maxZ); glVertex3f(maxX, maxY, minZ);
+	glTexCoord2f(0.0f, 0.0f); glVertex3f(minX, minY, minZ);
+	glTexCoord2f(1.0f, 0.0f); glVertex3f(maxX, minY, minZ);
+	glTexCoord2f(1.0f, 1.0f); glVertex3f(maxX, minY, maxZ);
+	glTexCoord2f(0.0f, 1.0f); glVertex3f(minX, minY, maxZ);
+
+	glTexCoord2f(0.0f, 0.0f); glVertex3f(minX, maxY, minZ);
+	glTexCoord2f(1.0f, 0.0f); glVertex3f(minX, maxY, maxZ);
+	glTexCoord2f(1.0f, 1.0f); glVertex3f(maxX, maxY, maxZ);
+	glTexCoord2f(0.0f, 1.0f); glVertex3f(maxX, maxY, minZ);
+
 	// North (-Z) & South (+Z)
-	glVertex3f(minX, minY, minZ); glVertex3f(minX, maxY, minZ); glVertex3f(maxX, maxY, minZ); glVertex3f(maxX, minY, minZ);
-	glVertex3f(minX, minY, maxZ); glVertex3f(maxX, minY, maxZ); glVertex3f(maxX, maxY, maxZ); glVertex3f(minX, maxY, maxZ);
+	glTexCoord2f(0.0f, 0.0f); glVertex3f(minX, minY, minZ);
+	glTexCoord2f(1.0f, 0.0f); glVertex3f(minX, maxY, minZ);
+	glTexCoord2f(1.0f, 1.0f); glVertex3f(maxX, maxY, minZ);
+	glTexCoord2f(0.0f, 1.0f); glVertex3f(maxX, minY, minZ);
+
+	glTexCoord2f(0.0f, 0.0f); glVertex3f(minX, minY, maxZ);
+	glTexCoord2f(1.0f, 0.0f); glVertex3f(maxX, minY, maxZ);
+	glTexCoord2f(1.0f, 1.0f); glVertex3f(maxX, maxY, maxZ);
+	glTexCoord2f(0.0f, 1.0f); glVertex3f(minX, maxY, maxZ);
+
 	// West (-X) & East (+X)
-	glVertex3f(minX, minY, minZ); glVertex3f(minX, minY, maxZ); glVertex3f(minX, maxY, maxZ); glVertex3f(minX, maxY, minZ);
-	glVertex3f(maxX, minY, minZ); glVertex3f(maxX, maxY, minZ); glVertex3f(maxX, maxY, maxZ); glVertex3f(maxX, minY, maxZ);
+	glTexCoord2f(0.0f, 0.0f); glVertex3f(minX, minY, minZ);
+	glTexCoord2f(1.0f, 0.0f); glVertex3f(minX, minY, maxZ);
+	glTexCoord2f(1.0f, 1.0f); glVertex3f(minX, maxY, maxZ);
+	glTexCoord2f(0.0f, 1.0f); glVertex3f(minX, maxY, minZ);
+
+	glTexCoord2f(0.0f, 0.0f); glVertex3f(maxX, minY, minZ);
+	glTexCoord2f(1.0f, 0.0f); glVertex3f(maxX, maxY, minZ);
+	glTexCoord2f(1.0f, 1.0f); glVertex3f(maxX, maxY, maxZ);
+	glTexCoord2f(0.0f, 1.0f); glVertex3f(maxX, minY, maxZ);
 	glEnd();
 
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDisable(GL_TEXTURE_2D);
+	glDisable(GL_BLEND);
 	glDepthMask(GL_TRUE);
 	glEnable(GL_CULL_FACE);
-	glDisable(GL_BLEND);
-	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 	glMatrixMode(GL_MODELVIEW);
 	glPopMatrix();
 	glMatrixMode(GL_PROJECTION);
@@ -2159,7 +2264,7 @@ void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspe
 	float bobX = 0.0f;
 	float bobY = 0.0f;
 	if (viewBobbing) {
-		float phase = c.mWalkDist * 3.14159265f * 1.15f;
+		float phase = c.mWalkDist * 3.14159265f;
 		bobX = -std::cos(phase) * 0.045f * c.mSmoothBob;
 		bobY = std::abs(std::sin(phase)) * 0.045f * c.mSmoothBob;
 	}
@@ -2266,11 +2371,331 @@ void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspe
 	glMatrixMode(GL_MODELVIEW);
 }
 
+struct SteveModelQuad3D {
+	Vec3 v[4];
+	float u[4];
+	float tv[4];
+	Vec3 normal;
+
+	void init(const Vec3& v0, const Vec3& v1, const Vec3& v2, const Vec3& v3,
+	          int a, int b, int c, int d, float texW, float texH, bool mirror) {
+		v[0] = v0; v[1] = v1; v[2] = v2; v[3] = v3;
+		float u0 = static_cast<float>(a) / texW;
+		float vTop = static_cast<float>(b) / texH;
+		float u1 = static_cast<float>(c) / texW;
+		float vBot = static_cast<float>(d) / texH;
+		u[0] = u1; tv[0] = vTop;
+		u[1] = u0; tv[1] = vTop;
+		u[2] = u0; tv[2] = vBot;
+		u[3] = u1; tv[3] = vBot;
+
+		if (mirror) {
+			std::swap(v[0], v[3]);
+			std::swap(v[1], v[2]);
+			std::swap(u[0], u[3]);
+			std::swap(u[1], u[2]);
+			std::swap(tv[0], tv[3]);
+			std::swap(tv[1], tv[2]);
+		}
+
+		Vec3 e1 = v[0] - v[1];
+		Vec3 e2 = v[0] - v[3];
+		Vec3 n(e1.y * e2.z - e1.z * e2.y,
+		       e1.z * e2.x - e1.x * e2.z,
+		       e1.x * e2.y - e1.y * e2.x);
+		float len = n.length();
+		normal = (len > 1e-5f) ? (n / len) : Vec3(0.0f, -1.0f, 0.0f);
+	}
+};
+
+struct SteveModelCube3D {
+	SteveModelQuad3D quads[6];
+
+	SteveModelCube3D(int u, int v, float x, float y, float z, int w, int h, int d,
+	                 float inflate, float texW, float texH, bool mirror) {
+		float x1 = x + static_cast<float>(w);
+		float y1 = y + static_cast<float>(h);
+		float z1 = z + static_cast<float>(d);
+
+		float v20 = x - inflate;
+		float v21 = y - inflate;
+		float v22 = z - inflate;
+		float v23 = x1 + inflate;
+		float v24 = y1 + inflate;
+		float v25 = z1 + inflate;
+		if (!mirror) {
+			std::swap(v20, v23);
+		}
+
+		Vec3 p[8] = {
+			Vec3(v23, v21, v22),
+			Vec3(v20, v21, v22),
+			Vec3(v20, v24, v22),
+			Vec3(v23, v24, v22),
+			Vec3(v23, v21, v25),
+			Vec3(v20, v21, v25),
+			Vec3(v20, v24, v25),
+			Vec3(v23, v24, v25),
+		};
+
+		int uMid = u + d + w;
+		int vMid = v + d;
+		quads[0].init(p[5], p[1], p[2], p[6], uMid, vMid, uMid + d, vMid + h, texW, texH, mirror);
+		quads[1].init(p[0], p[4], p[7], p[3], u, vMid, u + d, vMid + h, texW, texH, mirror);
+		quads[2].init(p[5], p[4], p[0], p[1], u + d, v, uMid, v + d, texW, texH, mirror);
+		quads[3].init(p[2], p[3], p[7], p[6], uMid, v + d, uMid + w, v, texW, texH, mirror);
+		quads[4].init(p[1], p[0], p[3], p[2], u + d, vMid, uMid, vMid + h, texW, texH, mirror);
+		quads[5].init(p[4], p[5], p[6], p[7], uMid + d, vMid, uMid + d + w, vMid + h, texW, texH, mirror);
+	}
+};
+
+struct SteveModelPart3D {
+	float xOffset = 0.0f;
+	float yOffset = 0.0f;
+	float zOffset = 0.0f;
+	float xRotAngle = 0.0f;
+	float yRotAngle = 0.0f;
+	float zRotAngle = 0.0f;
+	bool visible = true;
+	bool mirror = false;
+	float texW = 64.0f;
+	float texH = 32.0f;
+	int texOffsetX = 0;
+	int texOffsetY = 0;
+	std::vector<SteveModelCube3D> cubes;
+
+	SteveModelPart3D() = default;
+	SteveModelPart3D(int u, int v, int tw, int th, bool mir = false)
+		: visible(true), mirror(mir), texW(static_cast<float>(tw)), texH(static_cast<float>(th)),
+		  texOffsetX(u), texOffsetY(v) {}
+
+	void setPos(float x, float y, float z) {
+		xOffset = x;
+		yOffset = y;
+		zOffset = z;
+	}
+
+	void addBox(float x, float y, float z, int w, int h, int d, float inflate = 0.0f) {
+		cubes.emplace_back(texOffsetX, texOffsetY, x, y, z, w, h, d, inflate, texW, texH, mirror);
+	}
+
+	void translateTo(float scale) const {
+		if (xOffset != 0.0f || yOffset != 0.0f || zOffset != 0.0f) {
+			glTranslatef(scale * xOffset, scale * yOffset, scale * zOffset);
+		}
+		constexpr float kRadToDeg = 180.0f / 3.14159265f;
+		if (zRotAngle != 0.0f) glRotatef(zRotAngle * kRadToDeg, 0.0f, 0.0f, 1.0f);
+		if (yRotAngle != 0.0f) glRotatef(yRotAngle * kRadToDeg, 0.0f, 1.0f, 0.0f);
+		if (xRotAngle != 0.0f) glRotatef(xRotAngle * kRadToDeg, 1.0f, 0.0f, 0.0f);
+	}
+
+	void render(float scale, float shade = 1.0f) const {
+		if (!visible) return;
+		glPushMatrix();
+		translateTo(scale);
+
+		glm::mat3 rot(1.0f);
+		if (zRotAngle != 0.0f) {
+			float c = std::cos(zRotAngle), s = std::sin(zRotAngle);
+			rot = rot * glm::mat3(c, s, 0.0f, -s, c, 0.0f, 0.0f, 0.0f, 1.0f);
+		}
+		if (yRotAngle != 0.0f) {
+			float c = std::cos(yRotAngle), s = std::sin(yRotAngle);
+			rot = rot * glm::mat3(c, 0.0f, -s, 0.0f, 1.0f, 0.0f, s, 0.0f, c);
+		}
+		if (xRotAngle != 0.0f) {
+			float c = std::cos(xRotAngle), s = std::sin(xRotAngle);
+			rot = rot * glm::mat3(1.0f, 0.0f, 0.0f, 0.0f, c, s, 0.0f, -s, c);
+		}
+
+		glBegin(GL_QUADS);
+		for (const auto& cube : cubes) {
+			for (int qi = 0; qi < 6; ++qi) {
+				const SteveModelQuad3D& q = cube.quads[qi];
+				glm::vec3 wn = rot * glm::vec3(q.normal.x, q.normal.y, q.normal.z);
+				float up = -wn.y;
+				float faceShade = 0.88f;
+				if (up > 0.55f) faceShade = 1.0f;
+				else if (up < -0.55f) faceShade = 0.68f;
+				else if (std::abs(wn.z) > 0.55f) faceShade = 0.94f;
+				else faceShade = 0.82f;
+
+				float c = std::min(1.0f, shade * faceShade);
+				glColor4f(c, c, c, 1.0f);
+				for (int vi = 0; vi < 4; ++vi) {
+					glTexCoord2f(q.u[vi], q.tv[vi]);
+					glVertex3f(q.v[vi].x * scale, q.v[vi].y * scale, q.v[vi].z * scale);
+				}
+			}
+		}
+		glEnd();
+		glPopMatrix();
+	}
+};
+
+struct SteveHumanoidModel3D {
+	SteveModelPart3D headModel;
+	SteveModelPart3D bodyModel;
+	SteveModelPart3D rightArmModel;
+	SteveModelPart3D leftArmModel;
+	SteveModelPart3D rightLegModel;
+	SteveModelPart3D leftLegModel;
+
+	float attackTime = 0.0f;   // field_0
+	bool isRiding = false;     // field_4
+	bool holdingLeft = false;  // field_318
+	bool holdingRight = false; // field_319
+	bool sneaking = false;     // field_31A
+	bool isUsingBow = false;   // isUsingBow
+
+	// Matches MCPE 0.8.1 HumanoidModel::HumanoidModel(inflate, yOffset)
+	// Supports both 64x64 modern Steve skin and 64x32 armor textures
+	SteveHumanoidModel3D(float inflate, float yOff, int texH)
+		: headModel(0, 0, 64, texH, false)
+		, bodyModel(16, 16, 64, texH, false)
+		, rightArmModel(40, 16, 64, texH, false)
+		, leftArmModel(texH == 64 ? 32 : 40, texH == 64 ? 48 : 16, 64, texH, texH != 64)
+		, rightLegModel(0, 16, 64, texH, false)
+		, leftLegModel(texH == 64 ? 16 : 0, texH == 64 ? 48 : 16, 64, texH, texH != 64) {
+		headModel.addBox(-4.0f, -8.0f, -4.0f, 8, 8, 8, inflate);
+		headModel.setPos(0.0f, yOff + 0.0f, 0.0f);
+		bodyModel.addBox(-4.0f, 0.0f, -2.0f, 8, 12, 4, inflate);
+		bodyModel.setPos(0.0f, yOff + 0.0f, 0.0f);
+		rightArmModel.addBox(-3.0f, -2.0f, -2.0f, 4, 12, 4, inflate);
+		rightArmModel.setPos(-5.0f, yOff + 2.0f, 0.0f);
+		leftArmModel.addBox(-1.0f, -2.0f, -2.0f, 4, 12, 4, inflate);
+		leftArmModel.setPos(5.0f, yOff + 2.0f, 0.0f);
+		rightLegModel.addBox(-2.0f, 0.0f, -2.0f, 4, 12, 4, inflate);
+		rightLegModel.setPos(-2.0f, yOff + 12.0f, 0.0f);
+		leftLegModel.addBox(-2.0f, 0.0f, -2.0f, 4, 12, 4, inflate);
+		leftLegModel.setPos(2.0f, yOff + 12.0f, 0.0f);
+	}
+
+	// Exact 1:1 port of MCPE 0.8.1 HumanoidModel::setupAnim(a2, a3, a4, a5, a6, a7)
+	void setupAnim(float a2, float a3, float a4, float a5, float a6, float /*a7*/) {
+		constexpr float kPi = 3.1416f;
+		headModel.yRotAngle = a5 / (180.0f / kPi);
+		float v10 = a2 * 0.6662f;
+		headModel.xRotAngle = a6 / (180.0f / kPi);
+		float v11 = std::cos(a2 * 0.6662f) * a3;
+		float v12 = std::cos(v10 + kPi);
+		leftArmModel.xRotAngle = v11;
+		rightArmModel.zRotAngle = 0.0f;
+		leftArmModel.zRotAngle = 0.0f;
+		rightLegModel.yRotAngle = 0.0f;
+		leftLegModel.yRotAngle = 0.0f;
+		rightArmModel.xRotAngle = v12 * a3;
+		rightLegModel.xRotAngle = v11 * 1.4f;
+		leftLegModel.xRotAngle = (v12 * a3) * 1.4f;
+
+		if (isRiding) {
+			float v14 = -(kPi * 0.5f);
+			rightArmModel.xRotAngle += v14 * 0.4f;
+			rightLegModel.xRotAngle = v14 * 0.8f;
+			leftLegModel.xRotAngle = v14 * 0.8f;
+			rightLegModel.yRotAngle = (kPi * 0.5f) * 0.2f;
+			leftLegModel.yRotAngle = v14 * 0.2f;
+			leftArmModel.xRotAngle += v14 * 0.4f;
+		}
+		if (holdingLeft) {
+			leftArmModel.xRotAngle = (leftArmModel.xRotAngle * 0.5f) - ((kPi * 0.5f) * 0.2f);
+		}
+		if (holdingRight) {
+			rightArmModel.xRotAngle = (rightArmModel.xRotAngle * 0.5f) - ((kPi * 0.5f) * 0.2f);
+		}
+
+		rightArmModel.yRotAngle = 0.0f;
+		leftArmModel.yRotAngle = 0.0f;
+		bodyModel.yRotAngle = 0.0f;
+		rightArmModel.zOffset = 0.0f;
+		rightArmModel.xOffset = -5.0f;
+		leftArmModel.zOffset = 0.0f;
+		leftArmModel.xOffset = 5.0f;
+
+		float v15 = attackTime;
+		if (v15 > 0.0f) {
+			float v16 = std::sqrt(v15);
+			float v17 = std::sin((v16 * kPi) + (v16 * kPi)) * 0.2f;
+			bodyModel.yRotAngle = v17;
+			rightArmModel.zOffset = std::sin(v17) * 5.0f;
+			rightArmModel.xOffset = -(std::cos(v17) * 5.0f);
+			leftArmModel.zOffset = -(std::sin(v17) * 5.0f);
+			float v18 = std::cos(v17);
+			float v19 = attackTime;
+			leftArmModel.yRotAngle += v17;
+			leftArmModel.xRotAngle += v17;
+			leftArmModel.xOffset = v18 * 5.0f;
+			float v20 = v17 + rightArmModel.yRotAngle;
+			rightArmModel.yRotAngle = v20;
+			float oneMinus = 1.0f - v19;
+			float v21 = std::sin((1.0f - (oneMinus * oneMinus * oneMinus * oneMinus)) * kPi);
+			float v22 = std::sin(v19 * kPi);
+			float v23 = headModel.xRotAngle - 0.7f;
+			rightArmModel.yRotAngle = v20 + (v17 + v17);
+			rightArmModel.xRotAngle -= ((-(v23 * v22) * 0.75f) + (v21 * 1.2f));
+			rightArmModel.zRotAngle = std::sin(v19 * kPi) * -0.4f;
+		}
+
+		if (sneaking) {
+			bodyModel.xRotAngle = 0.5f;
+			rightLegModel.zOffset = 4.0f;
+			leftLegModel.zOffset = 4.0f;
+			rightLegModel.yOffset = 9.0f;
+			leftLegModel.yOffset = 9.0f;
+			headModel.yOffset = 1.0f;
+			rightArmModel.xRotAngle += 0.4f;
+			leftArmModel.xRotAngle += 0.4f;
+		} else {
+			bodyModel.xRotAngle = 0.0f;
+			rightLegModel.zOffset = 0.0f;
+			leftLegModel.zOffset = 0.0f;
+			headModel.yOffset = 0.0f;
+			rightLegModel.yOffset = 12.0f;
+			leftLegModel.yOffset = 12.0f;
+		}
+
+		float v25 = (std::cos(a4 * 0.09f) * 0.05f) + 0.05f;
+		float v26 = std::sin(a4 * 0.067f);
+		rightArmModel.zRotAngle += v25;
+		float v28 = v26 * 0.05f;
+		leftArmModel.zRotAngle -= v25;
+		rightArmModel.xRotAngle += v28;
+		leftArmModel.xRotAngle -= v28;
+
+		if (isUsingBow) {
+			float yRotAngle = headModel.yRotAngle;
+			rightArmModel.yRotAngle = yRotAngle - 0.1f;
+			leftArmModel.yRotAngle = (yRotAngle + 0.1f) + 0.4f;
+			float v30 = headModel.xRotAngle - (kPi * 0.5f);
+			rightArmModel.zRotAngle = v25;
+			leftArmModel.zRotAngle = -v25;
+			rightArmModel.xRotAngle = v30 + v28;
+			leftArmModel.xRotAngle = v30 - v28;
+		}
+	}
+
+	void render(float a2, float a3, float a4, float a5, float a6, float a7, float shade = 1.0f) {
+		setupAnim(a2, a3, a4, a5, a6, a7);
+		headModel.render(a7, shade);
+		bodyModel.render(a7, shade);
+		rightArmModel.render(a7, shade);
+		leftArmModel.render(a7, shade);
+		rightLegModel.render(a7, shade);
+		leftLegModel.render(a7, shade);
+	}
+};
+
 void renderWorldSteve3D(const Camera& c,
                         const GuiContext& guiCtx,
                         const glm::mat4& projection,
-                        const glm::mat4& view) {
+                        const glm::mat4& view,
+                        float lightShade = 1.0f) {
+	glActiveTexture(GL_TEXTURE0);
 	if (!GuiComponent::bindTexture("textures/entity/steve.png")) return;
+
+	static SteveHumanoidModel3D steveModel(0.0f, 0.0f, 64);
+	static SteveHumanoidModel3D armorModel1(1.0f, 0.0f, 32);
+	static SteveHumanoidModel3D armorModel2(0.5f, 0.0f, 32);
 
 	glUseProgram(0);
 	glEnable(GL_DEPTH_TEST);
@@ -2287,151 +2712,125 @@ void renderWorldSteve3D(const Camera& c,
 	glPushMatrix();
 	glLoadMatrixf(glm::value_ptr(view));
 
-	const float scale = 1.8f / 32.0f;
-	float limbSwing = std::sin(c.mWalkDist * 3.14159265f * 1.15f) * 45.0f * c.mSmoothBob;
-	float sw = c.mSwingProgress;
-	float swingAngle = (sw > 0.0f) ? (-std::sin(std::sqrt(sw) * 3.14159265f) * 85.0f) : 0.0f;
-	bool sneaking = !c.mIsFlying && (glinput.KeyDown(GLFW_KEY_LEFT_SHIFT) || glinput.KeyDown(GLFW_KEY_RIGHT_SHIFT));
-
-	glTranslatef(c.mPos.x, c.mRenderFeetY, c.mPos.z);
-	glRotatef(90.0f - static_cast<float>(c.yaw), 0.0f, 1.0f, 0.0f);
-	glScalef(scale, scale, scale);
-	if (sneaking) {
-		glTranslatef(0.0f, -1.5f, 0.0f);
-	}
-
-	// Right Leg (x = -2, hip y = 12)
-	glPushMatrix();
-	glTranslatef(-2.0f, 12.0f, 0.0f);
-	glRotatef(limbSwing, 1.0f, 0.0f, 0.0f);
-	drawPlayerBox3D(-2.0f, -12.0f, -2.0f, 4.0f, 12.0f, 4.0f, 0, 16, 4, 12, 4, 64.0f, 64.0f);
-	glPopMatrix();
-
-	// Left Leg (x = +2, hip y = 12)
-	glPushMatrix();
-	glTranslatef(2.0f, 12.0f, 0.0f);
-	glRotatef(-limbSwing, 1.0f, 0.0f, 0.0f);
-	drawPlayerBox3D(-2.0f, -12.0f, -2.0f, 4.0f, 12.0f, 4.0f, 16, 48, 4, 12, 4, 64.0f, 64.0f);
-	glPopMatrix();
-
-	// Torso
-	glPushMatrix();
-	if (sneaking) glRotatef(18.0f, 1.0f, 0.0f, 0.0f);
-	drawPlayerBox3D(-4.0f, 12.0f, -2.0f, 8.0f, 12.0f, 4.0f, 16, 16, 8, 12, 4, 64.0f, 64.0f);
-
-	// Right Arm + Held Item
+	const float kPxScale = 0.0625f;
 	int slotIdx = std::max(0, std::min(8, guiCtx.selectedHotbarSlot));
 	const ItemInstance& held = guiCtx.inventorySlots[static_cast<size_t>(slotIdx)];
 	bool hasHeld = !held.isNull() && held.getStackSize() > 0;
-	glPushMatrix();
-	glTranslatef(-6.0f, 22.0f, 0.0f);
-	glRotatef((hasHeld ? (-limbSwing * 0.5f - 18.0f) : -limbSwing) + swingAngle, 1.0f, 0.0f, 0.0f);
-	glRotatef(4.0f, 0.0f, 0.0f, -1.0f);
-	drawPlayerBox3D(-2.0f, -10.0f, -2.0f, 4.0f, 12.0f, 4.0f, 40, 16, 4, 12, 4, 64.0f, 64.0f);
+	bool isUsingBow = hasHeld && Item::mBow && held.getItem() == Item::mBow && gBowPulling;
+	bool sneaking = !c.mIsFlying && (glinput.KeyDown(GLFW_KEY_LEFT_SHIFT) || glinput.KeyDown(GLFW_KEY_RIGHT_SHIFT));
 
+	// Convert renderer yaw (0=+X, 90=+Z) to MCPE 0.8.1 yaw (yaw_mcpe = yaw - 90, 180 - yaw_mcpe = 270 - yaw)
+	float bodyYawMcpe = c.mBodyYaw - 90.0f;
+	float headYawMcpe = static_cast<float>(c.yaw) - 90.0f;
+	float netHeadYaw = headYawMcpe - bodyYawMcpe;
+	while (netHeadYaw < -180.0f) netHeadYaw += 360.0f;
+	while (netHeadYaw >= 180.0f) netHeadYaw -= 360.0f;
+	float headPitch = static_cast<float>(-c.pitch);
+	float bobTicks = static_cast<float>(glfwGetTime()) * 20.0f;
+
+	// Exact MCPE 0.8.1 MobRenderer::render transform chain (L116-124):
+	// setupPosition -> setupRotations(180 - bodyYaw) -> glScalef(-1, -1, 1) -> glTranslatef(0, -24*0.0625 - 0.0078125, 0)
+	glPushMatrix();
+	glTranslatef(c.mPos.x, c.mRenderFeetY - (sneaking ? 0.125f : 0.0f), c.mPos.z);
+	glRotatef(180.0f - bodyYawMcpe, 0.0f, 1.0f, 0.0f);
+	glScalef(-1.0f, -1.0f, 1.0f);
+	glTranslatef(0.0f, (kPxScale * -24.0f) - 0.0078125f, 0.0f);
+
+	// 1. Base Steve model (HumanoidMobRenderer::render + HumanoidModel::render)
+	steveModel.attackTime = c.mSwingProgress;
+	steveModel.holdingRight = hasHeld;
+	steveModel.sneaking = sneaking;
+	steveModel.isUsingBow = isUsingBow;
+	steveModel.render(c.mWalkAnimPos, c.mWalkAnimSpeed, bobTicks, netHeadYaw, headPitch, kPxScale, lightShade);
+
+	// 2. Equipped Armor passes (PlayerRenderer::prepareArmor L59-86, 4 passes: 0=helmet, 1=chestplate, 2=leggings, 3=boots)
+	for (int armour = 0; armour < 4; ++armour) {
+		const ItemInstance& armorItem = guiCtx.armorSlots[armour];
+		if (armorItem.isNull() || armorItem.getStackSize() <= 0) continue;
+		std::string armorTex = getArmorTexturePath(armorItem, armour == 2);
+		if (armorTex.empty() || !GuiComponent::bindTexture(armorTex)) continue;
+
+		SteveHumanoidModel3D& am = (armour == 2) ? armorModel2 : armorModel1;
+		am.headModel.visible = (armour == 0);
+		am.bodyModel.visible = (armour == 1 || armour == 2);
+		am.rightArmModel.visible = (armour == 1);
+		am.leftArmModel.visible = (armour == 1);
+		am.rightLegModel.visible = (armour == 2 || armour == 3);
+		am.leftLegModel.visible = (armour == 2 || armour == 3);
+
+		am.attackTime = steveModel.attackTime;
+		am.holdingRight = steveModel.holdingRight;
+		am.sneaking = steveModel.sneaking;
+		am.isUsingBow = steveModel.isUsingBow;
+		am.render(c.mWalkAnimPos, c.mWalkAnimSpeed, bobTicks, netHeadYaw, headPitch, kPxScale, lightShade);
+	}
+
+	// 3. Held Item in 3rd person (Exact MCPE 0.8.1 HumanoidMobRenderer::additionalRendering L33-90)
 	if (hasHeld) {
 		glPushMatrix();
+		steveModel.rightArmModel.translateTo(kPxScale);
+		glTranslatef(-0.0625f, 0.4375f, 0.0625f);
+
 		BlockRenderInfo blockInfo = getBlockRenderInfo(held);
 		if (blockInfo.is3D) {
-			glTranslatef(0.0f, -10.0f, 3.0f);
-			glRotatef(20.0f, 1.0f, 0.0f, 0.0f);
+			// HumanoidMobRenderer.cpp L48-56: 3D Tile / Block
+			glTranslatef(0.0f, 0.1875f, -0.3125f);
+			glRotatef(200.0f, 1.0f, 0.0f, 0.0f);
 			glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
-			glScalef(6.0f, 6.0f, 6.0f);
-			drawTexturedCube3D(blockInfo, 1.0f);
+			glScalef(0.375f, 0.375f, 0.375f);
+			drawTexturedCube3D(blockInfo, lightShade);
 		} else {
-			std::string tex = getItemTexturePath(held);
-			bool isTool = held.getItem() && (held.getItem()->isHandEquipped() || held.getItem()->isMirroredArt());
-			glTranslatef(0.0f, -9.5f, 2.5f);
-			if (isTool) {
-				glScalef(10.0f, 10.0f, 10.0f);
-				glRotatef(90.0f, 0.0f, 1.0f, 0.0f);
-				glRotatef(-45.0f, 0.0f, 0.0f, 1.0f);
-				glTranslatef(0.30f, 0.30f, 0.0f);
-			} else {
-				glScalef(6.0f, 6.0f, 6.0f);
+			if (Item::mBow && held.getItem() == Item::mBow) {
+				// HumanoidMobRenderer.cpp L58-63 + L80-85: Item::bow
+				glTranslatef(0.2f, 0.125f, -0.3875f);
+				glRotatef(-180.0f, 1.0f, 0.0f, 0.0f);
+				glRotatef(10.0f, 0.0f, 1.0f, 0.0f);
+				glScalef(0.625f, 0.625f, 0.625f);
+				glRotatef(-100.0f, 1.0f, 0.0f, 0.0f);
 				glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
+			} else if (held.getItem() && held.getItem()->isHandEquipped()) {
+				// HumanoidMobRenderer.cpp L75-85: Tools / Swords (isHandEquipped)
+				glRotatef(180.0f, 0.0f, 1.0f, 0.0f);
+				glTranslatef(0.1f, 0.265f, 0.0f);
+				glScalef(0.625f, 0.625f, 0.625f);
+				glRotatef(80.0f, 1.0f, 0.0f, 0.0f);
+				glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
+			} else {
+				// HumanoidMobRenderer.cpp L65-73 + L85: Regular flat items
+				glTranslatef(0.25f, 0.1875f, -0.1875f);
+				glScalef(0.375f, 0.375f, 0.375f);
+				glRotatef(60.0f, 0.0f, 0.0f, 1.0f);
+				glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
+				glRotatef(20.0f, 0.0f, 0.0f, 1.0f);
 			}
-			drawTexturedSprite3D(tex, 1.0f);
+
+			std::string tex = getItemTexturePath(held);
+			if (isUsingBow && gBowPullTime > 0.0f) {
+				if (gBowPullTime >= 0.85f) tex = "textures/items/bow_pulling_2.png";
+				else if (gBowPullTime >= 0.45f) tex = "textures/items/bow_pulling_1.png";
+				else tex = "textures/items/bow_pulling_0.png";
+			}
+
+			// Exact MCPE 0.8.1 ItemInHandRenderer::renderItem() 2D sprite chain (L320-331)
+			glScalef(1.5f, 1.5f, 1.5f);
+			glRotatef(50.0f, 0.0f, 1.0f, 0.0f);
+			glRotatef(335.0f, 0.0f, 0.0f, 1.0f);
+			glTranslatef(0.075f, -0.245f, -0.1f);
+			glScalef(0.0625f, 0.0625f, 0.0625f);
+			glRotatef(90.0f, 0.0f, 0.0f, 1.0f);
+			glRotatef(90.0f, 1.0f, 0.0f, 0.0f);
+			glRotatef(-180.0f, 1.0f, 0.0f, 0.0f);
+			glRotatef(-90.0f, 0.0f, 1.0f, 0.0f);
+			glTranslatef(0.0f, 0.0f, -16.0f);
+			glTranslatef(8.0f, 0.5f, 8.0f);
+			glScalef(16.0f, 16.0f, -16.0f);
+			glRotatef(90.0f, 1.0f, 0.0f, 0.0f);
+			drawTexturedSprite3D(tex, lightShade);
 		}
 		glPopMatrix();
 	}
+
 	glPopMatrix();
-
-	// Left Arm
-	glPushMatrix();
-	glTranslatef(6.0f, 22.0f, 0.0f);
-	glRotatef(limbSwing, 1.0f, 0.0f, 0.0f);
-	glRotatef(4.0f, 0.0f, 0.0f, 1.0f);
-	drawPlayerBox3D(-2.0f, -10.0f, -2.0f, 4.0f, 12.0f, 4.0f, 32, 48, 4, 12, 4, 64.0f, 64.0f);
-	glPopMatrix();
-
-	// Head
-	glPushMatrix();
-	glTranslatef(0.0f, 24.0f, 0.0f);
-	glRotatef(static_cast<float>(-c.pitch), 1.0f, 0.0f, 0.0f);
-	drawPlayerBox3D(-4.0f, 0.0f, -4.0f, 8.0f, 8.0f, 8.0f, 0, 0, 8, 8, 8, 64.0f, 64.0f);
-
-	// Armor slot 0: Helmet
-	std::string helmTex = getArmorTexturePath(guiCtx.armorSlots[0], false);
-	if (!helmTex.empty() && GuiComponent::bindTexture(helmTex)) {
-		drawPlayerBox3D(-4.5f, -0.5f, -4.5f, 9.0f, 9.0f, 9.0f, 0, 0, 8, 8, 8, 64.0f, 32.0f);
-	}
-	glPopMatrix();
-
-	// Armor slot 1: Chestplate
-	std::string chestTex = getArmorTexturePath(guiCtx.armorSlots[1], false);
-	if (!chestTex.empty() && GuiComponent::bindTexture(chestTex)) {
-		drawPlayerBox3D(-4.5f, 11.5f, -2.5f, 9.0f, 13.0f, 5.0f, 16, 16, 8, 12, 4, 64.0f, 32.0f);
-
-		glPushMatrix();
-		glTranslatef(-6.0f, 22.0f, 0.0f);
-		glRotatef(-limbSwing + swingAngle, 1.0f, 0.0f, 0.0f);
-		glRotatef(4.0f, 0.0f, 0.0f, -1.0f);
-		drawPlayerBox3D(-2.5f, -10.5f, -2.5f, 5.0f, 13.0f, 5.0f, 40, 16, 4, 12, 4, 64.0f, 32.0f);
-		glPopMatrix();
-
-		glPushMatrix();
-		glTranslatef(6.0f, 22.0f, 0.0f);
-		glRotatef(limbSwing, 1.0f, 0.0f, 0.0f);
-		glRotatef(4.0f, 0.0f, 0.0f, 1.0f);
-		drawPlayerBox3D(-2.5f, -10.5f, -2.5f, 5.0f, 13.0f, 5.0f, 40, 16, 4, 12, 4, 64.0f, 32.0f);
-		glPopMatrix();
-	}
-	glPopMatrix(); // end torso tilt
-
-	// Armor slot 2: Leggings
-	std::string legsTex = getArmorTexturePath(guiCtx.armorSlots[2], true);
-	if (!legsTex.empty() && GuiComponent::bindTexture(legsTex)) {
-		drawPlayerBox3D(-4.25f, 11.75f, -2.25f, 8.5f, 12.5f, 4.5f, 16, 16, 8, 12, 4, 64.0f, 32.0f);
-
-		glPushMatrix();
-		glTranslatef(-2.0f, 12.0f, 0.0f);
-		glRotatef(limbSwing, 1.0f, 0.0f, 0.0f);
-		drawPlayerBox3D(-2.25f, -12.25f, -2.25f, 4.5f, 12.5f, 4.5f, 0, 16, 4, 12, 4, 64.0f, 32.0f);
-		glPopMatrix();
-
-		glPushMatrix();
-		glTranslatef(2.0f, 12.0f, 0.0f);
-		glRotatef(-limbSwing, 1.0f, 0.0f, 0.0f);
-		drawPlayerBox3D(-2.25f, -12.25f, -2.25f, 4.5f, 12.5f, 4.5f, 0, 16, 4, 12, 4, 64.0f, 32.0f);
-		glPopMatrix();
-	}
-
-	// Armor slot 3: Boots
-	std::string bootsTex = getArmorTexturePath(guiCtx.armorSlots[3], false);
-	if (!bootsTex.empty() && GuiComponent::bindTexture(bootsTex)) {
-		glPushMatrix();
-		glTranslatef(-2.0f, 12.0f, 0.0f);
-		glRotatef(limbSwing, 1.0f, 0.0f, 0.0f);
-		drawPlayerBox3D(-2.5f, -12.4f, -2.5f, 5.0f, 12.8f, 5.0f, 0, 16, 4, 12, 4, 64.0f, 32.0f);
-		glPopMatrix();
-
-		glPushMatrix();
-		glTranslatef(2.0f, 12.0f, 0.0f);
-		glRotatef(-limbSwing, 1.0f, 0.0f, 0.0f);
-		drawPlayerBox3D(-2.5f, -12.4f, -2.5f, 5.0f, 12.8f, 5.0f, 0, 16, 4, 12, 4, 64.0f, 32.0f);
-		glPopMatrix();
-	}
 
 	glDisable(GL_ALPHA_TEST);
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
@@ -2681,6 +3080,12 @@ void renderThreadStuff()
 			c.setPositionAndLook(meta.playerX, meta.playerY, meta.playerZ, meta.playerYaw, meta.playerPitch);
 			hasInitialSpawn = true;
 			gGuiContext.respawnRequested = false;
+		} else if (meta.hasBedSpawn) {
+			c.setPositionAndLook(meta.bedSpawnX + 0.5f,
+			                     static_cast<float>(meta.bedSpawnY) + 0.05f,
+			                     meta.bedSpawnZ + 0.5f, 0.0, 0.0);
+			hasInitialSpawn = false;
+			gGuiContext.respawnRequested = true;
 		} else {
 			c.setPositionAndLook(0.5f, 98.0f, 0.5f, 0.0, 0.0);
 			hasInitialSpawn = false;
@@ -3058,19 +3463,31 @@ void renderThreadStuff()
 					                     Block::mBed->getSecondPart(region, hitPos, bedSecondPos) &&
 					                     region.getBlockID(bedSecondPos) == Block::mBed->mID);
 
+					int blockTintCol = block->getColor(region, hitPos, fb.data);
 					if (region.removeBlock(hitPos)) {
 						SoundEngine::play(SoundEngine::SND_DIG, 0.85f, 0.9f + (std::rand() % 20) * 0.01f);
-						float pr = 0.55f, pg = 0.55f, pb = 0.55f;
-						if (block == Block::mGrass || block == Block::mLeaves || block == Block::mLeaves2) {
-							pr = 0.30f; pg = 0.65f; pb = 0.25f;
-						} else if (block == Block::mDirt || block == Block::mLog || block == Block::mWoodPlanks) {
-							pr = 0.55f; pg = 0.38f; pb = 0.22f;
-						} else if (block == Block::mSand || block == Block::mSandStone) {
-							pr = 0.85f; pg = 0.80f; pb = 0.55f;
-						} else if (block == Block::mTNT) {
-							pr = 0.80f; pg = 0.20f; pb = 0.15f;
+						float pr = ((blockTintCol >> 16) & 0xFF) / 255.0f;
+						float pg = ((blockTintCol >> 8) & 0xFF) / 255.0f;
+						float pb = (blockTintCol & 0xFF) / 255.0f;
+						float tu0 = 0.0f, tv0 = 0.0f, tu1 = 0.0f, tv1 = 0.0f;
+						bool hasTex = false;
+						if (const BlockGraphics* bg = (fb.id > 0 && fb.id < 256) ? BlockGraphics::mBlocks[fb.id] : nullptr) {
+							const TextureUVCoordinateSet& uv = bg->getTexture(2, fb.data);
+							tu0 = uv._u0; tv0 = uv._v0; tu1 = uv._u1; tv1 = uv._v1;
+							hasTex = true;
 						}
-						ParticleSystem::spawnBlockBreak(static_cast<float>(hitPos.x), static_cast<float>(hitPos.y), static_cast<float>(hitPos.z), pr, pg, pb, &region);
+						if (!hasTex && blockTintCol == 0xFFFFFF) {
+							if (block == Block::mDirt || block == Block::mLog || block == Block::mWoodPlanks) {
+								pr = 0.55f; pg = 0.38f; pb = 0.22f;
+							} else if (block == Block::mSand || block == Block::mSandStone) {
+								pr = 0.85f; pg = 0.80f; pb = 0.55f;
+							} else if (block == Block::mTNT) {
+								pr = 0.80f; pg = 0.20f; pb = 0.15f;
+							} else {
+								pr = 0.55f; pg = 0.55f; pb = 0.55f;
+							}
+						}
+						ParticleSystem::spawnBlockBreak(static_cast<float>(hitPos.x), static_cast<float>(hitPos.y), static_cast<float>(hitPos.z), pr, pg, pb, &region, tu0, tv0, tu1, tv1, hasTex);
 						if (hasBedSecond) {
 							region.removeBlock(bedSecondPos);
 						}
@@ -3157,17 +3574,29 @@ void renderThreadStuff()
 								crackParticleAccum += survDt;
 								if (crackParticleAccum >= 0.09f) {
 									crackParticleAccum = 0.0f;
-									float pr = 0.55f, pg = 0.55f, pb = 0.55f;
-									if (block == Block::mGrass || block == Block::mLeaves || block == Block::mLeaves2) {
-										pr = 0.30f; pg = 0.65f; pb = 0.25f;
-									} else if (block == Block::mDirt || block == Block::mLog || block == Block::mWoodPlanks) {
-										pr = 0.55f; pg = 0.38f; pb = 0.22f;
-									} else if (block == Block::mSand || block == Block::mSandStone) {
-										pr = 0.85f; pg = 0.80f; pb = 0.55f;
-									} else if (block == Block::mTNT) {
-										pr = 0.80f; pg = 0.20f; pb = 0.15f;
+									int blockTintCol = block->getColor(region, hitPos, fb.data);
+									float pr = ((blockTintCol >> 16) & 0xFF) / 255.0f;
+									float pg = ((blockTintCol >> 8) & 0xFF) / 255.0f;
+									float pb = (blockTintCol & 0xFF) / 255.0f;
+									float tu0 = 0.0f, tv0 = 0.0f, tu1 = 0.0f, tv1 = 0.0f;
+									bool hasTex = false;
+									if (const BlockGraphics* bg = (fb.id > 0 && fb.id < 256) ? BlockGraphics::mBlocks[fb.id] : nullptr) {
+										const TextureUVCoordinateSet& uv = bg->getTexture(static_cast<FacingID>(targetHit.getFacing()), fb.data);
+										tu0 = uv._u0; tv0 = uv._v0; tu1 = uv._u1; tv1 = uv._v1;
+										hasTex = true;
 									}
-									ParticleSystem::spawnBlockCrack(static_cast<float>(hitPos.x), static_cast<float>(hitPos.y), static_cast<float>(hitPos.z), targetHit.getFacing(), pr, pg, pb, &region);
+									if (!hasTex && blockTintCol == 0xFFFFFF) {
+										if (block == Block::mDirt || block == Block::mLog || block == Block::mWoodPlanks) {
+											pr = 0.55f; pg = 0.38f; pb = 0.22f;
+										} else if (block == Block::mSand || block == Block::mSandStone) {
+											pr = 0.85f; pg = 0.80f; pb = 0.55f;
+										} else if (block == Block::mTNT) {
+											pr = 0.80f; pg = 0.20f; pb = 0.15f;
+										} else {
+											pr = 0.55f; pg = 0.55f; pb = 0.55f;
+										}
+									}
+									ParticleSystem::spawnBlockCrack(static_cast<float>(hitPos.x), static_cast<float>(hitPos.y), static_cast<float>(hitPos.z), targetHit.getFacing(), pr, pg, pb, &region, tu0, tv0, tu1, tv1, hasTex);
 								}
 								miningProgress += survDt / mineInfo.breakTime;
 								if (miningProgress >= 1.0f) {
@@ -3474,13 +3903,82 @@ void renderThreadStuff()
 						}
 					}
 
+					if (!handledRightClick && hasTargetHit && !held.isNull() && held.getStackSize() > 0 &&
+					    Item::mSign && held.getId() == Item::mSign->getId()) {
+						BlockPos hitPos = targetHit.getBlock();
+						FacingID face = targetHit.getFacing();
+						if (face != Facing::DOWN && face < Facing::MAX) {
+							BlockPos placePos = hitPos + Facing::DIRECTION[face];
+							if (placePos.y >= 0 && placePos.y < 128) {
+								BlockID existingId = region.getBlockID(placePos);
+								const Block* existingBlock = Block::mBlocks[existingId];
+								bool canReplace = (existingId == 0) || (existingBlock && existingBlock->getMaterial().isReplaceable());
+								if (canReplace && region.getMaterial(hitPos).isSolid()) {
+									const Block* signBlock = (face == Facing::UP) ? Block::mSign : Block::mWallSign;
+									if (signBlock) {
+										DataID signData = 0;
+										if (face == Facing::UP) {
+											float deg = static_cast<float>(c.yaw) - 90.0f;
+											int rot16 = Math::floor(((deg + 180.0f) * 16.0f / 360.0f) + 0.5f) & 15;
+											signData = static_cast<DataID>(rot16);
+										} else {
+											signBlock->getBlockState(BlockState::FacingDirection).set(signData, face);
+										}
+										if (region.setBlockAndData(placePos, FullBlock(signBlock->mID, signData), Block::UPDATE_ALL)) {
+											SoundEngine::play(SoundEngine::SND_PLACE, 0.75f, 0.95f);
+											c.triggerSwing();
+											if (!gGuiContext.isCreative) {
+												held.remove(1);
+												if (held.getStackSize() <= 0) held.setNull();
+											}
+											updateLightingAndRebuildChunks(region, placePos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+											handledRightClick = true;
+										}
+									}
+								}
+							}
+						}
+					}
+
 					if (!handledRightClick && hasTargetHit && !held.isNull() && held.getStackSize() > 0 && held.isBlock()) {
 						BlockPos hitPos = targetHit.getBlock();
 						FacingID face = targetHit.getFacing();
 						if (face < Facing::MAX) {
 							const Block* placeBlock = held.getBlock();
 							BlockPos placePos = hitPos + Facing::DIRECTION[face];
-							if (placeBlock && placePos.y >= 0 && placePos.y < 128) {
+
+							// Merge matching half-slabs into a double slab when clicking the inner face
+							if (placeBlock && (placeBlock == Block::mStoneSlab || placeBlock == Block::mWoodenSlab || placeBlock == Block::mStoneSlab2)) {
+								FullBlock hitFB = region.getBlockAndData(hitPos);
+								if (hitFB.id == placeBlock->mID) {
+									int heldVariant = held.getAuxValue() & 0x7;
+									int hitVariant = hitFB.data & 0x7;
+									bool hitIsBottom = SlabBlock::isBottomSlab(hitFB.data);
+									bool canMerge = (heldVariant == hitVariant) &&
+										((face == Facing::UP && hitIsBottom) || (face == Facing::DOWN && !hitIsBottom));
+									const Block* doubleSlab =
+										(placeBlock == Block::mStoneSlab) ? Block::mDoubleStoneSlab :
+										(placeBlock == Block::mWoodenSlab) ? Block::mDoubleWoodenSlab :
+										Block::mDoubleStoneSlab2;
+									if (canMerge && doubleSlab) {
+										AABB fullBB(static_cast<float>(hitPos.x), static_cast<float>(hitPos.y), static_cast<float>(hitPos.z),
+										            static_cast<float>(hitPos.x + 1), static_cast<float>(hitPos.y + 1), static_cast<float>(hitPos.z + 1));
+										if (!fullBB.intersects(c.mBB) &&
+										    region.setBlockAndData(hitPos, FullBlock(doubleSlab->mID, static_cast<DataID>(hitVariant)), Block::UPDATE_ALL)) {
+											SoundEngine::play(SoundEngine::SND_PLACE, 0.75f, 0.95f + (std::rand() % 15) * 0.01f);
+											c.triggerSwing();
+											if (!gGuiContext.isCreative) {
+												held.remove(1);
+												if (held.getStackSize() <= 0) held.setNull();
+											}
+											updateLightingAndRebuildChunks(region, hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+											handledRightClick = true;
+										}
+									}
+								}
+							}
+
+							if (!handledRightClick && placeBlock && placePos.y >= 0 && placePos.y < 128) {
 								BlockID existingId = region.getBlockID(placePos);
 								const Block* existingBlock = Block::mBlocks[existingId];
 								bool canReplace = (existingId == 0) || (existingBlock && existingBlock->getMaterial().isReplaceable());
@@ -3495,39 +3993,144 @@ void renderThreadStuff()
 									if (!overlapsPlayer) {
 										DataID placeData = static_cast<DataID>(held.getAuxValue() & 0xF);
 										bool allowPlace = true;
-										if (Block::mTorch && placeBlock == Block::mTorch) {
+
+										// Matches Minecraft Entity::getRotation().y quadrant: 0=+Z, 1=-X, 2=-Z, 3=+X
+										int mcDir = 0;
+										if (std::abs(c.cameraMoveFront.z) >= std::abs(c.cameraMoveFront.x)) {
+											mcDir = (c.cameraMoveFront.z >= 0.0f) ? 0 : 2;
+										} else {
+											mcDir = (c.cameraMoveFront.x >= 0.0f) ? 3 : 1;
+										}
+										static const FacingID mcDirToFacing[4] = { Facing::NORTH, Facing::EAST, Facing::SOUTH, Facing::WEST };
+										static const FacingID mcDirToOppFacing[4] = { Facing::SOUTH, Facing::WEST, Facing::NORTH, Facing::EAST };
+										auto computeFacingAll = [&](bool invert) -> FacingID {
+											if (std::abs(static_cast<int>(c.mPos.x) - placePos.x) < 2 &&
+											    std::abs(static_cast<int>(c.mPos.z) - placePos.z) < 2) {
+												if (c.mBB.min.y > placePos.y) return invert ? Facing::DOWN : Facing::UP;
+												if (placePos.y > c.mBB.max.y) return invert ? Facing::UP : Facing::DOWN;
+											}
+											return invert ? mcDirToOppFacing[mcDir] : mcDirToFacing[mcDir];
+										};
+
+										if (placeBlock == Block::mTorch || placeBlock == Block::mLitRedStoneTorch || placeBlock == Block::mUnlitRedStoneTorch) {
 											static const DataID torchDataFromFacing[6] = {
 												TorchBlock::TORCH_TOP, TorchBlock::TORCH_TOP,
 												TorchBlock::TORCH_SOUTH, TorchBlock::TORCH_NORTH,
 												TorchBlock::TORCH_EAST, TorchBlock::TORCH_WEST
 											};
-											if (face != Facing::DOWN && region.isSolidBlockingBlock(hitPos)) {
+											if (face != Facing::DOWN && region.canProvideSupport(hitPos, face, BlockSupportType::Center)) {
 												placeData = torchDataFromFacing[face];
-											} else if (region.isSolidBlockingBlock(placePos.below())) {
+											} else if (region.canProvideSupport(placePos.below(), Facing::UP, BlockSupportType::Center)) {
 												placeData = TorchBlock::TORCH_TOP;
 											} else {
-												allowPlace = false;
+												bool foundWall = false;
+												for (FacingID f = Facing::NORTH; f <= Facing::EAST; ++f) {
+													if (region.canProvideSupport(placePos.neighbor(Facing::OPPOSITE_FACING[f]), f, BlockSupportType::Center)) {
+														placeData = torchDataFromFacing[f];
+														foundWall = true;
+														break;
+													}
+												}
+												if (!foundWall) allowPlace = false;
 											}
-										} else if (placeBlock->hasProperty(BlockProperty::Trap)) {
-											int tdir = 0;
-											if (std::abs(c.cameraMoveFront.z) >= std::abs(c.cameraMoveFront.x)) {
-												tdir = (c.cameraMoveFront.z >= 0.0f) ? 3 : 2;
+										} else if (placeBlock == Block::mLadder) {
+											placeData = 0;
+											if (face >= Facing::NORTH && face <= Facing::EAST && region.isSolidBlockingBlock(hitPos)) {
+												placeBlock->getBlockState(BlockState::FacingDirection).set(placeData, face);
 											} else {
-												tdir = (c.cameraMoveFront.x >= 0.0f) ? 1 : 0;
+												bool foundWall = false;
+												for (FacingID f = Facing::NORTH; f <= Facing::EAST; ++f) {
+													if (region.isSolidBlockingBlock(placePos.neighbor(Facing::OPPOSITE_FACING[f]))) {
+														placeBlock->getBlockState(BlockState::FacingDirection).set(placeData, f);
+														foundWall = true;
+														break;
+													}
+												}
+												if (!foundWall) allowPlace = false;
+											}
+										} else if (placeBlock == Block::mVine) {
+											int vineFacing = 0;
+											switch (face) {
+											case Facing::NORTH: vineFacing = VineBlock::VINE_SOUTH; break;
+											case Facing::SOUTH: vineFacing = VineBlock::VINE_NORTH; break;
+											case Facing::WEST:  vineFacing = VineBlock::VINE_EAST; break;
+											case Facing::EAST:  vineFacing = VineBlock::VINE_WEST; break;
+											default: break;
 											}
 											placeData = 0;
-											placeBlock->getBlockState(BlockState::Direction).set(placeData, tdir);
+											placeBlock->getBlockState(BlockState::VineGrowth).set(placeData, vineFacing);
+											if (placeData == 0 && !region.isSolidBlockingBlock(placePos.above())) {
+												allowPlace = false;
+											}
+										} else if (placeBlock == Block::mStoneButton || placeBlock == Block::mWoodButton) {
+											placeData = 0;
+											placeBlock->getBlockState(BlockState::FacingDirection).set(placeData, face);
+										} else if (placeBlock == Block::mLever) {
+											int ldir = LeverBlock::getLeverFacing(face);
+											if (face == Facing::UP) {
+												ldir = ((mcDir & 1) == 0) ? 5 : 6;
+											} else if (face == Facing::DOWN) {
+												ldir = ((mcDir & 1) == 0) ? 7 : 0;
+											}
+											placeData = 0;
+											placeBlock->getBlockState(BlockState::FacingDirection).set(placeData, ldir);
+										} else if (placeBlock->hasProperty(BlockProperty::Trap)) {
+											static const int trapDirFromMc[4] = { 3, 0, 2, 1 };
+											placeData = 0;
+											placeBlock->getBlockState(BlockState::Direction).set(placeData, trapDirFromMc[mcDir]);
+											bool upsideDown = (face == Facing::DOWN) || (face != Facing::UP && targetHit.getPos().y - hitPos.y > 0.5f);
+											placeBlock->getBlockState(BlockState::UpsideDownBit).set(placeData, upsideDown ? 1 : 0);
+										} else if (placeBlock->hasProperty(BlockProperty::Stair)) {
+											static const int stairDirFromMc[4] = { 2, 1, 3, 0 };
+											placeData = 0;
+											placeBlock->getBlockState(BlockState::Direction).set(placeData, stairDirFromMc[mcDir]);
 											bool upsideDown = (face == Facing::DOWN) || (face != Facing::UP && targetHit.getPos().y - hitPos.y > 0.5f);
 											placeBlock->getBlockState(BlockState::UpsideDownBit).set(placeData, upsideDown ? 1 : 0);
 										} else if (placeBlock->hasProperty(BlockProperty::FenceGate)) {
-											int gdir = 0;
-											if (std::abs(c.cameraMoveFront.z) >= std::abs(c.cameraMoveFront.x)) {
-												gdir = (c.cameraMoveFront.z >= 0.0f) ? 0 : 2;
-											} else {
-												gdir = (c.cameraMoveFront.x >= 0.0f) ? 3 : 1;
-											}
 											placeData = 0;
-											placeBlock->getBlockState(BlockState::Direction).set(placeData, gdir);
+											placeBlock->getBlockState(BlockState::Direction).set(placeData, mcDir);
+										} else if (placeBlock == Block::mStoneSlab || placeBlock == Block::mWoodenSlab || placeBlock == Block::mStoneSlab2) {
+											placeData = static_cast<DataID>(held.getAuxValue() & 0x7);
+											bool topSlab = (face == Facing::DOWN) || (face != Facing::UP && targetHit.getPos().y - hitPos.y > 0.5f);
+											placeBlock->getBlockState(BlockState::TopSlotBit).set(placeData, topSlab ? 1 : 0);
+										} else if (placeBlock == Block::mChest || placeBlock == Block::mTrappedChest || placeBlock == Block::mEnderChest ||
+										           placeBlock == Block::mFurnace || placeBlock == Block::mLitFurnace) {
+											placeData = 0;
+											placeBlock->getBlockState(BlockState::FacingDirection).set(placeData, mcDirToFacing[mcDir]);
+										} else if (placeBlock == Block::mPumpkin || placeBlock == Block::mLitPumpkin) {
+											placeData = 0;
+											placeBlock->getBlockState(BlockState::Direction).set(placeData, (mcDir + 2) & 3);
+										} else if (placeBlock == Block::mAnvil) {
+											static const int anvilDirFromMc[4] = {
+												Direction::WEST, Direction::NORTH, Direction::EAST, Direction::SOUTH
+											};
+											placeData = 0;
+											placeBlock->getBlockState(BlockState::Damage).set(placeData, held.getAuxValue() & 0x3);
+											placeBlock->getBlockState(BlockState::Direction).set(placeData, anvilDirFromMc[mcDir]);
+										} else if (placeBlock == Block::mLog || placeBlock == Block::mLog2 || placeBlock == Block::mHayBlock ||
+										           (placeBlock == Block::mQuartzBlock && (held.getAuxValue() & 0x3) != 0)) {
+											int axis = RotatedPillarBlock::FACING_Y;
+											if (face == Facing::NORTH || face == Facing::SOUTH) axis = RotatedPillarBlock::FACING_Z;
+											else if (face == Facing::EAST || face == Facing::WEST) axis = RotatedPillarBlock::FACING_X;
+											placeBlock->getBlockState(BlockState::Direction).set(placeData, axis);
+										} else if (placeBlock == Block::mUnpoweredRepeater || placeBlock == Block::mPoweredRepeater ||
+										           placeBlock == Block::mUnpoweredComparator || placeBlock == Block::mPoweredComparator) {
+											placeData = 0;
+											placeBlock->getBlockState(BlockState::Direction).set(placeData, (mcDir + 2) & 3);
+										} else if (placeBlock == Block::mHopper) {
+											FacingID attached = Facing::OPPOSITE_FACING[face];
+											if (attached == Facing::UP) attached = Facing::DOWN;
+											placeData = 0;
+											placeBlock->getBlockState(BlockState::FacingDirection).set(placeData, attached);
+										} else if (placeBlock == Block::mEndRod) {
+											placeData = 0;
+											placeBlock->getBlockState(BlockState::FacingDirection).set(placeData, face);
+										} else if (placeBlock == Block::mDispenser || placeBlock == Block::mDropper) {
+											placeData = 0;
+											placeBlock->getBlockState(BlockState::FacingDirection).set(placeData, computeFacingAll(false));
+										} else if (placeBlock == Block::mPiston || placeBlock == Block::mStickyPiston || placeBlock == Block::mObserver) {
+											placeData = 0;
+											placeBlock->getBlockState(BlockState::FacingDirection).set(placeData, computeFacingAll(true));
 										}
 										if (allowPlace && region.setBlockAndData(placePos, FullBlock(placeBlock->mID, placeData), Block::UPDATE_ALL)) {
 											SoundEngine::play(SoundEngine::SND_PLACE, 0.75f, 0.95f + (std::rand() % 15) * 0.01f);
@@ -3553,10 +4156,11 @@ void renderThreadStuff()
 				gBowPullTime = 0.0f;
 			}
 
+			syncFurnaceBlockStates(c.getRegion(), gGuiContext, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+
 			if (!gGuiContext.loadingChunks) {
 				float clampedDt = std::min(std::max(deltaTime, 0.0001f), 0.1f);
 				tickFurnaces(gGuiContext, clampedDt);
-				syncFurnaceBlockStates(c.getRegion(), gGuiContext, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
 				bool allowPickup = (gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen);
 				updateWorldItemEntities(worldItems, deltaTime, c.getRegion(), c.mBB, gGuiContext, allowPickup);
 				SoundEngine::setMasterVolume(gGuiOptions.soundVolume);
@@ -3854,7 +4458,7 @@ void renderThreadStuff()
 				}
 				lookTarget = eyePos;
 			} else if (gGuiOptions.viewBobbing) {
-				float phase = c.mWalkDist * 3.14159265f * 1.15f;
+				float phase = c.mWalkDist * 3.14159265f;
 				float bobVert = -std::abs(std::cos(phase)) * 0.045f * c.mSmoothBob;
 				float bobHoriz = std::sin(phase) * 0.035f * c.mSmoothBob;
 				glm::vec3 rightVec = glm::normalize(glm::cross(c.cameraFront, c.cameraUp));
@@ -3872,7 +4476,8 @@ void renderThreadStuff()
 
 			ChunkPos camChunkPos(Math::floor(c.mPos.x / 16.0f), Math::floor(c.mPos.z / 16.0f));
 			int renderDistance = 3;
-			int loadDistance = renderDistance + 2;
+			int lightDistance = renderDistance + 1;
+			int loadDistance = lightDistance + 2;
 			ChunkSource& chunkSrc = commandContext.dim->getChunkSource();
 
 			auto queueChunkAndNeighbors = [&](const ChunkPos& cp) {
@@ -3902,10 +4507,10 @@ void renderThreadStuff()
 					if (lc && lc->getState() == ChunkState::Loaded) {
 						if (loadedChunkSet.insert(cp).second) {
 							queueChunkAndNeighbors(cp);
-						} else if (inRenderRange && rc.find(cp) == rc.end()) {
+						} else if (inRenderRange && (rc.find(cp) == rc.end() || litChunks.find(cp) == litChunks.end())) {
 							needsReRendering2.insert(cp);
 						}
-					} else {
+					} else if (std::abs(x) <= lightDistance + 1 && std::abs(z) <= lightDistance + 1) {
 						needsReRendering.insert(cp);
 					}
 				}
@@ -3923,6 +4528,41 @@ void renderThreadStuff()
 				}
 			}
 
+			// Decoupled Lighting Pass over [-lightDistance..lightDistance]^2 ([-4..4]^2)
+			for (int x = -lightDistance; x <= lightDistance; ++x) {
+				for (int z = -lightDistance; z <= lightDistance; ++z) {
+					ChunkPos pos(camChunkPos.x + x, camChunkPos.z + z);
+					if (litChunks.find(pos) != litChunks.end()) continue;
+					if (!areChunkNeighborsLoaded(chunkSrc, pos)) continue;
+
+					litChunks.insert(pos);
+					std::unordered_set<ChunkPos> touchedChunks;
+					WorldLighting::propagateChunkLighting(c.getRegion(), pos, &touchedChunks);
+
+					touchedChunks.insert(pos);
+					touchedChunks.insert(ChunkPos(pos.x + 1, pos.z));
+					touchedChunks.insert(ChunkPos(pos.x - 1, pos.z));
+					touchedChunks.insert(ChunkPos(pos.x, pos.z + 1));
+					touchedChunks.insert(ChunkPos(pos.x, pos.z - 1));
+
+					for (const ChunkPos& np : touchedChunks) {
+						bool npInRender = (std::abs(np.x - camChunkPos.x) <= renderDistance &&
+						                   std::abs(np.z - camChunkPos.z) <= renderDistance);
+						auto rcIt = rc.find(np);
+						if (rcIt != rc.end()) {
+							for (int s = 0; s < 8; ++s) {
+								if (rcIt->second[s]) {
+									rcIt->second[s]->setDirty(Tick(0), true);
+								}
+							}
+							needsReRendering2.insert(np);
+						} else if (npInRender) {
+							needsReRendering2.insert(np);
+						}
+					}
+				}
+			}
+
 			for (auto it = needsReRendering2.begin(); it != needsReRendering2.end(); ) {
 				ChunkPos pos = *it;
 				if (!areChunkNeighborsLoaded(chunkSrc, pos)) {
@@ -3930,8 +4570,22 @@ void renderThreadStuff()
 					it = needsReRendering2.erase(it);
 					continue;
 				}
-				if (litChunks.insert(pos).second) {
-					WorldLighting::propagateChunkLighting(c.getRegion(), pos);
+				bool readyToMesh = (litChunks.find(pos) != litChunks.end());
+				if (readyToMesh) {
+					for (int dx = -1; dx <= 1 && readyToMesh; ++dx) {
+						for (int dz = -1; dz <= 1 && readyToMesh; ++dz) {
+							ChunkPos ncp(pos.x + dx, pos.z + dz);
+							if (std::abs(ncp.x - camChunkPos.x) <= lightDistance &&
+							    std::abs(ncp.z - camChunkPos.z) <= lightDistance &&
+							    litChunks.find(ncp) == litChunks.end()) {
+								readyToMesh = false;
+							}
+						}
+					}
+				}
+				if (!readyToMesh) {
+					++it;
+					continue;
 				}
 				for (int i = 0; i < 8; i++) {
 					BlockPos cp(pos.x * 16, i * 16, pos.z * 16);
@@ -4108,7 +4762,7 @@ void renderThreadStuff()
 			glMatrixMode(GL_MODELVIEW);
 			glPushMatrix();
 			glLoadMatrixf(&view[0][0]);
-			ParticleSystem::render(c.yaw, c.pitch);
+			ParticleSystem::render(c.yaw, c.pitch, &texgroup);
 			ProjectileTntSystem::renderArrows();
 			ProjectileTntSystem::renderTnts();
 			glPopMatrix();
@@ -4117,7 +4771,11 @@ void renderThreadStuff()
 			glMatrixMode(GL_MODELVIEW);
 
 			if (gGuiOptions.thirdPerson && !gGuiContext.loadingChunks) {
-				renderWorldSteve3D(c, gGuiContext, projection, view);
+				float steveLight = WorldLighting::sampleWorldBrightness(
+					c.getRegion(),
+					BlockPos(Math::floor(c.mPos.x), Math::floor(c.mPos.y), Math::floor(c.mPos.z)),
+					skyInfo.sunFactor);
+				renderWorldSteve3D(c, gGuiContext, projection, view, steveLight);
 			}
 
 			if (hasTargetHit && !mobInFront && gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
@@ -4149,8 +4807,47 @@ void renderThreadStuff()
 		} // end if (renderWorld || gGuiContext.loadingChunks)
 
 		if (gGuiContext.loadingChunks) {
-			const int targetChunks = 49; // (2 * renderDistance + 1)^2 for renderDistance = 3
-			gGuiContext.loadingProgress = std::min(1.0f, static_cast<float>(rc.size()) / static_cast<float>(targetChunks));
+			if (commandContext.dim != nullptr) {
+				ChunkPos camCp(Math::floor(c.mPos.x / 16.0f), Math::floor(c.mPos.z / 16.0f));
+				ChunkSource& chunkSrc = commandContext.dim->getChunkSource();
+				const int rDist = 3;
+				const int lDist = rDist + 1;
+				int loadedCount = 0;
+				int litCount = 0;
+				int meshedCount = 0;
+				const int totalLightChunks = (2 * lDist + 1) * (2 * lDist + 1); // 81
+				const int totalRenderChunks = (2 * rDist + 1) * (2 * rDist + 1); // 49
+
+				for (int dx = -lDist; dx <= lDist; ++dx) {
+					for (int dz = -lDist; dz <= lDist; ++dz) {
+						ChunkPos cp(camCp.x + dx, camCp.z + dz);
+						auto* lc = chunkSrc.getExistingChunk(cp);
+						if (lc && lc->getState() == ChunkState::Loaded) {
+							++loadedCount;
+						}
+						if (litChunks.find(cp) != litChunks.end()) {
+							++litCount;
+						}
+						if (std::abs(dx) <= rDist && std::abs(dz) <= rDist && rc.find(cp) != rc.end()) {
+							++meshedCount;
+						}
+					}
+				}
+
+				bool allLoadedAndLit = (loadedCount == totalLightChunks && litCount == totalLightChunks);
+				bool allMeshed = (meshedCount == totalRenderChunks);
+				if (allLoadedAndLit && allMeshed && needsReRendering2.empty()) {
+					gGuiContext.loadingProgress = 1.0f;
+				} else {
+					float loadFrac = static_cast<float>(loadedCount) / static_cast<float>(totalLightChunks);
+					float litFrac = static_cast<float>(litCount) / static_cast<float>(totalLightChunks);
+					float meshFrac = static_cast<float>(meshedCount) / static_cast<float>(totalRenderChunks);
+					float weighted = 0.30f * loadFrac + 0.30f * litFrac + 0.40f * meshFrac;
+					gGuiContext.loadingProgress = std::min(0.99f, std::max(0.0f, weighted));
+				}
+			} else {
+				gGuiContext.loadingProgress = 0.0f;
+			}
 		}
 
 		// 2D GUI / HUD Pass

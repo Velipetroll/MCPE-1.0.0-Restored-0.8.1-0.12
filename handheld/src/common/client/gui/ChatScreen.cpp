@@ -82,12 +82,16 @@ void ChatScreen::keyPressed(int key) {
 	}
 	if (key == 259 /* GLFW_KEY_BACKSPACE */) {
 		if (!mInputText.empty()) mInputText.pop_back();
-	} else if (key >= 32 && key <= 126) {
-		if (mInputText.size() < 64) {
-			mInputText.push_back(static_cast<char>(key));
-		}
 	}
 	Screen::keyPressed(key);
+}
+
+void ChatScreen::charTyped(unsigned int codepoint) {
+	if (codepoint >= 32 && codepoint <= 126) {
+		if (mInputText.size() < 64) {
+			mInputText.push_back(static_cast<char>(codepoint));
+		}
+	}
 }
 
 void ChatScreen::buttonClicked(Button* button) {

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <glad/glad.h>
 #include "client/gui/GuiComponent.h"
+#include "TextureGroup.h"
 #include "world/level/BlockPos.h"
 #include "world/level/BlockSource.h"
 #include "util/Math.h"
@@ -33,6 +34,8 @@ struct Particle {
     int maxAliveTime = 20;
     bool noclip = false;
     bool onGround = false;
+    float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
+    bool hasTexture = false;
 };
 
 inline std::vector<Particle>& getParticles() {
@@ -165,7 +168,8 @@ inline void initParticleBase(Particle& p, float xPos, float yPos, float zPos, fl
     p.maxAliveTime = static_cast<int>(4.0f / (rand01() * 0.9f + 0.1f));
 }
 
-inline void spawnBlockBreak(float bx, float by, float bz, float r, float g, float b, BlockSource* region = nullptr) {
+inline void spawnBlockBreak(float bx, float by, float bz, float r, float g, float b, BlockSource* region = nullptr,
+                            float tu0 = 0.0f, float tv0 = 0.0f, float tu1 = 0.0f, float tv1 = 0.0f, bool hasTex = false) {
     auto& ps = getParticles();
     if (ps.size() > 800) return;
     // Matches MCPE 0.8.1 ParticleEngine::destroy (3x3x3 sub-grid, outward velocity from block center)
@@ -190,6 +194,15 @@ inline void spawnBlockBreak(float bx, float by, float bz, float r, float g, floa
                 p.g = g * shade;
                 p.b = b * shade;
                 p.a = 1.0f;
+                if (hasTex) {
+                    float du = (tu1 - tu0) * 0.25f;
+                    float dv = (tv1 - tv0) * 0.25f;
+                    p.u0 = tu0 + rand01() * 3.0f * du;
+                    p.v0 = tv0 + rand01() * 3.0f * dv;
+                    p.u1 = p.u0 + du;
+                    p.v1 = p.v0 + dv;
+                    p.hasTexture = true;
+                }
                 if (stepParticle(p, region)) {
                     ps.push_back(p);
                 }
@@ -198,7 +211,8 @@ inline void spawnBlockBreak(float bx, float by, float bz, float r, float g, floa
     }
 }
 
-inline void spawnBlockCrack(float bx, float by, float bz, int face, float r, float g, float b, BlockSource* region = nullptr) {
+inline void spawnBlockCrack(float bx, float by, float bz, int face, float r, float g, float b, BlockSource* region = nullptr,
+                            float tu0 = 0.0f, float tv0 = 0.0f, float tu1 = 0.0f, float tv1 = 0.0f, bool hasTex = false) {
     auto& ps = getParticles();
     if (ps.size() > 800) return;
 
@@ -232,6 +246,15 @@ inline void spawnBlockCrack(float bx, float by, float bz, int face, float r, flo
     p.g = g * shade;
     p.b = b * shade;
     p.a = 1.0f;
+    if (hasTex) {
+        float du = (tu1 - tu0) * 0.25f;
+        float dv = (tv1 - tv0) * 0.25f;
+        p.u0 = tu0 + rand01() * 3.0f * du;
+        p.v0 = tv0 + rand01() * 3.0f * dv;
+        p.u1 = p.u0 + du;
+        p.v1 = p.v0 + dv;
+        p.hasTexture = true;
+    }
     if (stepParticle(p, region)) {
         ps.push_back(p);
     }
@@ -385,7 +408,7 @@ inline void tick(float dt, BlockSource* region = nullptr) {
     }
 }
 
-inline void render(float yawDeg, float pitchDeg) {
+inline void render(float yawDeg, float pitchDeg, mce::TextureGroup* texGroup = nullptr) {
     auto& ps = getParticles();
     if (ps.empty()) return;
 
@@ -476,11 +499,47 @@ inline void render(float yawDeg, float pitchDeg) {
         glEnd();
     }
 
-    // Pass 2: Terrain particles (colored quads matching block tint)
+    // Pass 2: Terrain particles (textured from atlas.terrain with alpha test/blend, or colored fallback)
+    bool hasAtlas = false;
+    if (texGroup) {
+        auto atlasTex = texGroup->getTexture(ResourceLocation("atlas.terrain"));
+        if (atlasTex.get()) {
+            atlasTex.get()->bindTexture(mce::RenderContextImmediate::get(), 0, 0);
+            hasAtlas = true;
+        }
+    }
+    if (hasAtlas) {
+        glEnable(GL_TEXTURE_2D);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glBegin(GL_QUADS);
+        for (const auto& p : ps) {
+            if (p.type != ParticleType::Terrain || !p.hasTexture) continue;
+            float px = p.prevX + (p.x - p.prevX) * partialTicks;
+            float py = p.prevY + (p.y - p.prevY) * partialTicks;
+            float pz = p.prevZ + (p.z - p.prevZ) * partialTicks;
+            float s = p.scale * 0.1f;
+
+            glColor4f(p.r, p.g, p.b, 1.0f);
+
+            float x0 = px - (rx + ux) * s, y0 = py - (ry + uy) * s, z0 = pz - (rz + uz) * s;
+            float x1 = px + (rx - ux) * s, y1 = py + (ry - uy) * s, z1 = pz + (rz - uz) * s;
+            float x2 = px + (rx + ux) * s, y2 = py + (ry + uy) * s, z2 = pz + (rz + uz) * s;
+            float x3 = px - (rx - ux) * s, y3 = py - (ry - uy) * s, z3 = pz - (rz - uz) * s;
+
+            glTexCoord2f(p.u0, p.v1); glVertex3f(x0, y0, z0);
+            glTexCoord2f(p.u1, p.v1); glVertex3f(x1, y1, z1);
+            glTexCoord2f(p.u1, p.v0); glVertex3f(x2, y2, z2);
+            glTexCoord2f(p.u0, p.v0); glVertex3f(x3, y3, z3);
+        }
+        glEnd();
+        glDisable(GL_BLEND);
+    }
+
     glDisable(GL_TEXTURE_2D);
     glBegin(GL_QUADS);
     for (const auto& p : ps) {
-        if (p.type != ParticleType::Terrain) continue;
+        if (p.type != ParticleType::Terrain || (hasAtlas && p.hasTexture)) continue;
         float px = p.prevX + (p.x - p.prevX) * partialTicks;
         float py = p.prevY + (p.y - p.prevY) * partialTicks;
         float pz = p.prevZ + (p.z - p.prevZ) * partialTicks;

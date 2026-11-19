@@ -251,12 +251,17 @@ void CreateWorldScreen::keyPressed(int key) {
 	std::string& target = (mFocusedField == 0) ? mWorldName : mSeedText;
 	if (key == 259 /* GLFW_KEY_BACKSPACE */) {
 		if (!target.empty()) target.pop_back();
-	} else if (key >= 32 && key <= 126) {
-		if (target.size() < 24) {
-			target.push_back(static_cast<char>(key));
-		}
 	}
 	Screen::keyPressed(key);
+}
+
+void CreateWorldScreen::charTyped(unsigned int codepoint) {
+	std::string& target = (mFocusedField == 0) ? mWorldName : mSeedText;
+	if (codepoint >= 32 && codepoint <= 126) {
+		if (target.size() < 24) {
+			target.push_back(static_cast<char>(codepoint));
+		}
+	}
 }
 
 void CreateWorldScreen::buttonClicked(Button* button) {
