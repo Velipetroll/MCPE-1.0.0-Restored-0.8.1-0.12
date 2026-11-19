@@ -338,7 +338,7 @@ void TopSnowBlock::onRemove(BlockSource& region, const BlockPos& pos) const {
 }
 
 int TopSnowBlock::getResource(Random& random, int data, int bonusLootLevel) const {
-	return Item::mSnowBall->getId();
+	return Item::mSnowBall ? Item::mSnowBall->getId() : 0;
 }
 
 int TopSnowBlock::getResourceCount(Random& random, int data, int bonusLootLevel) const {

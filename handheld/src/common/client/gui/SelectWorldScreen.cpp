@@ -5,26 +5,46 @@
 #include "AddExternalServerScreen.h"
 #include "StartMenuScreen.h"
 #include "TouchControls.h"
+#include "WorldPersistence.h"
 #include "GuiContext.h"
 #include "Options.h"
 #include "Font.h"
 #include <filesystem>
+
+static WorldEntry buildWorldEntry(const std::string& fallbackName, const std::string& dirPath, bool isDefault) {
+	WorldEntry entry;
+	entry.name = fallbackName;
+	entry.path = dirPath;
+	entry.isDefault = isDefault;
+	WorldMetadata meta;
+	meta.name = fallbackName;
+	if (loadWorldMetadata(dirPath, meta)) {
+		entry.name = meta.name.empty() ? fallbackName : meta.name;
+		entry.seed = meta.seed;
+		entry.isCreative = meta.isCreative;
+	} else {
+		entry.seed = isDefault ? 0 : parseSeedString(fallbackName);
+		entry.isCreative = false;
+	}
+	entry.info = entry.isCreative ? "Creative Mode" : "Survival Mode";
+	return entry;
+}
 
 void SelectWorldScreen::loadWorldList() {
 	namespace fs = std::filesystem;
 	mWorlds.clear();
 
 	if (fs::exists("./restore")) {
-		mWorlds.push_back({ "My World (restore)", "./restore", "Survival Mode", true });
+		mWorlds.push_back(buildWorldEntry("My World (restore)", "./restore", true));
 	} else {
-		mWorlds.push_back({ "My World", "./restore", "Survival Mode", true });
+		mWorlds.push_back(buildWorldEntry("My World", "./restore", true));
 	}
 
 	if (fs::exists("./worlds") && fs::is_directory("./worlds")) {
 		for (const auto& entry : fs::directory_iterator("./worlds")) {
 			if (entry.is_directory()) {
 				std::string name = entry.path().filename().string();
-				mWorlds.push_back({ name, entry.path().string(), "Saved World", false });
+				mWorlds.push_back(buildWorldEntry(name, entry.path().string(), false));
 			}
 		}
 	}
@@ -121,8 +141,11 @@ void SelectWorldScreen::render(int mouseX, int mouseY, float partialTicks) {
 				drawRect(cx, startY, cx + cardW, startY + cardH, 0xFF555555);
 			}
 			if (font) {
+				std::string subInfo = mEditMode
+					? (mWorlds[i].info + "  Seed: " + std::to_string(mWorlds[i].seed))
+					: mWorlds[i].info;
 				drawCenteredString(font, mWorlds[i].name, cx + cardW / 2, startY + cardH - 28, 0xFFFFFFFF);
-				drawCenteredString(font, mWorlds[i].info, cx + cardW / 2, startY + cardH - 16, 0xFFAAAAAA);
+				drawCenteredString(font, subInfo, cx + cardW / 2, startY + cardH - 16, 0xFFAAAAAA);
 			}
 			if (mEditMode && !mWorlds[i].isDefault) {
 				int xbx = cx + cardW - 18;
@@ -211,7 +234,15 @@ void SelectWorldScreen::buttonClicked(Button* button) {
 	if (!context || !button) return;
 
 	if (button->id == 1) {
-		context->setScreen(new ProgressScreen());
+		if (mSelectedIndex >= 0 && mSelectedIndex < static_cast<int>(mWorlds.size())) {
+			const auto& sel = mWorlds[static_cast<size_t>(mSelectedIndex)];
+			context->activeWorldDir = sel.path;
+			context->activeWorldName = sel.name;
+			context->activeWorldSeed = sel.seed;
+			context->isCreative = sel.isCreative;
+			context->worldOpenRequested = true;
+			context->setScreen(new ProgressScreen());
+		}
 	} else if (button->id == 2) {
 		context->setScreen(new CreateWorldScreen());
 	} else if (button->id == 3) {

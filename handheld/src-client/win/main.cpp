@@ -923,24 +923,6 @@ int main(int argc, char** argv)
 
 
 
-	Level* level = new Level(std::make_unique<DBStorage>("some_level","./restore/mcworld"));
-
-	/*Dimension& dim = level->createDimension(Overworld);
-
-	LevelChunk* chunks[9];
-	//needed for post-processing
-	static const ChunkPos offsets[] = {
-	{ 0, 0 },
-	{ -1, -1 },
-	{ 0, -1 },
-	{ 1, -1 },
-	{ -1, 0 },
-	{ 1, 0 },
-	{ -1, 1 },
-	{ 0, 1 },
-	{ 1, 1 }
-	};*/
-
 	bool useConsole = false;
 	for (int i = 1; i < argc; ++i) {
 		if (std::string(argv[i]) == "--console") {
@@ -950,10 +932,11 @@ int main(int argc, char** argv)
 	}
 
 	if (useConsole) {
+		Level* level = new Level(std::make_unique<DBStorage>("some_level","./restore/mcworld"));
 		cmdThread(level);
 	} else {
-		commandContext.level = level;
-		commandContext.dim = &level->createDimension(Overworld);
+		commandContext.level = nullptr;
+		commandContext.dim = nullptr;
 		commandContext.running = true;
 		renderThreadStuff();
 	}

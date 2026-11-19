@@ -18,7 +18,7 @@ SnowBlock::SnowBlock(const std::string& nameId, int id)
 }
 
 int SnowBlock::getResource(Random& random, int data, int bonusLootLevel) const {
-	return Item::mSnowBall->getId();
+	return Item::mSnowBall ? Item::mSnowBall->getId() : mID;
 }
 
 int SnowBlock::getResourceCount(Random& random, int data, int bonusLootLevel) const {

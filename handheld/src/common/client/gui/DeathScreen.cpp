@@ -53,8 +53,12 @@ void DeathScreen::render(int mouseX, int mouseY, float partialTicks) {
 void DeathScreen::buttonClicked(Button* button) {
 	if (!context || !button) return;
 	if (button->id == 1) {
-		context->resumeGame();
+		context->health = 20;
+		context->respawnRequested = true;
+		context->startGame();
 	} else if (button->id == 2) {
+		context->health = 20;
+		context->respawnRequested = true;
 		context->quitToTitle();
 	}
 }

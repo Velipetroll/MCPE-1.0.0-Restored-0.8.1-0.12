@@ -20,7 +20,7 @@ bool DeadBush::mayPlaceOn(const Block& block) const {
 }
 
 int DeadBush::getResource(Random& random, int data, int bonusLootLevel) const {
-	return Item::mStick->getId();
+	return Item::mStick ? Item::mStick->getId() : 0;
 }
 
 int DeadBush::getResourceCount(Random& random, int data, int bonusLootLevel) const {

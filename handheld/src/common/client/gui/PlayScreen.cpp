@@ -5,6 +5,7 @@
 #include "DeleteWorldScreen.h"
 #include "AddExternalServerScreen.h"
 #include "TouchControls.h"
+#include "WorldPersistence.h"
 #include "GuiContext.h"
 #include "Options.h"
 #include "Font.h"
@@ -29,16 +30,35 @@ void PlayScreen::loadWorlds() {
 	mWorlds.clear();
 	if (!mLocalWorlds) return;
 
+	auto makeEntry = [](const std::string& fallbackName, const std::string& dirPath, bool isDefault) {
+		WorldEntry we;
+		we.name = fallbackName;
+		we.path = dirPath;
+		we.isDefault = isDefault;
+		WorldMetadata meta;
+		meta.name = fallbackName;
+		if (loadWorldMetadata(dirPath, meta)) {
+			we.name = meta.name.empty() ? fallbackName : meta.name;
+			we.seed = meta.seed;
+			we.isCreative = meta.isCreative;
+		} else {
+			we.seed = isDefault ? 0 : parseSeedString(fallbackName);
+			we.isCreative = false;
+		}
+		we.info = we.isCreative ? "Creative Mode" : "Survival Mode";
+		return we;
+	};
+
 	if (fs::exists("./restore")) {
-		mWorlds.push_back({ "My World (restore)", "./restore", "Survival Mode", true });
+		mWorlds.push_back(makeEntry("My World (restore)", "./restore", true));
 	} else {
-		mWorlds.push_back({ "My World", "./restore", "Survival Mode", true });
+		mWorlds.push_back(makeEntry("My World", "./restore", true));
 	}
 
 	if (fs::exists("./worlds") && fs::is_directory("./worlds")) {
 		for (const auto& entry : fs::directory_iterator("./worlds")) {
 			if (entry.is_directory()) {
-				mWorlds.push_back({ entry.path().filename().string(), entry.path().string(), "Saved World", false });
+				mWorlds.push_back(makeEntry(entry.path().filename().string(), entry.path().string(), false));
 			}
 		}
 	}
@@ -162,8 +182,11 @@ void PlayScreen::render(int mouseX, int mouseY, float partialTicks) {
 
 		if (font) {
 			int titleColor = rowPressed ? 0xFFFFFFA0 : 0xFFFFFFFF;
+			std::string infoLine = mEditMode
+				? (mWorlds[i].info + "  Seed: " + std::to_string(mWorlds[i].seed))
+				: mWorlds[i].info;
 			drawString(font, mWorlds[i].name, mListX + 5, ry + 5, titleColor);
-			drawString(font, mWorlds[i].info, mListX + 5, ry + 16, 0xFFBBBBBB);
+			drawString(font, infoLine, mListX + 5, ry + 16, 0xFFBBBBBB);
 		}
 
 		if (showDelete) {
@@ -223,6 +246,12 @@ void PlayScreen::mouseReleased(int x, int y, int button) {
 				mDragging = false;
 				mPressedIndex = -1;
 				mPressedDelete = false;
+				const auto& sel = mWorlds[static_cast<size_t>(idx)];
+				context->activeWorldDir = sel.path;
+				context->activeWorldName = sel.name;
+				context->activeWorldSeed = sel.seed;
+				context->isCreative = sel.isCreative;
+				context->worldOpenRequested = true;
 				context->setScreen(new ProgressScreen());
 				return;
 			}

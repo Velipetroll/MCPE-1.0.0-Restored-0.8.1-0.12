@@ -17,7 +17,7 @@ GravelBlock::GravelBlock(const std::string& nameId, int type)
 int GravelBlock::getResource(Random& random, int data, int bonusLootLevel) const {
 	bonusLootLevel = std::min(3, bonusLootLevel);
 
-	if (random.nextInt(10 - bonusLootLevel * 3) == 0) {
+	if (Item::mFlint && random.nextInt(10 - bonusLootLevel * 3) == 0) {
 		return Item::mFlint->getId();
 	}
 

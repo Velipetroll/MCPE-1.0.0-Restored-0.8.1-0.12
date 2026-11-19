@@ -705,7 +705,7 @@ void Item::registerItems() {
 // 	//Item::milk = &registerItem<BucketItem>( 79, -1).setIcon(13,
 // 	// 4).setCategory(ItemCategory::FoodArmor).setDescriptionId("milk").setCraftingRemainingItem>( Item.bucket_empty);
 // 	Item::mBrick = &registerItem<Item>("brick", 80);
-// 	Item::mClay = &registerItem<Item>("clay_ball", 81);
+	Item::mClay = &registerItem<Item>("clay_ball", 81);
 // 	Item::mReeds = &registerItem<BlockPlanterItem>("reeds", 82, Block::mReeds);
 // 	Item::mPaper = &registerItem<Item>("paper", 83);
 // 	Item::mBook = &registerItem<Item>("book", 84);
@@ -942,7 +942,7 @@ void Item::initClientData() {
 // 	//Item::milk = &registerItem<BucketItem>( 79, -1).setIcon(13,
 // 	// 4).setCategory(ItemCategory::FoodArmor).setDescriptionId("milk").setCraftingRemainingItem>( Item.bucket_empty);
 // 	Item::mBrick->setIcon("brick").setCategory(CreativeItemCategory::Miscellaneous);
-// 	Item::mClay->setIcon("clay_ball").setCategory(CreativeItemCategory::Miscellaneous);
+	Item::mClay->setIcon("clay_ball").setCategory(CreativeItemCategory::Miscellaneous);
 // 	Item::mReeds->setIcon("reeds").setCategory(CreativeItemCategory::Miscellaneous);
 // 	Item::mPaper->setIcon("paper").setCategory(CreativeItemCategory::Miscellaneous);
 // 	Item::mBook->setIcon("book_normal").setCategory(CreativeItemCategory::Miscellaneous);

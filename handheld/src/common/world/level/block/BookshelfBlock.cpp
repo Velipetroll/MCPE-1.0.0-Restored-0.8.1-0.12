@@ -17,5 +17,5 @@ int BookshelfBlock::getResourceCount(Random& random, int data, int bonusLootLeve
 }
 
 int BookshelfBlock::getResource(Random& random, int data, int bonusLootLevel) const {
-	return Item::mBook->getId();
+	return Item::mBook ? Item::mBook->getId() : mID;
 }

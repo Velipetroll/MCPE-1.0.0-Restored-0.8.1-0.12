@@ -73,21 +73,23 @@ public:
 	std::condition_variable vv;
 	std::condition_variable taskFinished;
 	bool running = true;
+	bool busy = false;
 	static void NOP()
 	{
 		//return true;
 	}
 
-	void sync()//todo
+	void sync()
 	{
+		std::unique_lock lock(tmutex);
+		taskFinished.wait(lock, [this] {
+			return tasks.empty() && !busy;
+			});
 	}
 
 	void flush()
 	{
-		std::unique_lock lock(tmutex);
-		taskFinished.wait(lock, [this] {
-			return tasks.empty();
-			});
+		sync();
 	}
 
 	void workerThread()
@@ -108,12 +110,17 @@ public:
 
 				t = std::move(tasks.back());
 				tasks.pop_back();
+				busy = true;
 			}
 
 			//Dont stop the main thread
 			if (t.t1())
 				t.t2();
 
+			{
+				std::lock_guard lock(tmutex);
+				busy = false;
+			}
 			taskFinished.notify_all();
 		}
 	}

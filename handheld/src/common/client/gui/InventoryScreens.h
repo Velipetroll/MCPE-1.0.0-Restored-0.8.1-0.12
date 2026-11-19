@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Screen.h"
+#include "GuiContext.h"
 #include "world/crafting/CraftingRecipes.h"
 #include "world/item/ItemInstance.h"
 #include <string>
@@ -164,29 +165,45 @@ public:
 
 class FurnaceScreen : public Screen {
 public:
+	FurnaceScreen() = default;
+	explicit FurnaceScreen(const BlockCoordKey& pos);
 	void init() override;
 	void setupPositions() override;
 	void render(int mouseX, int mouseY, float partialTicks) override;
+	void mouseClicked(int x, int y, int button) override;
 	void buttonClicked(Button* button) override;
+	void keyPressed(int key) override;
 	bool renderGameBehind() const override { return true; }
 
 private:
+	void closeScreen();
+	BlockCoordKey mPos{};
+	ItemInstance mCarriedItem;
 	Button* mCloseButton = nullptr;
 };
 
 class ChestScreen : public Screen {
 public:
 	explicit ChestScreen(bool isDouble = false);
+	ChestScreen(const BlockCoordKey& primaryPos, bool isDouble, const BlockCoordKey& secondaryPos = BlockCoordKey{});
 	void init() override;
 	void setupPositions() override;
 	void render(int mouseX, int mouseY, float partialTicks) override;
+	void mouseClicked(int x, int y, int button) override;
 	void buttonClicked(Button* button) override;
+	void keyPressed(int key) override;
 	bool renderGameBehind() const override { return true; }
 
 private:
+	void closeScreen();
+	BlockCoordKey mPrimaryPos{};
+	BlockCoordKey mSecondaryPos{};
 	bool mIsDouble = false;
+	ItemInstance mCarriedItem;
 	Button* mCloseButton = nullptr;
 };
+
+void tickFurnaces(GuiContext& ctx, float dt);
 
 class TextEditScreen : public Screen {
 public:

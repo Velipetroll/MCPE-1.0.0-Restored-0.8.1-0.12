@@ -53,7 +53,7 @@ void RedStoneOreBlock::animateTick(BlockSource& region, const BlockPos& pos, Ran
 }
 
 int RedStoneOreBlock::getResource(Random& random, int data, int bonusLootLevel) const {
-	return Item::mRedStone->getId();
+	return Item::mRedStone ? Item::mRedStone->getId() : mID;
 }
 
 int RedStoneOreBlock::getResourceCount(Random& random, int data, int bonusLootLevel) const {

@@ -119,7 +119,7 @@ const AABB& ReedBlock::getAABB(BlockSource& region, const BlockPos& pos, AABB& b
 }
 
 int ReedBlock::getResource(Random& random, int data, int bonusLootLevel) const {
-	return Item::mReeds->getId();
+	return Item::mReeds ? Item::mReeds->getId() : mID;
 }
 
 ItemInstance ReedBlock::asItemInstance(BlockSource& region, const BlockPos& pos, int blockData) const {

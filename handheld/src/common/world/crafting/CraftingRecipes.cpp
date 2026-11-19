@@ -226,6 +226,8 @@ namespace {
 		ensureItem(Item::mGoldIngot, "gold_ingot", 10);
 		ensureItem(Item::mStick, "stick", 24);
 		ensureItem(Item::mWheat, "wheat", 40);
+		ensureItem(Item::mBrick, "brick", 80);
+		ensureItem(Item::mClay, "clay_ball", 81);
 
 		ensureItem(Item::mShovel_iron, "iron_shovel", 0, 1);
 		ensureItem(Item::mPickAxe_iron, "iron_pickaxe", 1, 1);
@@ -433,6 +435,8 @@ namespace {
 			regItem(Item::mDiamond, "Diamond", "textures/items/diamond.png");
 			regItem(Item::mWheat, "Wheat", "textures/items/wheat.png");
 			regItem(Item::mBread, "Bread", "textures/items/bread.png");
+			regItem(Item::mClay, "Clay", "textures/items/clay_ball.png");
+			regItem(Item::mBrick, "Brick", "textures/items/brick.png");
 
 			regItem(Item::mPickAxe_wood, "Wooden Pickaxe", "textures/items/wood_pickaxe.png");
 			regItem(Item::mHatchet_wood, "Wooden Axe", "textures/items/wood_axe.png");

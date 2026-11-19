@@ -12,6 +12,7 @@ void Gui::render(float partialTicks, int guiW, int guiH, Options* options, Font*
 	if (ctx) {
 		ctx->ensureInventoryInitialized();
 		selectedSlot = ctx->selectedHotbarSlot;
+		health = ctx->health;
 	}
 
 	glEnable(GL_BLEND);
@@ -19,7 +20,9 @@ void Gui::render(float partialTicks, int guiW, int guiH, Options* options, Font*
 
 	renderCrosshair(guiW, guiH);
 	renderHotbar(guiW, guiH, font, ctx);
-	renderHearts(guiW, guiH);
+	if (!ctx || !ctx->isCreative) {
+		renderHearts(guiW, guiH);
+	}
 	if (options && options->useTouchUI) {
 		renderTouchButtons(guiW, guiH, font);
 	}

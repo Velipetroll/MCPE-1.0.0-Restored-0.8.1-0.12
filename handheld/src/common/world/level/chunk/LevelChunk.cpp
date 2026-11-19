@@ -1504,6 +1504,8 @@ bool LevelChunk::deserialize(KeyValueInput& keymap) {
 	static_assert(sizeof(Tag) == 1, "The following code won't work if this isn't true");
 
 	mFinalized = Finalization::Done; // for backwards compatibility, since older saved chunks won't have the finalization tag
+	bool hasData2D = false;
+	std::array<bool, 16> loadedSubChunks{};
 
 	for (auto&& keyStream : keymap) {
 		auto& key = keyStream.key;
@@ -1514,6 +1516,7 @@ bool LevelChunk::deserialize(KeyValueInput& keymap) {
 		{
 		case Tag::Data2D: {
 			deserialize2DMaps(stream);
+			hasData2D = true;
 			break;
 		}
 		case Tag::Data2DLegacy: {
@@ -1556,13 +1559,29 @@ bool LevelChunk::deserialize(KeyValueInput& keymap) {
 		case Tag::SubChunkPrefix: {
 			if (isSubChunkKey(key.name)) {
 				//note that isSubChunkKey already checks if the SubChunk ID is valid
-				deserializeSubChunk(key.name[1], stream);
+				uint8_t idx = static_cast<uint8_t>(key.name[1]);
+				deserializeSubChunk(idx, stream);
+				if (idx < loadedSubChunks.size()) {
+					loadedSubChunks[idx] = true;
+				}
 			}
 			break;
 		}
 		case Tag::FinalizedState: {
 			deserializeFinalization(stream);
 		}
+		}
+	}
+
+	if (hasData2D) {
+		for (size_t idx = 0; idx < mSubChunks.size() && idx < loadedSubChunks.size(); ++idx) {
+			if (!loadedSubChunks[idx]) {
+				mSubChunks[idx] = make_unique<SubChunk>(mDefaultSkyBrightness > Brightness::MIN);
+				size_t counterIdx = enum_cast(LevelChunkDataField::_count) + idx;
+				if (counterIdx < mDirtyTickCounters.size()) {
+					mDirtyTickCounters[counterIdx] = &mSubChunks[idx]->mDirtyTicksCounter;
+				}
+			}
 		}
 	}
 

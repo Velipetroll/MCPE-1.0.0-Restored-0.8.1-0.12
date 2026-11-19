@@ -2,7 +2,9 @@
 
 #include "world/item/ItemInstance.h"
 #include <array>
+#include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 class Font;
@@ -13,6 +15,35 @@ enum class GameState {
 	StartMenu,
 	InGame,
 	Paused
+};
+
+struct BlockCoordKey {
+	int x = 0;
+	int y = 0;
+	int z = 0;
+	bool operator==(const BlockCoordKey& o) const { return x == o.x && y == o.y && z == o.z; }
+};
+
+struct BlockCoordHash {
+	size_t operator()(const BlockCoordKey& k) const {
+		size_t h = std::hash<int>()(k.x);
+		h ^= std::hash<int>()(k.y) + 0x9e3779b9 + (h << 6) + (h >> 2);
+		h ^= std::hash<int>()(k.z) + 0x9e3779b9 + (h << 6) + (h >> 2);
+		return h;
+	}
+};
+
+struct ChestData {
+	std::array<ItemInstance, 27> slots;
+};
+
+struct FurnaceData {
+	ItemInstance input;
+	ItemInstance fuel;
+	ItemInstance output;
+	float burnTime = 0.0f;
+	float burnDuration = 0.0f;
+	float cookTime = 0.0f;
 };
 
 struct GuiContext {
@@ -35,8 +66,30 @@ struct GuiContext {
 	std::array<ItemInstance, 4> armorSlots;
 	int selectedHotbarSlot = 0;
 	bool inventoryInitialized = false;
+	bool isCreative = false;
+	int health = 20;
+	bool respawnRequested = false;
+	std::vector<ItemInstance> pendingWorldDrops;
+
+	std::string activeWorldDir = "./restore";
+	std::string activeWorldName = "My World";
+	int64_t activeWorldSeed = 0;
+	bool worldOpenRequested = false;
+	bool worldSaveAndCloseRequested = false;
+	bool hasWorldLoaded = false;
+
+	bool hasPlayerTransform = false;
+	float playerX = 0.5f;
+	float playerY = 80.0f;
+	float playerZ = 0.5f;
+	double playerYaw = 0.0;
+	double playerPitch = 0.0;
+
+	std::unordered_map<BlockCoordKey, ChestData, BlockCoordHash> chests;
+	std::unordered_map<BlockCoordKey, FurnaceData, BlockCoordHash> furnaces;
 
 	void ensureInventoryInitialized();
+	ItemInstance addItemToInventoryRemainder(const ItemInstance& item);
 	bool addItemToInventory(const ItemInstance& item);
 
 	void setScreen(Screen* screen);

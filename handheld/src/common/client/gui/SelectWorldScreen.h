@@ -8,6 +8,8 @@ struct WorldEntry {
 	std::string name;
 	std::string path;
 	std::string info;
+	int64_t seed = 0;
+	bool isCreative = false;
 	bool isDefault = false;
 };
 

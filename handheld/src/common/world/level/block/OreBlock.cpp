@@ -15,15 +15,15 @@ OreBlock::OreBlock(const std::string& nameId, int id)
 }
 
 int OreBlock::getResource(Random& random, int data, int bonusLootLevel) const {
-	if (isType(Block::mCoalOre)) {
+	if (isType(Block::mCoalOre) && Item::mCoal) {
 		return Item::mCoal->getId();
-	} else if (isType(Block::mDiamondOre)) {
+	} else if (isType(Block::mDiamondOre) && Item::mDiamond) {
 		return Item::mDiamond->getId();
-	} else if (isType(Block::mLapisOre)) {
+	} else if (isType(Block::mLapisOre) && Item::mDye_powder) {
 		return Item::mDye_powder->getId();
-	} else if (isType(Block::mEmeraldOre)) {
+	} else if (isType(Block::mEmeraldOre) && Item::mEmerald) {
 		return Item::mEmerald->getId();
-	} else if (isType(Block::mQuartzOre)) {
+	} else if (isType(Block::mQuartzOre) && Item::mNetherQuartz) {
 		return Item::mNetherQuartz->getId();
 	} else {
 		return mID;

@@ -21,6 +21,17 @@
 #include "client/gui/ChatScreen.h"
 #include "client/gui/InventoryScreens.h"
 #include "client/gui/StartMenuScreen.h"
+#include "client/gui/DeathScreen.h"
+#include "client/gui/GuiComponent.h"
+#include "client/gui/WorldPersistence.h"
+#include "world/crafting/CraftingRecipes.h"
+#include "world/level/storage/DBStorage.h"
+#include "platform/threading/WorkerPool.h"
+#include "world/phys/HitResult.h"
+#include "world/Facing.h"
+#include "world/level/block/Block.h"
+#include "world/level/material/Material.h"
+#include "util/Random.h"
 
 
 int screenx = 1600;
@@ -30,6 +41,7 @@ static GuiContext gGuiContext;
 static Options gGuiOptions;
 static Font gGuiFont;
 static Gui gGuiHud;
+static bool gCursorLocked = true;
 
 static void updateGuiScale()
 {
@@ -139,18 +151,26 @@ void GLInput::Clear()
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
 	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
-		if (gGuiContext.state == GameState::InGame) {
+		if (gGuiContext.currentScreen) {
+			gGuiContext.currentScreen->keyPressed(key);
+		} else if (gGuiContext.state == GameState::InGame) {
 			gGuiContext.pauseGame();
 		} else if (gGuiContext.state == GameState::Paused) {
 			gGuiContext.resumeGame();
-		} else if (gGuiContext.currentScreen) {
-			gGuiContext.currentScreen->keyPressed(key);
 		}
 		return;
 	}
 	if (action == GLFW_PRESS && gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
 		if (key >= GLFW_KEY_1 && key <= GLFW_KEY_9) {
 			gGuiHud.selectedSlot = key - GLFW_KEY_1;
+			gGuiContext.selectedHotbarSlot = key - GLFW_KEY_1;
+		} else if (key == GLFW_KEY_V) {
+			gGuiContext.isCreative = !gGuiContext.isCreative;
+			if (!gGuiContext.isCreative && gGuiContext.health <= 0) {
+				gGuiContext.health = 20;
+			}
+			gGuiContext.chatHistory.push_back(gGuiContext.isCreative ? "Mode: Creative (Double-Space to Fly)" : "Mode: Survival");
+			return;
 		} else if (key == GLFW_KEY_T) {
 			gGuiContext.setScreen(new ChatScreen(""));
 			return;
@@ -210,21 +230,24 @@ public:
 	BlockSource* mRegion;//commandContext.dim->getChunkSource()
 	Level* mLevel;
 	Vec3 mPosDelta;
-	float mMaxAutoStep = 0.0f;
+	float mMaxAutoStep = 0.56f;
 	bool mCollidableMobNear = false;
 	float mLastPenetration = 0;
 	bool mHorizontalCollision = false;
 	bool mVerticalCollision = false;
 	bool mCollision = false;
 	bool mStuckInCollider = false;
-	bool mOnGround = true;
+	bool mOnGround = false;
 	bool mIsStuckInWeb = false;
 	bool mNoGravity = false;
+	bool mIsFlying = false;
+	float mFallDistance = 0.0f;
+	double mLastSpacePressTime = -1.0;
 	//AABB* mLastHitBB;
 	AABB mBB;
 	std::vector<AABB> mSubBBs;
 	//Vec2 mBBDim = { 0.6f, 1.8f }; // *** Def ***
-	float mHeightOffset = 1.7;
+	float mHeightOffset = 1.62f;
 	Vec3 mSlideOffset = Vec3(0,0,0);
 	bool mNoPhysics = false;
 
@@ -235,23 +258,105 @@ public:
 
 	void move(const Vec3& posIn);
 
+	Camera() : mRegion(nullptr), mLevel(nullptr), mPosDelta(0, 0, 0)
+	{
+		mBB.set(-0.3f, 98.0f, -0.3f, 0.3f, 99.8f, 0.3f);
+		mPos = glm::vec3(0.0f, 98.0f + mHeightOffset, 0.0f);
+	}
+
 	Camera(Level* level, Dimension* dim) : mPosDelta(0, 0, 0)
 	{
-		mRegion = &dim->getBlockSourceDEPRECATEDUSEPLAYERREGIONINSTEAD();
+		setWorld(level, dim);
+		mBB.set(-0.3f, 98.0f, -0.3f, 0.3f, 99.8f, 0.3f);
+		mPos = glm::vec3(0.0f, 98.0f + mHeightOffset, 0.0f);
+	}
+
+	void setWorld(Level* level, Dimension* dim)
+	{
 		mLevel = level;
-		mBB.set(-0.4,98,-0.4,0.4,99.8,0.4);
+		mRegion = dim ? &dim->getBlockSourceDEPRECATEDUSEPLAYERREGIONINSTEAD() : nullptr;
+	}
+
+	void setPositionAndLook(float x, float feetY, float z, double yawIn, double pitchIn)
+	{
+		mBB.set(x - 0.3f, feetY, z - 0.3f, x + 0.3f, feetY + 1.8f, z + 0.3f);
+		mPos = glm::vec3(x, feetY + mHeightOffset, z);
+		mPosDelta = Vec3(0.0f, 0.0f, 0.0f);
+		mFallDistance = 0.0f;
+		mOnGround = false;
+		mIsFlying = false;
+		mSlideOffset = Vec3(0.0f, 0.0f, 0.0f);
+		yaw = yawIn;
+		pitch = pitchIn;
+		if (pitch > 89.0) pitch = 89.0;
+		if (pitch < -89.0) pitch = -89.0;
+		glm::vec3 direction;
+		direction.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+		direction.y = sin(glm::radians(pitch));
+		direction.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+		cameraFront = glm::normalize(direction);
+		direction.x = cos(glm::radians(yaw));
+		direction.y = 0;
+		direction.z = sin(glm::radians(yaw));
+		cameraMoveFront = glm::normalize(direction);
+		firstMouse = true;
+	}
+
+	void spawnAtSurface()
+	{
+		Height topY = getRegion().getAboveTopSolidBlock(0, 0, true, false);
+		if (topY < 1 || topY >= 126) topY = 80;
+		float feetY = static_cast<float>(topY) + 0.05f;
+		mBB.set(0.5f - 0.3f, feetY, 0.5f - 0.3f,
+		        0.5f + 0.3f, feetY + 1.8f, 0.5f + 0.3f);
+		mPos = glm::vec3(0.5f, feetY + mHeightOffset, 0.5f);
+		mPosDelta = Vec3(0.0f, 0.0f, 0.0f);
+		mFallDistance = 0.0f;
+		mOnGround = false;
+		mIsFlying = false;
+		mSlideOffset = Vec3(0.0f, 0.0f, 0.0f);
+	}
+
+	bool isInWater()
+	{
+		int bx = Math::floor(mPos.x);
+		int by = Math::floor(mBB.min.y + 0.3f);
+		int bz = Math::floor(mPos.z);
+		return getRegion().getMaterial(bx, by, bz).isType(MaterialType::Water);
+	}
+
+	void checkFallDamage(float dy, bool onGround)
+	{
+		if (mIsFlying || gGuiContext.isCreative || isInWater()) {
+			mFallDistance = 0.0f;
+			return;
+		}
+		if (onGround) {
+			if (mFallDistance > 0.0f) {
+				int damage = static_cast<int>(std::ceil(mFallDistance - 3.0f));
+				if (damage > 0) {
+					gGuiContext.health = std::max(0, gGuiContext.health - damage);
+					if (gGuiContext.health <= 0 && !gGuiContext.currentScreen) {
+						gGuiContext.setScreen(new DeathScreen());
+					}
+				}
+				mFallDistance = 0.0f;
+			}
+		} else if (dy < 0.0f) {
+			mFallDistance -= dy;
+		}
 	}
 
 	bool isSneaking()
 	{
 		return glinput.KeyDown(GLFW_KEY_LEFT_SHIFT) || glinput.KeyDown(GLFW_KEY_RIGHT_SHIFT);
 	}
-	//Note this is quite hacked together - it REALLY needs to be updated at a constant tickrate - thats next
+
 	void UpdateCam(float deltaTime)
 	{
+		float dt = std::min(std::max(deltaTime, 0.0001f), 0.05f);
 		float xposIn = glinput.mouseXPos;
 		float yposIn = glinput.mouseYPos;
-
 
 		if (firstMouse)
 		{
@@ -286,30 +391,45 @@ public:
 		direction.x = cos(glm::radians(yaw));
 		direction.y = 0;
 		direction.z = sin(glm::radians(yaw));
-
-
 		cameraMoveFront = glm::normalize(direction);
 
+		if (gGuiContext.isCreative) {
+			if (glinput.NewKeyDown(GLFW_KEY_SPACE)) {
+				double now = glfwGetTime();
+				if (mLastSpacePressTime > 0.0 && (now - mLastSpacePressTime) < 0.32) {
+					mIsFlying = !mIsFlying;
+					mPosDelta.y = 0.0f;
+					mLastSpacePressTime = -1.0;
+				} else {
+					mLastSpacePressTime = now;
+				}
+			}
+			if (mOnGround && mIsFlying) {
+				mIsFlying = false;
+			}
+		} else {
+			mIsFlying = false;
+		}
+		mNoGravity = mIsFlying;
 
-		float cameraSpeed = 4.0f; //* deltaTime;
+		bool inWater = !mIsFlying && isInWater();
+		float cameraSpeed = mOnGround ? 2.7f : (mIsFlying ? 1.15f : 0.46f);
+		if (inWater) cameraSpeed = 0.85f;
 
-
-		
-
-		if (glinput.KeyDown(GLFW_KEY_LEFT_CONTROL) || glinput.KeyDown(GLFW_KEY_RIGHT_CONTROL))
-			cameraSpeed *= 3;
-
-		if (!mOnGround)
-		{
-			cameraSpeed = 2;
+		if (glinput.KeyDown(GLFW_KEY_LEFT_CONTROL) || glinput.KeyDown(GLFW_KEY_RIGHT_CONTROL)) {
+			cameraSpeed *= mIsFlying ? 1.8f : 1.4f;
+		}
+		if (!mIsFlying && isSneaking()) {
+			cameraSpeed *= 0.4f;
 		}
 
 		const float MAGIC_FRICTION_CONSTANT = 0.91f;
 		const float MAGIC_FRICTION_MODIFIER = 0.6f;
 
 		float friction = MAGIC_FRICTION_CONSTANT;
-
-		if (mOnGround) {
+		if (inWater) {
+			friction = 0.8f;
+		} else if (mOnGround) {
 			friction = MAGIC_FRICTION_MODIFIER * MAGIC_FRICTION_CONSTANT;
 
 			BlockID t = getRegion().getBlockID(
@@ -318,46 +438,64 @@ public:
 				Math::floor(mPos.z)
 			);
 
-			if (t > 0) {
+			if (t > 0 && Block::mBlocks[t]) {
 				friction = Block::mBlocks[t]->getFriction() * MAGIC_FRICTION_CONSTANT;
 			}
 		}
-		friction = std::pow(friction, deltaTime / 0.05f);
+		float tickScale = dt / 0.05f;
+		friction = std::pow(friction, tickScale);
 
-
-
-
-		
-
-		if (mOnGround && glinput.NewKeyDown(GLFW_KEY_SPACE))
-		{
-			mPosDelta.y = 0.9;
+		if (mIsFlying) {
+			if (glinput.KeyDown(GLFW_KEY_SPACE))
+				mPosDelta.y += 4.5f * dt;
+			if (isSneaking())
+				mPosDelta.y -= 4.5f * dt;
+			mPosDelta.y *= std::pow(0.6f, tickScale);
+		} else if (inWater) {
+			if (glinput.KeyDown(GLFW_KEY_SPACE))
+				mPosDelta.y += 0.85f * dt;
+			mFallDistance = 0.0f;
+		} else {
+			if (mOnGround && glinput.KeyDown(GLFW_KEY_SPACE)) {
+				mPosDelta.y = 0.44f;
+				mOnGround = false;
+			}
 		}
 
-		glm::vec3 mmPos(0, 0, 0);//bps
+		glm::vec3 mmPos(0, 0, 0);
 		if (glinput.KeyDown(GLFW_KEY_W))
-			mmPos += cameraSpeed * cameraMoveFront;
-		if (glinput.KeyDown(GLFW_KEY_S) == GLFW_PRESS)
-			mmPos -= cameraSpeed * cameraMoveFront;
-		if (glinput.KeyDown(GLFW_KEY_A) == GLFW_PRESS)
-			mmPos -= glm::normalize(glm::cross(cameraMoveFront, cameraUp)) * cameraSpeed;
-		if (glinput.KeyDown(GLFW_KEY_D) == GLFW_PRESS)
-			mmPos += glm::normalize(glm::cross(cameraMoveFront, cameraUp)) * cameraSpeed;
-		mPosDelta += Vec3(mmPos.x,mmPos.y,mmPos.z) * deltaTime;
-
-
-		if (!mNoGravity) {
-			float tickScale = deltaTime / 0.05f;
-
-			mPosDelta.y -= 0.08f * tickScale;
-			mPosDelta.y *= std::pow(0.98f, tickScale);
+			mmPos += cameraMoveFront;
+		if (glinput.KeyDown(GLFW_KEY_S))
+			mmPos -= cameraMoveFront;
+		if (glinput.KeyDown(GLFW_KEY_A))
+			mmPos -= glm::normalize(glm::cross(cameraMoveFront, cameraUp));
+		if (glinput.KeyDown(GLFW_KEY_D))
+			mmPos += glm::normalize(glm::cross(cameraMoveFront, cameraUp));
+		if (glm::dot(mmPos, mmPos) > 0.0001f) {
+			mmPos = glm::normalize(mmPos) * cameraSpeed;
+			mPosDelta += Vec3(mmPos.x, mmPos.y, mmPos.z) * dt;
 		}
+
+		move(mPosDelta * dt * 20.0f);
 
 		mPosDelta.x *= friction;
 		mPosDelta.z *= friction;
 
-		//mPos += mmPos;
-		move(mPosDelta*deltaTime*20);
+		// Apply gravity after moving (matches Minecraft tick order so jumps clear 1-block ledges at any FPS)
+		if (!mIsFlying) {
+			if (inWater) {
+				mPosDelta.y -= 0.02f * tickScale;
+				mPosDelta.y *= std::pow(0.8f, tickScale);
+			} else {
+				mPosDelta.y -= 0.08f * tickScale;
+				mPosDelta.y *= std::pow(0.98f, tickScale);
+			}
+		}
+
+		if (mBB.min.y < -16.0f && !gGuiContext.isCreative && gGuiContext.health > 0 && !gGuiContext.currentScreen) {
+			gGuiContext.health = 0;
+			gGuiContext.setScreen(new DeathScreen());
+		}
 	}
 };
 
@@ -418,7 +556,7 @@ void Camera::move(const Vec3& posIn) {
 
 	AABB bbOrg = mBB;
 
-	bool sneaking = mOnGround && isSneaking();
+	bool sneaking = !mIsFlying && mOnGround && isSneaking();
 
 	if (sneaking) {
 		float d = 0.05f;
@@ -564,7 +702,7 @@ void Camera::move(const Vec3& posIn) {
 		}
 		mBB.set(bbOrg);
 		// Fetch collision shapes using original speed, this will exclude colliders above head, we'll check those at the end
-		aABBs = mRegion->fetchCollisionShapes(getRegion(), mBB.expanded(orgSpeed), nullptr, true, nullptr);
+		aABBs = mRegion->fetchCollisionShapes(getRegion(), mBB.expanded(orgSpeed), nullptr, false, nullptr);
 
 		if (collidableWasNear) {
 			//testForCollidableMobs(*mRegion, intersectTestBox, aABBs);
@@ -601,7 +739,7 @@ void Camera::move(const Vec3& posIn) {
 		// See if we hit our head on the ceiling, meaning we shouldn't do step up.
 		// This makes getting head stuck in ceiling possible if moving into a block lower than footsize at a speed larger than you bounding box width. This shouldn't be achievable by standard means
 		// Not expanding bb by anything because we just want to see if we ended up in a good spot
-		bool hitCeiling = !mRegion->fetchCollisionShapes(getRegion(), mBB, nullptr, true, nullptr).empty();
+		bool hitCeiling = !mRegion->fetchCollisionShapes(getRegion(), mBB, nullptr, false, nullptr).empty();
 
 		// If our original horizontal square velocity was higher without trying to step over the obstacle, or our head ended up in the ceiling, revert back to that for the sake of smoother movement
 		if (hitCeiling || xaN * xaN + zaN * zaN >= speed.x * speed.x + speed.z * speed.z) {
@@ -625,7 +763,7 @@ void Camera::move(const Vec3& posIn) {
 		//ScopedProfile("rest");
 
 		mPos.x = (mBB.min.x + mBB.max.x) / 2.0f;
-		mPos.y = mBB.min.y + mHeightOffset - mSlideOffset.y;
+		mPos.y = mBB.min.y + mHeightOffset - mSlideOffset.y - ((!mIsFlying && isSneaking()) ? 0.08f : 0.0f);
 		mPos.z = (mBB.min.z + mBB.max.z) / 2.0f;
 
 		mHorizontalCollision = (xaOrg != speed.x) || (zaOrg != speed.z);
@@ -634,7 +772,7 @@ void Camera::move(const Vec3& posIn) {
 		mOnGround = (yaOrg != speed.y && yaOrg < 0) || (mOnGround && yaOrg == speed.y && yaOrg == 0);
 		mCollision = mHorizontalCollision || mVerticalCollision;
 
-		//checkFallDamage(speed.y, mOnGround);
+		checkFallDamage(speed.y, mOnGround);
 
 		if (xaOrg != speed.x) {
 			mPosDelta.x = 0;
@@ -642,20 +780,7 @@ void Camera::move(const Vec3& posIn) {
 		}
 
 		if (yaOrg != speed.y) {
-			/*auto stepPos = _getBlockOnPos();
-			auto& onBlock = mRegion->getBlock(stepPos);
-
-			onBlock.updateEntityAfterFallOn(*this);
-			onBlockCollision(1);
-
-			if (!onBlock.isType(Block::mAir) && mOnGround) {
-				onBlock.onStepOn(*this, stepPos);
-			}
-
-			if (!sneaking) {
-				Vec3 delta = mPos - mPosPrev;
-				mWalkDist += Math::sqrt(delta.x * delta.x + delta.z * delta.z) * 0.6f;
-			}*/
+			mPosDelta.y = 0;
 		}
 
 		if (zaOrg != speed.z) {
@@ -704,10 +829,12 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 		} else if (action == GLFW_RELEASE) {
 			gGuiContext.currentScreen->mouseReleased(guiX, guiY, button);
 		}
-	} else if (action == GLFW_PRESS && button == 0 && gGuiContext.state == GameState::InGame) {
+	} else if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_LEFT && gGuiContext.state == GameState::InGame && !gCursorLocked) {
 		int guiX = static_cast<int>(glinput.mouseXPos) * gGuiContext.guiWidth / std::max(1, screenx);
 		int guiY = static_cast<int>(glinput.mouseYPos) * gGuiContext.guiHeight / std::max(1, screeny);
-		gGuiHud.handleHudClick(guiX, guiY, gGuiContext.guiWidth, gGuiContext.guiHeight, &gGuiContext);
+		if (gGuiHud.handleHudClick(guiX, guiY, gGuiContext.guiWidth, gGuiContext.guiHeight, &gGuiContext)) {
+			return;
+		}
 	}
 
 	bool pressed = (action != GLFW_RELEASE);
@@ -716,6 +843,17 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 	{
 		glinput.mlast_table[button] = pressed ? 1 : -1;
 		glinput.mlookup_table[button] = pressed;
+	}
+}
+
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
+{
+	if (gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen && yoffset != 0.0) {
+		int step = (yoffset > 0.0) ? -1 : 1;
+		int next = (gGuiContext.selectedHotbarSlot + step) % 9;
+		if (next < 0) next += 9;
+		gGuiContext.selectedHotbarSlot = next;
+		gGuiHud.selectedSlot = next;
 	}
 }
 //todo move more stuff to renderer init
@@ -783,6 +921,7 @@ GLFWwindow* renderThreadInit()
 	glfwSetCursorPosCallback(window, mouse_callback);
 	glfwSetKeyCallback(window, key_callback);
 	glfwSetMouseButtonCallback(window, mouse_button_callback);
+	glfwSetScrollCallback(window, scroll_callback);
 
 	gGuiFont.init("font/default8.png");
 	gGuiContext.font = &gGuiFont;
@@ -826,6 +965,342 @@ void /*MinecraftClient::*/updateFoliageColors()
 	FoliageColor::setGrassColorPalette(*grass.unwrap().getTextureData());
 }
 
+namespace {
+
+void rebuildSubChunkAt(const ChunkPos& cp, int subY,
+                       std::unordered_map<ChunkPos, RenderChunk*[8]>& rc,
+                       std::unique_ptr<RenderChunkBuilder>& chunkBuilder,
+                       const Vec3& camPos) {
+	if (subY < 0 || subY >= 8) return;
+	auto it = rc.find(cp);
+	if (it == rc.end() || it->second[subY] == nullptr) return;
+	RenderChunk* chunkPart = it->second[subY];
+	chunkPart->setDirty(Tick(0), true);
+	chunkPart->startRebuild(std::move(chunkBuilder));
+	chunkPart->rebuild(false, true);
+	chunkBuilder = chunkPart->endRebuild(camPos);
+}
+
+void rebuildChunksForBlock(const BlockPos& pos,
+                           std::unordered_map<ChunkPos, RenderChunk*[8]>& rc,
+                           std::unique_ptr<RenderChunkBuilder>& chunkBuilder,
+                           const Vec3& camPos) {
+	ChunkPos baseCp(pos);
+	int subY = pos.y >> 4;
+	int lx = pos.x & 15;
+	int ly = pos.y & 15;
+	int lz = pos.z & 15;
+
+	rebuildSubChunkAt(baseCp, subY, rc, chunkBuilder, camPos);
+	if (lx == 0) rebuildSubChunkAt(ChunkPos(baseCp.x - 1, baseCp.z), subY, rc, chunkBuilder, camPos);
+	if (lx == 15) rebuildSubChunkAt(ChunkPos(baseCp.x + 1, baseCp.z), subY, rc, chunkBuilder, camPos);
+	if (lz == 0) rebuildSubChunkAt(ChunkPos(baseCp.x, baseCp.z - 1), subY, rc, chunkBuilder, camPos);
+	if (lz == 15) rebuildSubChunkAt(ChunkPos(baseCp.x, baseCp.z + 1), subY, rc, chunkBuilder, camPos);
+	if (ly == 0 && subY > 0) rebuildSubChunkAt(baseCp, subY - 1, rc, chunkBuilder, camPos);
+	if (ly == 15 && subY < 7) rebuildSubChunkAt(baseCp, subY + 1, rc, chunkBuilder, camPos);
+}
+
+void drawBlockSelectionOutline(const BlockPos& pos, const AABB& localShape,
+                               const glm::mat4& projection, const glm::mat4& view) {
+	const float eps = 0.0025f;
+	float minX = pos.x + localShape.min.x - eps;
+	float minY = pos.y + localShape.min.y - eps;
+	float minZ = pos.z + localShape.min.z - eps;
+	float maxX = pos.x + localShape.max.x + eps;
+	float maxY = pos.y + localShape.max.y + eps;
+	float maxZ = pos.z + localShape.max.z + eps;
+
+	glUseProgram(0);
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glLoadMatrixf(glm::value_ptr(projection));
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+	glLoadMatrixf(glm::value_ptr(view));
+
+	glDisable(GL_TEXTURE_2D);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glLineWidth(2.0f);
+	glColor4f(0.0f, 0.0f, 0.0f, 0.45f);
+
+	glBegin(GL_LINES);
+	// Bottom face
+	glVertex3f(minX, minY, minZ); glVertex3f(maxX, minY, minZ);
+	glVertex3f(maxX, minY, minZ); glVertex3f(maxX, minY, maxZ);
+	glVertex3f(maxX, minY, maxZ); glVertex3f(minX, minY, maxZ);
+	glVertex3f(minX, minY, maxZ); glVertex3f(minX, minY, minZ);
+	// Top face
+	glVertex3f(minX, maxY, minZ); glVertex3f(maxX, maxY, minZ);
+	glVertex3f(maxX, maxY, minZ); glVertex3f(maxX, maxY, maxZ);
+	glVertex3f(maxX, maxY, maxZ); glVertex3f(minX, maxY, maxZ);
+	glVertex3f(minX, maxY, maxZ); glVertex3f(minX, maxY, minZ);
+	// Vertical edges
+	glVertex3f(minX, minY, minZ); glVertex3f(minX, maxY, minZ);
+	glVertex3f(maxX, minY, minZ); glVertex3f(maxX, maxY, minZ);
+	glVertex3f(maxX, minY, maxZ); glVertex3f(maxX, maxY, maxZ);
+	glVertex3f(minX, minY, maxZ); glVertex3f(minX, maxY, maxZ);
+	glEnd();
+
+	glDisable(GL_BLEND);
+	glMatrixMode(GL_MODELVIEW);
+	glPopMatrix();
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glMatrixMode(GL_MODELVIEW);
+}
+
+bool openInteractiveBlockScreen(BlockSource& region, const BlockPos& pos, BlockID id, GuiContext& guiCtx) {
+	const Block* block = Block::mBlocks[id];
+	if (!block) return false;
+	if (block == Block::mWorkBench) {
+		guiCtx.setScreen(new WorkbenchScreen(false));
+		return true;
+	}
+	if (block == Block::mStonecutterBench) {
+		guiCtx.setScreen(new StonecutterScreen());
+		return true;
+	}
+	if (block == Block::mFurnace || block == Block::mLitFurnace) {
+		guiCtx.setScreen(new FurnaceScreen(BlockCoordKey{ pos.x, pos.y, pos.z }));
+		return true;
+	}
+	if (block == Block::mChest || block == Block::mTrappedChest) {
+		bool isDouble = false;
+		BlockCoordKey primary{ pos.x, pos.y, pos.z };
+		BlockCoordKey secondary{};
+		const FacingID horiz[] = { Facing::NORTH, Facing::SOUTH, Facing::WEST, Facing::EAST };
+		for (FacingID f : horiz) {
+			BlockPos np = pos + Facing::DIRECTION[f];
+			if (region.getBlockID(np) == id) {
+				isDouble = true;
+				BlockCoordKey neighbor{ np.x, np.y, np.z };
+				if (neighbor.x < primary.x || (neighbor.x == primary.x && neighbor.z < primary.z)) {
+					secondary = primary;
+					primary = neighbor;
+				} else {
+					secondary = neighbor;
+				}
+				break;
+			}
+		}
+		guiCtx.setScreen(new ChestScreen(primary, isDouble, secondary));
+		return true;
+	}
+	if (block == Block::mEnderChest) {
+		guiCtx.setScreen(new ChestScreen(BlockCoordKey{ pos.x, pos.y, pos.z }, false));
+		return true;
+	}
+	return false;
+}
+
+struct WorldItemEntity {
+	ItemInstance item;
+	Vec3 pos;
+	Vec3 vel;
+	float age = 0.0f;
+	float pickupDelay = 0.0f;
+	float spinPhase = 0.0f;
+	bool onGround = false;
+};
+
+void spawnWorldItem(std::vector<WorldItemEntity>& items,
+                    const ItemInstance& item,
+                    const Vec3& pos,
+                    const Vec3& vel,
+                    float pickupDelay) {
+	if (item.isNull() || item.getStackSize() <= 0) return;
+	static Random itemRng;
+	WorldItemEntity ent;
+	ent.item = item;
+	ent.pos = pos;
+	ent.vel = vel;
+	ent.pickupDelay = pickupDelay;
+	ent.spinPhase = itemRng.nextFloat() * 6.283185f;
+	items.push_back(std::move(ent));
+}
+
+void updateWorldItemEntities(std::vector<WorldItemEntity>& items,
+                             float dt,
+                             BlockSource& region,
+                             const AABB& playerBB,
+                             GuiContext& guiCtx,
+                             bool allowPickup) {
+	dt = std::min(std::max(dt, 0.0001f), 0.05f);
+	float tickScale = dt / 0.05f;
+	AABB pickupBox = playerBB.expanded(Vec3(0.85f, 0.5f, 0.85f));
+	const float halfW = 0.125f;
+	const float height = 0.25f;
+
+	for (size_t i = 0; i < items.size(); ) {
+		WorldItemEntity& e = items[i];
+		e.age += dt;
+		if (e.pickupDelay > 0.0f) {
+			e.pickupDelay = std::max(0.0f, e.pickupDelay - dt);
+		}
+		if (e.age > 300.0f || e.pos.y < -32.0f || e.item.isNull() || e.item.getStackSize() <= 0) {
+			items[i] = std::move(items.back());
+			items.pop_back();
+			continue;
+		}
+
+		// Gravity
+		e.vel.y -= 16.0f * dt;
+		if (e.vel.y < -25.0f) e.vel.y = -25.0f;
+
+		Vec3 moveStep = e.vel * dt;
+		AABB itemBB(e.pos.x - halfW, e.pos.y, e.pos.z - halfW,
+		            e.pos.x + halfW, e.pos.y + height, e.pos.z + halfW);
+		std::vector<AABB>& aABBs = region.fetchCollisionShapes(region, itemBB.expanded(moveStep), nullptr, false, nullptr);
+
+		float xaOrg = moveStep.x;
+		float yaOrg = moveStep.y;
+		float zaOrg = moveStep.z;
+
+		Vec3 steps[3] = { Vec3(0.0f, moveStep.y, 0.0f), Vec3(moveStep.x, 0.0f, 0.0f), Vec3(0.0f, 0.0f, moveStep.z) };
+		for (int axis = 0; axis < 3; ++axis) {
+			for (const auto& bb : aABBs) {
+				steps[axis] = bb.clipCollide(itemBB, steps[axis], false);
+			}
+			itemBB.move(steps[axis]);
+		}
+
+		e.pos.x = (itemBB.min.x + itemBB.max.x) * 0.5f;
+		e.pos.y = itemBB.min.y;
+		e.pos.z = (itemBB.min.z + itemBB.max.z) * 0.5f;
+
+		if (steps[1].x != xaOrg) e.vel.x = 0.0f;
+		if (steps[2].z != zaOrg) e.vel.z = 0.0f;
+		if (steps[0].y != yaOrg) {
+			e.onGround = (yaOrg < 0.0f);
+			e.vel.y = 0.0f;
+		} else {
+			e.onGround = false;
+		}
+
+		float drag = std::pow(e.onGround ? 0.65f : 0.98f, tickScale);
+		e.vel.x *= drag;
+		e.vel.z *= drag;
+
+		if (allowPickup && e.pickupDelay <= 0.0f && itemBB.intersects(pickupBox)) {
+			ItemInstance rem = guiCtx.addItemToInventoryRemainder(e.item);
+			if (rem.isNull() || rem.getStackSize() <= 0) {
+				items[i] = std::move(items.back());
+				items.pop_back();
+				continue;
+			}
+			e.item = rem;
+		}
+		++i;
+	}
+}
+
+void renderWorldItemEntities(const std::vector<WorldItemEntity>& items,
+                             const glm::mat4& projection,
+                             const glm::mat4& view) {
+	if (items.empty()) return;
+
+	glUseProgram(0);
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glLoadMatrixf(glm::value_ptr(projection));
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+	glLoadMatrixf(glm::value_ptr(view));
+
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+	glEnable(GL_TEXTURE_2D);
+	glDisable(GL_CULL_FACE);
+	glEnable(GL_ALPHA_TEST);
+	glAlphaFunc(GL_GREATER, 0.1f);
+
+	auto drawCubeQuad = [](const std::string& tex, float shade,
+	                       float ax, float ay, float az,
+	                       float bx, float by, float bz,
+	                       float cx, float cy, float cz,
+	                       float dx, float dy, float dz,
+	                       float v0, float v1) {
+		if (tex.empty() || !GuiComponent::bindTexture(tex)) return;
+		glColor4f(shade, shade, shade, 1.0f);
+		glBegin(GL_QUADS);
+		glTexCoord2f(0.0f, v1); glVertex3f(ax, ay, az);
+		glTexCoord2f(1.0f, v1); glVertex3f(bx, by, bz);
+		glTexCoord2f(1.0f, v0); glVertex3f(cx, cy, cz);
+		glTexCoord2f(0.0f, v0); glVertex3f(dx, dy, dz);
+		glEnd();
+	};
+
+	for (const auto& e : items) {
+		if (e.item.isNull()) continue;
+		float bob = std::sin(e.age * 3.0f + e.spinPhase) * 0.07f;
+		float yawDeg = e.age * 70.0f + e.spinPhase * 57.29578f;
+
+		glPushMatrix();
+		glTranslatef(e.pos.x, e.pos.y + 0.18f + bob, e.pos.z);
+		glRotatef(yawDeg, 0.0f, 1.0f, 0.0f);
+
+		BlockRenderInfo blockInfo = getBlockRenderInfo(e.item);
+		if (blockInfo.is3D) {
+			float y0 = -0.5f;
+			float y1 = blockInfo.isSlab ? 0.0f : 0.5f;
+			float vTop = blockInfo.isSlab ? 0.5f : 0.0f;
+
+			glScalef(0.25f, 0.25f, 0.25f);
+			if (blockInfo.isTransparent) {
+				glEnable(GL_BLEND);
+				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			} else {
+				glDisable(GL_BLEND);
+			}
+
+			// Top (+Y) & Bottom (-Y)
+			drawCubeQuad(blockInfo.topTex, 1.0f, -0.5f, y1, 0.5f, 0.5f, y1, 0.5f, 0.5f, y1, -0.5f, -0.5f, y1, -0.5f, 0.0f, 1.0f);
+			drawCubeQuad(blockInfo.topTex, 0.5f, -0.5f, y0, -0.5f, 0.5f, y0, -0.5f, 0.5f, y0, 0.5f, -0.5f, y0, 0.5f, 0.0f, 1.0f);
+			// Front (+Z) & Back (-Z)
+			drawCubeQuad(blockInfo.frontTex, 0.8f, -0.5f, y0, 0.5f, 0.5f, y0, 0.5f, 0.5f, y1, 0.5f, -0.5f, y1, 0.5f, vTop, 1.0f);
+			drawCubeQuad(blockInfo.frontTex, 0.8f, 0.5f, y0, -0.5f, -0.5f, y0, -0.5f, -0.5f, y1, -0.5f, 0.5f, y1, -0.5f, vTop, 1.0f);
+			// Right (+X) & Left (-X)
+			drawCubeQuad(blockInfo.sideTex, 0.65f, 0.5f, y0, 0.5f, 0.5f, y0, -0.5f, 0.5f, y1, -0.5f, 0.5f, y1, 0.5f, vTop, 1.0f);
+			drawCubeQuad(blockInfo.sideTex, 0.65f, -0.5f, y0, -0.5f, -0.5f, y0, 0.5f, -0.5f, y1, 0.5f, -0.5f, y1, -0.5f, vTop, 1.0f);
+		} else {
+			std::string tex = getItemTexturePath(e.item);
+			glDisable(GL_BLEND);
+			glScalef(0.36f, 0.36f, 0.36f);
+			if (!tex.empty() && GuiComponent::bindTexture(tex)) {
+				glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+				glBegin(GL_QUADS);
+				glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, -0.5f, 0.0f);
+				glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, -0.5f, 0.0f);
+				glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, 0.5f, 0.0f);
+				glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, 0.0f);
+				glEnd();
+				if (e.item.getStackSize() > 1) {
+					glBegin(GL_QUADS);
+					glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.46f, -0.46f, -0.05f);
+					glTexCoord2f(1.0f, 1.0f); glVertex3f(0.54f, -0.46f, -0.05f);
+					glTexCoord2f(1.0f, 0.0f); glVertex3f(0.54f, 0.54f, -0.05f);
+					glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.46f, 0.54f, -0.05f);
+					glEnd();
+				}
+			}
+		}
+
+		glPopMatrix();
+	}
+
+	glDisable(GL_ALPHA_TEST);
+	glDisable(GL_BLEND);
+	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	glMatrixMode(GL_MODELVIEW);
+	glPopMatrix();
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glMatrixMode(GL_MODELVIEW);
+}
+
+} // namespace
+
 void renderThreadStuff()
 {
 	GLFWwindow* window = renderThreadInit();
@@ -833,7 +1308,7 @@ void renderThreadStuff()
 	if (!window)
 		return;
 
-	bool cursor_locked = true;
+	gCursorLocked = true;
 
 
 
@@ -857,7 +1332,7 @@ void renderThreadStuff()
 	//shader.setInt("atlas", 0);
 	//glUniform1i(glGetUniformLocation(shader, "atlas"), 0);//set the atlas to be texture 0
 
-	Camera c(commandContext.level,commandContext.dim);
+	Camera c;
 
 	//sptr = &shader;
 
@@ -933,7 +1408,95 @@ void renderThreadStuff()
 	std::unordered_set<ChunkPos> needsReRendering;
 	std::unordered_set<ChunkPos> needsReRendering2;
 
-	std::unique_ptr chunkBuilder = make_unique<RenderChunkBuilder>(commandContext.dim->getChunkSource());
+	std::unique_ptr<RenderChunkBuilder> chunkBuilder;
+
+	Recipes::getInstance()->init();
+
+	std::vector<WorldItemEntity> worldItems;
+	bool hasInitialSpawn = false;
+	currentFrame = static_cast<float>(glfwGetTime());
+
+	auto saveActiveWorld = [&]() {
+		if (!gGuiContext.hasWorldLoaded) return;
+		gGuiContext.hasPlayerTransform = true;
+		gGuiContext.playerX = c.mPos.x;
+		gGuiContext.playerY = c.mBB.min.y;
+		gGuiContext.playerZ = c.mPos.z;
+		gGuiContext.playerYaw = c.yaw;
+		gGuiContext.playerPitch = c.pitch;
+
+		WorldMetadata meta;
+		captureMetadataFromContext(gGuiContext, meta);
+		saveWorldMetadata(gGuiContext.activeWorldDir, meta);
+
+		if (commandContext.level) {
+			commandContext.level->saveDirtyChunks();
+			for (auto* w : WorkerPool::getWorkersFor(WorkerRole::Disk)) {
+				w->sync();
+			}
+		}
+	};
+
+	auto closeActiveWorld = [&]() {
+		for (auto* w : WorkerPool::getWorkersFor(WorkerRole::Streaming)) {
+			w->sync();
+		}
+		for (auto* w : WorkerPool::getWorkersFor(WorkerRole::Disk)) {
+			w->sync();
+		}
+		for (auto& kv : rc) {
+			for (int i = 0; i < 8; ++i) {
+				delete kv.second[i];
+				kv.second[i] = nullptr;
+			}
+		}
+		rc.clear();
+		needsReRendering.clear();
+		needsReRendering2.clear();
+		worldItems.clear();
+		chunkBuilder.reset();
+		c.setWorld(nullptr, nullptr);
+		commandContext.dim = nullptr;
+		delete commandContext.level;
+		commandContext.level = nullptr;
+		gGuiContext.hasWorldLoaded = false;
+	};
+
+	auto openActiveWorld = [&]() {
+		if (gGuiContext.hasWorldLoaded || commandContext.level) {
+			saveActiveWorld();
+			closeActiveWorld();
+		}
+
+		WorldMetadata meta;
+		meta.name = gGuiContext.activeWorldName;
+		meta.seed = gGuiContext.activeWorldSeed;
+		meta.isCreative = gGuiContext.isCreative;
+		loadWorldMetadata(gGuiContext.activeWorldDir, meta);
+		applyMetadataToContext(meta, gGuiContext);
+		gGuiHud.selectedSlot = gGuiContext.selectedHotbarSlot;
+
+		std::string dbPath = getWorldDbPath(gGuiContext.activeWorldDir);
+		Level* level = new Level(std::make_unique<DBStorage>(meta.name, dbPath));
+		level->getLevelData().setLevelName(meta.name);
+		level->getLevelData().setSeed(static_cast<RandomSeed>(meta.seed));
+		commandContext.level = level;
+		commandContext.dim = &level->createDimension(Overworld);
+		c.setWorld(commandContext.level, commandContext.dim);
+		chunkBuilder = make_unique<RenderChunkBuilder>(commandContext.dim->getChunkSource());
+
+		if (meta.hasPlayerPos) {
+			c.setPositionAndLook(meta.playerX, meta.playerY, meta.playerZ, meta.playerYaw, meta.playerPitch);
+			hasInitialSpawn = true;
+			gGuiContext.respawnRequested = false;
+		} else {
+			c.setPositionAndLook(0.5f, 98.0f, 0.5f, 0.0, 0.0);
+			hasInitialSpawn = false;
+			gGuiContext.respawnRequested = true;
+		}
+		gGuiContext.hasWorldLoaded = true;
+		gGuiContext.worldOpenRequested = false;
+	};
 
 
 
@@ -952,19 +1515,190 @@ void renderThreadStuff()
 				gGuiContext.currentScreen->init(&gGuiContext, gGuiContext.guiWidth, gGuiContext.guiHeight);
 			}
 		}
+		if (gGuiContext.worldSaveAndCloseRequested) {
+			saveActiveWorld();
+			closeActiveWorld();
+			gGuiContext.worldSaveAndCloseRequested = false;
+		}
+		if (gGuiContext.worldOpenRequested) {
+			openActiveWorld();
+		}
 		if (gGuiContext.shouldQuit) {
+			saveActiveWorld();
+			closeActiveWorld();
 			glfwSetWindowShouldClose(window, true);
 			continue;
 		}
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);//Set clear color to be brown with 0 alpha 
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);//Actually clears screen + depth buffer 
 
-		bool renderWorld = (gGuiContext.state == GameState::InGame) ||
-		                   (gGuiContext.currentScreen && gGuiContext.currentScreen->renderGameBehind());
+		bool renderWorld = ((gGuiContext.state == GameState::InGame) ||
+		                    (gGuiContext.currentScreen && gGuiContext.currentScreen->renderGameBehind())) &&
+		                   commandContext.level != nullptr && commandContext.dim != nullptr;
 
-		if (renderWorld || gGuiContext.loadingChunks) {
+		if ((renderWorld || gGuiContext.loadingChunks) && commandContext.level != nullptr && commandContext.dim != nullptr) {
+			if (gGuiContext.state == GameState::InGame && !gGuiContext.loadingChunks &&
+			    (!hasInitialSpawn || gGuiContext.respawnRequested)) {
+				auto* spawnChunk = commandContext.dim->getChunkSource().getOrLoadChunk(ChunkPos(0, 0), ChunkSource::LoadMode::None);
+				if (spawnChunk && spawnChunk->getState() == ChunkState::Loaded) {
+					c.spawnAtSurface();
+					hasInitialSpawn = true;
+					gGuiContext.respawnRequested = false;
+				}
+			}
+
+			// Drain drops created outside inventory UI
+			if (!gGuiContext.pendingWorldDrops.empty()) {
+				for (const auto& dropItem : gGuiContext.pendingWorldDrops) {
+					Vec3 spawnPos(c.mPos.x + c.cameraFront.x * 0.55f,
+					              c.mPos.y - 0.3f + c.cameraFront.y * 0.55f,
+					              c.mPos.z + c.cameraFront.z * 0.55f);
+					Vec3 spawnVel(c.cameraFront.x * 5.5f,
+					              c.cameraFront.y * 5.5f + 1.5f,
+					              c.cameraFront.z * 5.5f);
+					spawnWorldItem(worldItems, dropItem, spawnPos, spawnVel, 1.2f);
+				}
+				gGuiContext.pendingWorldDrops.clear();
+			}
+
+			HitResult targetHit;
+			bool hasTargetHit = false;
 			if (gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
 				c.UpdateCam(deltaTime);
+
+				if (glinput.NewKeyDown(GLFW_KEY_Q)) {
+					gGuiContext.ensureInventoryInitialized();
+					int slotIdx = std::max(0, std::min(8, gGuiContext.selectedHotbarSlot));
+					ItemInstance& held = gGuiContext.inventorySlots[slotIdx];
+					if (!held.isNull() && held.getStackSize() > 0) {
+						bool dropAll = glinput.KeyDown(GLFW_KEY_LEFT_CONTROL) || glinput.KeyDown(GLFW_KEY_RIGHT_CONTROL);
+						int dropAmt = dropAll ? static_cast<int>(held.getStackSize()) : 1;
+						ItemInstance dropStack(held);
+						dropStack.set(dropAmt);
+						Vec3 spawnPos(c.mPos.x + c.cameraFront.x * 0.55f,
+						              c.mPos.y - 0.3f + c.cameraFront.y * 0.55f,
+						              c.mPos.z + c.cameraFront.z * 0.55f);
+						Vec3 spawnVel(c.cameraFront.x * 6.0f,
+						              c.cameraFront.y * 6.0f + 1.5f,
+						              c.cameraFront.z * 6.0f);
+						spawnWorldItem(worldItems, dropStack, spawnPos, spawnVel, 1.2f);
+						held.remove(dropAmt);
+						if (held.getStackSize() <= 0) {
+							held.setNull();
+						}
+					}
+				}
+
+				const float reach = 5.0f;
+				Vec3 rayStart(c.mPos.x, c.mPos.y, c.mPos.z);
+				Vec3 rayEnd(c.mPos.x + c.cameraFront.x * reach,
+				            c.mPos.y + c.cameraFront.y * reach,
+				            c.mPos.z + c.cameraFront.z * reach);
+				BlockSource& region = c.getRegion();
+				targetHit = region.clip(rayStart, rayEnd, false, false, 200, false);
+				hasTargetHit = targetHit.isHit() && targetHit.isTile();
+
+				if (hasTargetHit) {
+					BlockPos hitPos = targetHit.getBlock();
+					if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
+						FullBlock fb = region.getBlockAndData(hitPos);
+						const Block* block = fb.id > 0 ? Block::mBlocks[fb.id] : nullptr;
+						if (block && (gGuiContext.isCreative || block->getDestroySpeed() >= 0.0f)) {
+							static Random dropRng;
+							int dropId = block->getResource(dropRng, fb.data, 0);
+							int dropCount = block->getResourceCount(dropRng, fb.data, 0);
+							DataID dropData = (dropId == fb.id && block != Block::mFurnace && block != Block::mLitFurnace &&
+							                   block != Block::mChest && block != Block::mTrappedChest) ? fb.data : 0;
+							if (region.removeBlock(hitPos)) {
+								BlockCoordKey bkey{ hitPos.x, hitPos.y, hitPos.z };
+								auto dropContainerItem = [&](const ItemInstance& ci) {
+									if (ci.isNull() || ci.getStackSize() <= 0) return;
+									Vec3 dpos(hitPos.x + 0.5f, hitPos.y + 0.35f, hitPos.z + 0.5f);
+									Vec3 dvel((dropRng.nextFloat() - 0.5f) * 2.4f, 3.0f, (dropRng.nextFloat() - 0.5f) * 2.4f);
+									spawnWorldItem(worldItems, ci, dpos, dvel, 0.35f);
+								};
+								auto chestIt = gGuiContext.chests.find(bkey);
+								if (chestIt != gGuiContext.chests.end()) {
+									for (const auto& s : chestIt->second.slots) dropContainerItem(s);
+									gGuiContext.chests.erase(chestIt);
+								}
+								auto furnIt = gGuiContext.furnaces.find(bkey);
+								if (furnIt != gGuiContext.furnaces.end()) {
+									dropContainerItem(furnIt->second.input);
+									dropContainerItem(furnIt->second.fuel);
+									dropContainerItem(furnIt->second.output);
+									gGuiContext.furnaces.erase(furnIt);
+								}
+								if (!gGuiContext.isCreative && dropId > 0 && dropCount > 0) {
+									ItemInstance dropItem(dropId, dropCount, dropData);
+									if (!dropItem.isNull()) {
+										Vec3 dropPos(hitPos.x + 0.5f, hitPos.y + 0.35f, hitPos.z + 0.5f);
+										Vec3 dropVel((dropRng.nextFloat() - 0.5f) * 2.4f,
+										             3.2f + dropRng.nextFloat() * 1.0f,
+										             (dropRng.nextFloat() - 0.5f) * 2.4f);
+										spawnWorldItem(worldItems, dropItem, dropPos, dropVel, 0.35f);
+									}
+								}
+								rebuildChunksForBlock(hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+								targetHit = region.clip(rayStart, rayEnd, false, false, 200, false);
+								hasTargetHit = targetHit.isHit() && targetHit.isTile();
+							}
+						}
+					} else if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_RIGHT)) {
+						FullBlock fb = region.getBlockAndData(hitPos);
+						if (!c.isSneaking() && openInteractiveBlockScreen(region, hitPos, fb.id, gGuiContext)) {
+							// Interactive screen opened
+						} else {
+							gGuiContext.ensureInventoryInitialized();
+							int slotIdx = std::max(0, std::min(8, gGuiContext.selectedHotbarSlot));
+							ItemInstance& held = gGuiContext.inventorySlots[slotIdx];
+							FacingID face = targetHit.getFacing();
+							if (!held.isNull() && held.getStackSize() > 0 && held.isBlock() && face < Facing::MAX) {
+								const Block* placeBlock = held.getBlock();
+								BlockPos placePos = hitPos + Facing::DIRECTION[face];
+								if (placeBlock && placePos.y >= 0 && placePos.y < 128) {
+									BlockID existingId = region.getBlockID(placePos);
+									const Block* existingBlock = Block::mBlocks[existingId];
+									bool canReplace = (existingId == 0) || (existingBlock && existingBlock->getMaterial().isReplaceable());
+									if (canReplace) {
+										AABB tmpBB;
+										bool overlapsPlayer = false;
+										if (placeBlock->isSolid() || !placeBlock->getAABB(region, placePos, tmpBB).isEmpty()) {
+											AABB placeBB(static_cast<float>(placePos.x), static_cast<float>(placePos.y), static_cast<float>(placePos.z),
+											             static_cast<float>(placePos.x + 1), static_cast<float>(placePos.y + 1), static_cast<float>(placePos.z + 1));
+											overlapsPlayer = placeBB.intersects(c.mBB);
+										}
+										if (!overlapsPlayer) {
+											DataID placeData = static_cast<DataID>(held.getAuxValue() & 0xF);
+											if (region.setBlockAndData(placePos, FullBlock(placeBlock->mID, placeData), Block::UPDATE_ALL)) {
+												if (!gGuiContext.isCreative) {
+													held.remove(1);
+													if (held.getStackSize() <= 0) {
+														held.setNull();
+													}
+												}
+												rebuildChunksForBlock(placePos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+			if (!gGuiContext.loadingChunks) {
+				float clampedDt = std::min(std::max(deltaTime, 0.0001f), 0.1f);
+				tickFurnaces(gGuiContext, clampedDt);
+				bool allowPickup = (gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen);
+				updateWorldItemEntities(worldItems, deltaTime, c.getRegion(), c.mBB, gGuiContext, allowPickup);
+			}
+			projection = glm::perspective(glm::radians(85.0f),
+			                              static_cast<float>(screenx) / static_cast<float>(std::max(1, screeny)),
+			                              0.1f, 1000.0f);
+			for (auto sl : mptrs) {
+				(*sl)->myShader->setMatrix4("PROJ", glm::value_ptr(projection));
 			}
 			glm::mat4 view = glm::lookAt(c.mPos, c.mPos + c.cameraFront, c.cameraUp);
 		
@@ -1137,6 +1871,22 @@ void renderThreadStuff()
 					lc.second[i]->render(renderParams, currentFrame);
 			}
 		}
+
+		renderWorldItemEntities(worldItems, projection, view);
+
+		if (hasTargetHit && gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
+			BlockPos hitPos = targetHit.getBlock();
+			BlockID hitId = c.getRegion().getBlockID(hitPos);
+			const Block* hitBlock = hitId > 0 ? Block::mBlocks[hitId] : nullptr;
+			if (hitBlock) {
+				AABB shapeBuf;
+				AABB localShape = hitBlock->getVisualShape(c.getRegion(), hitPos, shapeBuf);
+				if (localShape.isEmpty()) {
+					localShape.set(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+				}
+				drawBlockSelectionOutline(hitPos, localShape, projection, view);
+			}
+		}
 		} // end if (renderWorld || gGuiContext.loadingChunks)
 
 		if (gGuiContext.loadingChunks) {
@@ -1180,21 +1930,26 @@ void renderThreadStuff()
 		glEnable(GL_CULL_FACE);
 
 		bool wantLock = (gGuiContext.state == GameState::InGame && gGuiContext.currentScreen == nullptr);
-		if (wantLock != cursor_locked) {
-			cursor_locked = wantLock;
-			glfwSetInputMode(window, GLFW_CURSOR, cursor_locked ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+		if (wantLock != gCursorLocked) {
+			gCursorLocked = wantLock;
+			glfwSetInputMode(window, GLFW_CURSOR, gCursorLocked ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+			if (gCursorLocked) {
+				c.firstMouse = true;
+			}
 		}
 
 		if (glinput.NewKeyDown(GLFW_KEY_U))
 		{
-			cursor_locked = !cursor_locked;
-			glfwSetInputMode(window, GLFW_CURSOR, cursor_locked ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+			gCursorLocked = !gCursorLocked;
+			glfwSetInputMode(window, GLFW_CURSOR, gCursorLocked ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
 		}
 		glinput.Clear();
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();
 	}
+	saveActiveWorld();
+	closeActiveWorld();
 	commandContext.running = false;
 	glfwTerminate();
 }

@@ -16,6 +16,8 @@ void ProgressScreen::init() {
 	if (context) {
 		context->loadingChunks = true;
 		context->loadingProgress = 0.0f;
+		context->health = 20;
+		context->respawnRequested = true;
 	}
 }
 

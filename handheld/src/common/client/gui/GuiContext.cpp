@@ -25,8 +25,8 @@ void GuiContext::ensureInventoryInitialized() {
 	if (Item::mDiamond) inventorySlots[8] = ItemInstance(Item::mDiamond, 16, 0);
 }
 
-bool GuiContext::addItemToInventory(const ItemInstance& item) {
-	if (item.isNull() || item.getStackSize() <= 0) return true;
+ItemInstance GuiContext::addItemToInventoryRemainder(const ItemInstance& item) {
+	if (item.isNull() || item.getStackSize() <= 0) return ItemInstance();
 	ensureInventoryInitialized();
 
 	ItemInstance rem(item);
@@ -39,7 +39,7 @@ bool GuiContext::addItemToInventory(const ItemInstance& item) {
 			int move = std::min(space, static_cast<int>(rem.getStackSize()));
 			slot.add(move);
 			rem.remove(move);
-			if (rem.isNull() || rem.getStackSize() <= 0) return true;
+			if (rem.isNull() || rem.getStackSize() <= 0) return ItemInstance();
 		}
 	}
 
@@ -50,10 +50,15 @@ bool GuiContext::addItemToInventory(const ItemInstance& item) {
 			slot = rem;
 			slot.set(move);
 			rem.remove(move);
-			if (rem.isNull() || rem.getStackSize() <= 0) return true;
+			if (rem.isNull() || rem.getStackSize() <= 0) return ItemInstance();
 		}
 	}
 
+	return rem;
+}
+
+bool GuiContext::addItemToInventory(const ItemInstance& item) {
+	ItemInstance rem = addItemToInventoryRemainder(item);
 	return rem.isNull() || rem.getStackSize() <= 0;
 }
 
@@ -67,6 +72,9 @@ void GuiContext::setScreen(Screen* screen) {
 }
 
 void GuiContext::startGame() {
+	if (state == GameState::StartMenu) {
+		health = 20;
+	}
 	state = GameState::InGame;
 	setScreen(nullptr);
 }
@@ -79,13 +87,16 @@ void GuiContext::pauseGame() {
 }
 
 void GuiContext::resumeGame() {
-	if (state == GameState::Paused) {
+	if (state == GameState::Paused || currentScreen != nullptr) {
 		state = GameState::InGame;
 		setScreen(nullptr);
 	}
 }
 
 void GuiContext::quitToTitle() {
+	if (hasWorldLoaded) {
+		worldSaveAndCloseRequested = true;
+	}
 	state = GameState::StartMenu;
 	setScreen(new StartMenuScreen());
 }

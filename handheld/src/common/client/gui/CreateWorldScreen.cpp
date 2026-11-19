@@ -3,6 +3,7 @@
 #include "SelectWorldScreen.h"
 #include "PlayScreen.h"
 #include "TouchControls.h"
+#include "WorldPersistence.h"
 #include "GuiContext.h"
 #include "Options.h"
 #include "Font.h"
@@ -267,9 +268,35 @@ void CreateWorldScreen::buttonClicked(Button* button) {
 		mCreativeMode = false;
 		updateLabels();
 	} else if (button->id == 2) {
-		std::string folderName = mWorldName.empty() ? "New World" : mWorldName;
+		namespace fs = std::filesystem;
+		std::string displayName = mWorldName.empty() ? "New World" : mWorldName;
+		std::string baseFolder = sanitizeWorldFolderName(displayName);
+		std::string folderName = baseFolder;
+		int suffix = 2;
+		while (fs::exists("./worlds/" + folderName)) {
+			folderName = baseFolder + " (" + std::to_string(suffix++) + ")";
+		}
+		std::string worldDir = "./worlds/" + folderName;
 		std::error_code ec;
-		std::filesystem::create_directories("./worlds/" + folderName, ec);
+		fs::create_directories(worldDir, ec);
+
+		int64_t seed = parseSeedString(mSeedText);
+		WorldMetadata meta;
+		meta.name = displayName;
+		meta.seed = seed;
+		meta.isCreative = mCreativeMode;
+		meta.health = 20;
+		meta.hasPlayerPos = false;
+		meta.hasInventory = false;
+		saveWorldMetadata(worldDir, meta);
+
+		context->activeWorldDir = worldDir;
+		context->activeWorldName = displayName;
+		context->activeWorldSeed = seed;
+		context->isCreative = mCreativeMode;
+		context->health = 20;
+		context->respawnRequested = true;
+		context->worldOpenRequested = true;
 		context->setScreen(new ProgressScreen());
 	} else if (button->id == 3) {
 		bool touch = context->options && context->options->useTouchUI;

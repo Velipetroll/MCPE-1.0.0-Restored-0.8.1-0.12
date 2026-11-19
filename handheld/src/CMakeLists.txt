@@ -1048,6 +1048,7 @@ common/client/gui/SelectWorldScreen.cpp
 common/client/gui/Slider.cpp
 common/client/gui/StartMenuScreen.cpp
 common/client/gui/TouchControls.cpp
+common/client/gui/WorldPersistence.cpp
 common/client/renderer/block/AmbientOcclusionCalculator.cpp
 common/client/renderer/block/BlockGraphics.cpp
 common/client/renderer/block/BlockOccluder.cpp

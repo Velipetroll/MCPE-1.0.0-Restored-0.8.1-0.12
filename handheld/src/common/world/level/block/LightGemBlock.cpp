@@ -23,6 +23,6 @@ int LightGemBlock::getResourceCount( Random& random, int data, int bonusLootLeve
 }
 
 int LightGemBlock::getResource(Random& random, int data, int bonusLootLevel) const {
-	return Item::mYellowDust->getId();
+	return Item::mYellowDust ? Item::mYellowDust->getId() : mID;
 }
  

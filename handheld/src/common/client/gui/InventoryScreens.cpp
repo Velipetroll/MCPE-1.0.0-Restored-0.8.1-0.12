@@ -182,6 +182,25 @@ namespace {
 		return false;
 	}
 
+	bool handlePcOutsideDrop(GuiContext* ctx, ItemInstance& carried, int px, int py, int pw, int ph, int x, int y, int button) {
+		if (!ctx || carried.isNull()) return false;
+		if (x >= px && x < px + pw && y >= py && y < py + ph) return false;
+		if (button == 0) {
+			ctx->pendingWorldDrops.push_back(carried);
+			carried.setNull();
+			return true;
+		}
+		if (button == 1) {
+			ItemInstance one(carried);
+			one.set(1);
+			ctx->pendingWorldDrops.push_back(one);
+			carried.remove(1);
+			if (carried.getStackSize() <= 0) carried.setNull();
+			return true;
+		}
+		return false;
+	}
+
 	bool handlePcResultSlotClick(ItemInstance& result, ItemInstance& carried, CraftingContainer& grid) {
 		if (result.isNull()) return false;
 		int maxStack = std::max(1, static_cast<int>(result.getMaxStackSize()));
@@ -748,6 +767,9 @@ void InventoryScreen::mouseClicked(int x, int y, int button) {
 		}
 
 		if (handlePcPlayerInventoryClick(context, mCarriedItem, px, py, x, y, button)) {
+			return;
+		}
+		if (handlePcOutsideDrop(context, mCarriedItem, px, py, pw, ph, x, y, button)) {
 			return;
 		}
 	}
@@ -1350,6 +1372,9 @@ void PaneCraftingScreen::mouseClicked(int x, int y, int button) {
 		if (handlePcPlayerInventoryClick(context, mCarriedItem, px, py, x, y, button)) {
 			return;
 		}
+		if (handlePcOutsideDrop(context, mCarriedItem, px, py, pw, ph, x, y, button)) {
+			return;
+		}
 	}
 
 	Screen::mouseClicked(x, y, button);
@@ -1412,8 +1437,146 @@ StonecutterScreen::StonecutterScreen()
 	: PaneCraftingScreen(1, 5, false, "Stonecutter") {
 }
 
+// --- Smelting helpers & Furnace tick ---
+namespace {
+
+ItemInstance getSmeltingResult(const ItemInstance& input) {
+	if (input.isNull() || input.getStackSize() <= 0) return ItemInstance();
+	int id = input.getId();
+	if (Block::mCobblestone && id == Block::mCobblestone->mID && Block::mStone) {
+		return ItemInstance(Block::mStone, 1, 0);
+	}
+	if (Block::mSand && id == Block::mSand->mID && Block::mGlass) {
+		return ItemInstance(Block::mGlass, 1, 0);
+	}
+	if (Block::mIronOre && id == Block::mIronOre->mID && Item::mIronIngot) {
+		return ItemInstance(Item::mIronIngot, 1, 0);
+	}
+	if (Block::mGoldOre && id == Block::mGoldOre->mID && Item::mGoldIngot) {
+		return ItemInstance(Item::mGoldIngot, 1, 0);
+	}
+	if (Block::mClay && id == Block::mClay->mID && Block::mHardenedClay) {
+		return ItemInstance(Block::mHardenedClay, 1, 0);
+	}
+	if (Item::mClay && id == Item::mClay->getId() && Item::mBrick) {
+		return ItemInstance(Item::mBrick, 1, 0);
+	}
+	if (Block::mLog && id == Block::mLog->mID && Item::mCoal) {
+		return ItemInstance(Item::mCoal, 1, 1); // Charcoal
+	}
+	if (Item::mPorkChop_raw && id == Item::mPorkChop_raw->getId() && Item::mPorkChop_cooked) {
+		return ItemInstance(Item::mPorkChop_cooked, 1, 0);
+	}
+	if (Item::mBeef_raw && id == Item::mBeef_raw->getId() && Item::mBeef_cooked) {
+		return ItemInstance(Item::mBeef_cooked, 1, 0);
+	}
+	if (Item::mChicken_raw && id == Item::mChicken_raw->getId() && Item::mChicken_cooked) {
+		return ItemInstance(Item::mChicken_cooked, 1, 0);
+	}
+	if (Item::mPotato && id == Item::mPotato->getId() && Item::mPotatoBaked) {
+		return ItemInstance(Item::mPotatoBaked, 1, 0);
+	}
+	if (Item::mFish_raw_cod && id == Item::mFish_raw_cod->getId() && Item::mFish_cooked_cod) {
+		return ItemInstance(Item::mFish_cooked_cod, 1, 0);
+	}
+	return ItemInstance();
+}
+
+float getFuelBurnSeconds(const ItemInstance& fuel) {
+	if (fuel.isNull() || fuel.getStackSize() <= 0) return 0.0f;
+	int id = fuel.getId();
+	if (Item::mCoal && id == Item::mCoal->getId()) return 80.0f;
+	if (Block::mWoodPlanks && id == Block::mWoodPlanks->mID) return 15.0f;
+	if (Block::mLog && id == Block::mLog->mID) return 15.0f;
+	if (Block::mWorkBench && id == Block::mWorkBench->mID) return 15.0f;
+	if (Block::mChest && id == Block::mChest->mID) return 15.0f;
+	if (Item::mStick && id == Item::mStick->getId()) return 5.0f;
+	if (Block::mSapling && id == Block::mSapling->mID) return 5.0f;
+	if (Block::mCoalBlock && id == Block::mCoalBlock->mID) return 800.0f;
+	return 0.0f;
+}
+
+bool handleTakeOnlySlotClick(ItemInstance& slot, ItemInstance& carried) {
+	if (slot.isNull()) return false;
+	int maxStack = std::max(1, static_cast<int>(slot.getMaxStackSize()));
+	if (carried.isNull()) {
+		carried = slot;
+		slot.setNull();
+		return true;
+	}
+	if (carried.sameItemAndAux(&slot) && carried.hasSameUserData(slot)) {
+		int space = maxStack - static_cast<int>(carried.getStackSize());
+		if (space > 0) {
+			int move = std::min(space, static_cast<int>(slot.getStackSize()));
+			carried.add(move);
+			slot.remove(move);
+			if (slot.getStackSize() <= 0) slot.setNull();
+			return true;
+		}
+	}
+	return false;
+}
+
+} // namespace
+
+void tickFurnaces(GuiContext& ctx, float dt) {
+	if (dt <= 0.0f) return;
+	for (auto& kv : ctx.furnaces) {
+		FurnaceData& fd = kv.second;
+		if (fd.burnTime > 0.0f) {
+			fd.burnTime = std::max(0.0f, fd.burnTime - dt);
+		}
+		ItemInstance result = getSmeltingResult(fd.input);
+		bool canSmelt = !result.isNull() &&
+			(fd.output.isNull() ||
+			 (fd.output.sameItemAndAux(&result) && fd.output.hasSameUserData(result) &&
+			  static_cast<int>(fd.output.getStackSize()) + static_cast<int>(result.getStackSize()) <= static_cast<int>(fd.output.getMaxStackSize())));
+
+		if (canSmelt) {
+			if (fd.burnTime <= 0.0f) {
+				float fuelSecs = getFuelBurnSeconds(fd.fuel);
+				if (fuelSecs > 0.0f) {
+					fd.burnTime = fuelSecs;
+					fd.burnDuration = fuelSecs;
+					fd.fuel.remove(1);
+					if (fd.fuel.getStackSize() <= 0) fd.fuel.setNull();
+				}
+			}
+			if (fd.burnTime > 0.0f) {
+				fd.cookTime += dt;
+				if (fd.cookTime >= 10.0f) {
+					fd.cookTime = 0.0f;
+					fd.input.remove(1);
+					if (fd.input.getStackSize() <= 0) fd.input.setNull();
+					if (fd.output.isNull()) {
+						fd.output = result;
+					} else {
+						fd.output.add(static_cast<int>(result.getStackSize()));
+					}
+				}
+			} else {
+				fd.cookTime = 0.0f;
+			}
+		} else {
+			fd.cookTime = 0.0f;
+		}
+	}
+}
+
 // --- FurnaceScreen ---
+FurnaceScreen::FurnaceScreen(const BlockCoordKey& pos) : mPos(pos) {}
+
+void FurnaceScreen::closeScreen() {
+	if (context && !mCarriedItem.isNull()) {
+		context->addItemToInventory(mCarriedItem);
+		mCarriedItem.setNull();
+	}
+	if (context) context->startGame();
+}
+
 void FurnaceScreen::init() {
+	if (context) context->ensureInventoryInitialized();
+	mCarriedItem.setNull();
 	mCloseButton = makeInvBtn(context, 1, "X");
 	buttons.push_back(mCloseButton);
 }
@@ -1426,50 +1589,202 @@ void FurnaceScreen::setupPositions() {
 
 void FurnaceScreen::render(int mouseX, int mouseY, float partialTicks) {
 	fillGradient(0, 0, width, height, 0xA0101010, 0xB0101010);
-	int pw = 220, ph = 150;
+	int pw = 176, ph = 166;
 	int px = (width - pw) / 2, py = (height - ph) / 2;
 	drawPanel(this, px, py, pw, ph);
 	if (font) drawString(font, "Furnace", px + 8, py + 6, 0xFF404040);
-	drawSlotGrid(this, px + 56, py + 20, 1, 1); // Input
-	drawSlotGrid(this, px + 56, py + 56, 1, 1); // Fuel
-	if (font) drawString(font, "->", px + 86, py + 40, 0xFF404040);
-	drawSlotGrid(this, px + 116, py + 38, 1, 1); // Output
-	drawSlotGrid(this, px + 28, py + 84, 9, 3);
+
+	std::string hoverText;
+	FurnaceData* fd = context ? &context->furnaces[mPos] : nullptr;
+	ItemInstance input = fd ? fd->input : ItemInstance();
+	ItemInstance fuel = fd ? fd->fuel : ItemInstance();
+	ItemInstance output = fd ? fd->output : ItemInstance();
+
+	renderPcSlotWithItem(this, font, px + 56, py + 17, input, mouseX, mouseY, nullptr, hoverText);
+	renderPcSlotWithItem(this, font, px + 56, py + 53, fuel, mouseX, mouseY, nullptr, hoverText);
+	renderPcSlotWithItem(this, font, px + 116, py + 35, output, mouseX, mouseY, nullptr, hoverText);
+
+	// Burn & cook progress indicators
+	fill(px + 56, py + 37, px + 72, py + 50, 0xFF8B8B8B);
+	if (fd && fd->burnTime > 0.0f && fd->burnDuration > 0.0f) {
+		int h = std::max(1, std::min(13, static_cast<int>(13.0f * (fd->burnTime / fd->burnDuration))));
+		fill(px + 58, py + 50 - h, px + 70, py + 50, 0xFFFF8800);
+	}
+	fill(px + 80, py + 40, px + 104, py + 46, 0xFF8B8B8B);
+	if (fd && fd->cookTime > 0.0f) {
+		int w = std::max(1, std::min(24, static_cast<int>(24.0f * (fd->cookTime / 10.0f))));
+		fill(px + 80, py + 40, px + 80 + w, py + 46, 0xFFFFFFFF);
+	}
+
+	if (font) drawString(font, "Inventory", px + 8, py + 72, 0xFF404040);
+	renderPcPlayerInventorySlots(this, font, context, px, py, mouseX, mouseY, hoverText);
+
 	Screen::render(mouseX, mouseY, partialTicks);
+
+	if (mCarriedItem.isNull() && !hoverText.empty()) {
+		drawPcTooltip(this, font, hoverText, mouseX, mouseY, width, height);
+	}
+	if (!mCarriedItem.isNull()) {
+		drawPcItemStack(this, font, mCarriedItem, mouseX - 8, mouseY - 8);
+	}
+}
+
+void FurnaceScreen::mouseClicked(int x, int y, int button) {
+	if ((button == 0 || button == 1) && context) {
+		int pw = 176, ph = 166;
+		int px = (width - pw) / 2, py = (height - ph) / 2;
+		FurnaceData& fd = context->furnaces[mPos];
+
+		if (pointInSlot(x, y, px + 56, py + 17)) {
+			handlePcNormalSlotClick(fd.input, mCarriedItem, button);
+			return;
+		}
+		if (pointInSlot(x, y, px + 56, py + 53)) {
+			handlePcNormalSlotClick(fd.fuel, mCarriedItem, button);
+			return;
+		}
+		if (pointInSlot(x, y, px + 116, py + 35)) {
+			handleTakeOnlySlotClick(fd.output, mCarriedItem);
+			return;
+		}
+		if (handlePcPlayerInventoryClick(context, mCarriedItem, px, py, x, y, button)) {
+			return;
+		}
+		if (handlePcOutsideDrop(context, mCarriedItem, px, py, pw, ph, x, y, button)) {
+			return;
+		}
+	}
+	Screen::mouseClicked(x, y, button);
 }
 
 void FurnaceScreen::buttonClicked(Button* button) {
-	if (context && button && button->id == 1) context->startGame();
+	if (button && button->id == 1) closeScreen();
+}
+
+void FurnaceScreen::keyPressed(int key) {
+	if (key == 256 /* ESCAPE */ || key == 69 /* E */) {
+		closeScreen();
+		return;
+	}
+	Screen::keyPressed(key);
 }
 
 // --- ChestScreen ---
 ChestScreen::ChestScreen(bool isDouble) : mIsDouble(isDouble) {}
 
+ChestScreen::ChestScreen(const BlockCoordKey& primaryPos, bool isDouble, const BlockCoordKey& secondaryPos)
+	: mPrimaryPos(primaryPos)
+	, mSecondaryPos(secondaryPos)
+	, mIsDouble(isDouble) {}
+
+void ChestScreen::closeScreen() {
+	if (context && !mCarriedItem.isNull()) {
+		context->addItemToInventory(mCarriedItem);
+		mCarriedItem.setNull();
+	}
+	if (context) context->startGame();
+}
+
 void ChestScreen::init() {
+	if (context) context->ensureInventoryInitialized();
+	mCarriedItem.setNull();
 	mCloseButton = makeInvBtn(context, 1, "X");
 	buttons.push_back(mCloseButton);
 }
 
 void ChestScreen::setupPositions() {
-	int pw = 220, ph = mIsDouble ? 186 : 150;
+	int rows = mIsDouble ? 6 : 3;
+	int pw = 176;
+	int ph = 18 + rows * 18 + 14 + 78;
 	int px = (width - pw) / 2, py = (height - ph) / 2;
 	if (mCloseButton) { mCloseButton->posX = px + pw - 20; mCloseButton->posY = py - 22; mCloseButton->width = 20; mCloseButton->height = 20; }
 }
 
 void ChestScreen::render(int mouseX, int mouseY, float partialTicks) {
 	fillGradient(0, 0, width, height, 0xA0101010, 0xB0101010);
-	int pw = 220, ph = mIsDouble ? 186 : 150;
+	int rows = mIsDouble ? 6 : 3;
+	int chestH = rows * 18;
+	int pw = 176;
+	int ph = 18 + chestH + 14 + 78;
 	int px = (width - pw) / 2, py = (height - ph) / 2;
 	drawPanel(this, px, py, pw, ph);
 	if (font) drawString(font, mIsDouble ? "Large Chest" : "Chest", px + 8, py + 6, 0xFF404040);
-	int rows = mIsDouble ? 5 : 3;
-	drawSlotGrid(this, px + 28, py + 20, 9, rows);
-	drawSlotGrid(this, px + 28, py + 24 + rows * 18, 9, 3);
+
+	std::string hoverText;
+	ChestData* primary = context ? &context->chests[mPrimaryPos] : nullptr;
+	ChestData* secondary = (context && mIsDouble) ? &context->chests[mSecondaryPos] : nullptr;
+
+	for (int r = 0; r < rows; ++r) {
+		for (int c = 0; c < 9; ++c) {
+			ItemInstance slotItem;
+			if (r < 3 && primary) {
+				slotItem = primary->slots[static_cast<size_t>(r * 9 + c)];
+			} else if (r >= 3 && secondary) {
+				slotItem = secondary->slots[static_cast<size_t>((r - 3) * 9 + c)];
+			}
+			renderPcSlotWithItem(this, font, px + 8 + c * 18, py + 18 + r * 18, slotItem, mouseX, mouseY, nullptr, hoverText);
+		}
+	}
+
+	int invHeaderY = py + 18 + chestH + 3;
+	if (font) drawString(font, "Inventory", px + 8, invHeaderY, 0xFF404040);
+	int invAnchorY = py + 18 + chestH + 14 - 84;
+	renderPcPlayerInventorySlots(this, font, context, px, invAnchorY, mouseX, mouseY, hoverText);
+
 	Screen::render(mouseX, mouseY, partialTicks);
+
+	if (mCarriedItem.isNull() && !hoverText.empty()) {
+		drawPcTooltip(this, font, hoverText, mouseX, mouseY, width, height);
+	}
+	if (!mCarriedItem.isNull()) {
+		drawPcItemStack(this, font, mCarriedItem, mouseX - 8, mouseY - 8);
+	}
+}
+
+void ChestScreen::mouseClicked(int x, int y, int button) {
+	if ((button == 0 || button == 1) && context) {
+		int rows = mIsDouble ? 6 : 3;
+		int chestH = rows * 18;
+		int pw = 176;
+		int ph = 18 + chestH + 14 + 78;
+		int px = (width - pw) / 2, py = (height - ph) / 2;
+
+		ChestData& primary = context->chests[mPrimaryPos];
+		for (int r = 0; r < rows; ++r) {
+			for (int c = 0; c < 9; ++c) {
+				if (pointInSlot(x, y, px + 8 + c * 18, py + 18 + r * 18)) {
+					if (r < 3) {
+						handlePcNormalSlotClick(primary.slots[static_cast<size_t>(r * 9 + c)], mCarriedItem, button);
+					} else if (mIsDouble) {
+						ChestData& secondary = context->chests[mSecondaryPos];
+						handlePcNormalSlotClick(secondary.slots[static_cast<size_t>((r - 3) * 9 + c)], mCarriedItem, button);
+					}
+					return;
+				}
+			}
+		}
+
+		int invAnchorY = py + 18 + chestH + 14 - 84;
+		if (handlePcPlayerInventoryClick(context, mCarriedItem, px, invAnchorY, x, y, button)) {
+			return;
+		}
+		if (handlePcOutsideDrop(context, mCarriedItem, px, py, pw, ph, x, y, button)) {
+			return;
+		}
+	}
+	Screen::mouseClicked(x, y, button);
 }
 
 void ChestScreen::buttonClicked(Button* button) {
-	if (context && button && button->id == 1) context->startGame();
+	if (button && button->id == 1) closeScreen();
+}
+
+void ChestScreen::keyPressed(int key) {
+	if (key == 256 /* ESCAPE */ || key == 69 /* E */) {
+		closeScreen();
+		return;
+	}
+	Screen::keyPressed(key);
 }
 
 // --- TextEditScreen ---

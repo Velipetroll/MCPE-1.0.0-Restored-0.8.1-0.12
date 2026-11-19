@@ -40,5 +40,5 @@ const AABB& WebBlock::getAABB(BlockSource& region, const BlockPos& pos, AABB& bu
 }
 
 int WebBlock::getResource(Random& random, int data, int bonusLootLevel) const {
-	return Item::mString->getId();
+	return Item::mString ? Item::mString->getId() : 0;
 }

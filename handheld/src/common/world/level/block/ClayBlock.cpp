@@ -13,7 +13,7 @@ ClayBlock::ClayBlock(const std::string& nameId, int id)
 }
 
 int ClayBlock::getResource(Random& random, int data, int bonusLootLevel) const {
-	return Item::mClay->getId();
+	return Item::mClay ? Item::mClay->getId() : mID;
 }
 
 int ClayBlock::getResourceCount(Random& random, int data, int bonusLootLevel) const {
