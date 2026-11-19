@@ -260,7 +260,7 @@ namespace {
 		ensureItem(Item::mSlimeBall, "slime_ball", 85);
 		ensureItem(Item::mEgg, "egg", 88, 16);
 		ensureItem(Item::mCompass, "compass", 89);
-		ensureItem(Item::mFishingRod, "fishing_rod", 90, 1);
+		ensureItem(Item::mFishingRod, "fishing_rod", 90, 1, true, true);
 		ensureItem(Item::mClock, "clock", 91);
 		ensureItem(Item::mYellowDust, "glowstone_dust", 92);
 		ensureItem(Item::mDye_powder, "dye", 95);

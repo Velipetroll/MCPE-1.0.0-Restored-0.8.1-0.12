@@ -22,6 +22,6 @@ public:
 	void entityInside(BlockSource& region, const BlockPos& pos, Entity& entity) const override;
 
 private:
-	static const int GUI_COLOR = 0xffffff;	// 0x71c35c;
+	static const int GUI_COLOR = 0x71c35c;
 	static const int WORLD_COLOR = 0x208030;
 };

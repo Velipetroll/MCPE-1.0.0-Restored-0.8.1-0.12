@@ -51,6 +51,8 @@
 #include "world/level/material/Material.h"
 #include "util/Random.h"
 #include "stb_image.h"
+#include <chrono>
+#include <cstdio>
 
 
 int screenx = 1600;
@@ -1190,6 +1192,7 @@ GLFWwindow* renderThreadInit()
 
 	gGuiFont.init("font/default8.png");
 	gGuiContext.font = &gGuiFont;
+	gGuiOptions.load("options.txt");
 	gGuiContext.options = &gGuiOptions;
 	SoundEngine::init();
 	updateGuiScale();
@@ -1243,7 +1246,7 @@ void rebuildSubChunkAt(const ChunkPos& cp, int subY,
 	RenderChunk* chunkPart = it->second[subY];
 	chunkPart->setDirty(Tick(0), true);
 	chunkPart->startRebuild(std::move(chunkBuilder));
-	chunkPart->rebuild(gGuiOptions.fancyGraphics, gGuiOptions.fancyGraphics);
+	chunkPart->rebuild(gGuiOptions.fancyGraphics, true);
 	chunkBuilder = chunkPart->endRebuild(camPos);
 }
 
@@ -1597,11 +1600,13 @@ bool openInteractiveBlockScreen(BlockSource& region, const BlockPos& pos, BlockI
 struct WorldItemEntity {
 	ItemInstance item;
 	Vec3 pos;
+	Vec3 prevPos;
 	Vec3 vel;
-	float age = 0.0f;
-	float pickupDelay = 0.0f;
-	float spinPhase = 0.0f;
+	int age = 0;
+	int delayBeforePickup = 0;
+	float hoverStart = 0.0f;
 	bool onGround = false;
+	int lifeTime = 6000;
 };
 
 void spawnWorldItem(std::vector<WorldItemEntity>& items,
@@ -1614,93 +1619,199 @@ void spawnWorldItem(std::vector<WorldItemEntity>& items,
 	WorldItemEntity ent;
 	ent.item = item;
 	ent.pos = pos;
-	ent.vel = vel;
-	ent.pickupDelay = pickupDelay;
-	ent.spinPhase = itemRng.nextFloat() * 6.283185f;
+	ent.prevPos = pos;
+	ent.vel = vel * 0.05f;
+	ent.delayBeforePickup = static_cast<int>(std::round(pickupDelay * 20.0f));
+	ent.hoverStart = itemRng.nextFloat() * 3.1416f * 2.0f;
 	items.push_back(std::move(ent));
 }
 
+// MCPE 0.8.1 ItemEntity::checkInTile
+static void checkWorldItemInTile(WorldItemEntity& e, BlockSource& region, Random& rng) {
+	int xFloor = Math::floor(e.pos.x);
+	int yFloor = Math::floor(e.pos.y);
+	int zFloor = Math::floor(e.pos.z);
+	if (region.getBlock(xFloor, yFloor, zFloor).isSolid()) {
+		float xDiff = e.pos.x - static_cast<float>(xFloor);
+		float yDiff = e.pos.y - static_cast<float>(yFloor);
+		float zDiff = e.pos.z - static_cast<float>(zFloor);
+		bool xNeg = region.getBlock(xFloor - 1, yFloor, zFloor).isSolid();
+		bool xPos = region.getBlock(xFloor + 1, yFloor, zFloor).isSolid();
+		bool yNeg = region.getBlock(xFloor, yFloor - 1, zFloor).isSolid();
+		bool yPos = region.getBlock(xFloor, yFloor + 1, zFloor).isSolid();
+		bool zNeg = region.getBlock(xFloor, yFloor, zFloor - 1).isSolid();
+		bool zPos = region.getBlock(xFloor, yFloor, zFloor + 1).isSolid();
+
+		float bestDist = 9999.0f;
+		int bestDir = -1;
+		if (!xNeg && xDiff < bestDist) {
+			bestDist = xDiff;
+			bestDir = 0;
+		}
+		if (!xPos && (1.0f - xDiff) < bestDist) {
+			bestDist = 1.0f - xDiff;
+			bestDir = 1;
+		}
+		if (!yNeg && yDiff < bestDist) {
+			bestDist = yDiff;
+			bestDir = 2;
+		}
+		if (!yPos && (1.0f - yDiff) < bestDist) {
+			bestDist = 1.0f - yDiff;
+			bestDir = 3;
+		}
+		if (!zNeg && zDiff < bestDist) {
+			bestDist = zDiff;
+			bestDir = 4;
+		}
+		if (!zPos && (1.0f - zDiff) < bestDist) {
+			bestDir = 5;
+		}
+
+		float push = rng.nextFloat() * 0.2f + 0.1f;
+		if (bestDir == 0) e.vel.x = -push;
+		else if (bestDir == 1) e.vel.x = push;
+		else if (bestDir == 2) e.vel.y = -push;
+		else if (bestDir == 3) e.vel.y = push;
+		else if (bestDir == 4) e.vel.z = -push;
+		else if (bestDir == 5) e.vel.z = push;
+	}
+}
+
 void updateWorldItemEntities(std::vector<WorldItemEntity>& items,
+                             float& tickAccum,
                              float dt,
                              BlockSource& region,
                              const AABB& playerBB,
                              GuiContext& guiCtx,
                              bool allowPickup) {
-	dt = std::min(std::max(dt, 0.0001f), 0.05f);
-	float tickScale = dt / 0.05f;
-	AABB pickupBox = playerBB.expanded(Vec3(0.85f, 0.5f, 0.85f));
-	const float halfW = 0.125f;
-	const float height = 0.25f;
+	constexpr float TICK_DT = 0.05f;
+	constexpr float HALF_W = 0.125f;
+	constexpr float HEIGHT = 0.25f;
+	constexpr float RIDING_HEIGHT = HEIGHT * 0.5f; // MCPE 0.8.1 ItemEntity: 0.125f
 
-	for (size_t i = 0; i < items.size(); ) {
-		WorldItemEntity& e = items[i];
-		e.age += dt;
-		if (e.pickupDelay > 0.0f) {
-			e.pickupDelay = std::max(0.0f, e.pickupDelay - dt);
-		}
-		if (e.age > 300.0f || e.pos.y < -32.0f || e.item.isNull() || e.item.getStackSize() <= 0) {
-			items[i] = std::move(items.back());
-			items.pop_back();
-			continue;
-		}
+	static Random itemTickRng;
+	dt = std::min(std::max(dt, 0.0001f), 0.1f);
+	tickAccum += dt;
+	if (tickAccum > 0.25f) tickAccum = 0.25f;
 
-		// Gravity
-		e.vel.y -= 16.0f * dt;
-		if (e.vel.y < -25.0f) e.vel.y = -25.0f;
-
-		Vec3 moveStep = e.vel * dt;
-		AABB itemBB(e.pos.x - halfW, e.pos.y, e.pos.z - halfW,
-		            e.pos.x + halfW, e.pos.y + height, e.pos.z + halfW);
-		std::vector<AABB>& aABBs = region.fetchCollisionShapes(region, itemBB.expanded(moveStep), nullptr, false, nullptr);
-
-		float xaOrg = moveStep.x;
-		float yaOrg = moveStep.y;
-		float zaOrg = moveStep.z;
-
-		Vec3 steps[3] = { Vec3(0.0f, moveStep.y, 0.0f), Vec3(moveStep.x, 0.0f, 0.0f), Vec3(0.0f, 0.0f, moveStep.z) };
-		for (int axis = 0; axis < 3; ++axis) {
-			for (const auto& bb : aABBs) {
-				steps[axis] = bb.clipCollide(itemBB, steps[axis], false);
+	while (tickAccum >= TICK_DT) {
+		tickAccum -= TICK_DT;
+		for (size_t i = 0; i < items.size(); ) {
+			WorldItemEntity& e = items[i];
+			e.prevPos = e.pos;
+			if (e.delayBeforePickup > 0) {
+				--e.delayBeforePickup;
 			}
-			itemBB.move(steps[axis]);
-		}
 
-		e.pos.x = (itemBB.min.x + itemBB.max.x) * 0.5f;
-		e.pos.y = itemBB.min.y;
-		e.pos.z = (itemBB.min.z + itemBB.max.z) * 0.5f;
+			// MCPE 0.8.1 ItemEntity::tick()
+			e.vel.y -= 0.04f;
+			const Block& curBlock = region.getBlock(Math::floor(e.pos.x), Math::floor(e.pos.y), Math::floor(e.pos.z));
+			if (curBlock.getMaterial().isType(MaterialType::Lava)) {
+				e.vel.y = 0.2f;
+				e.vel.x = (itemTickRng.nextFloat() - itemTickRng.nextFloat()) * 0.2f;
+				e.vel.z = (itemTickRng.nextFloat() - itemTickRng.nextFloat()) * 0.2f;
+			}
 
-		if (steps[1].x != xaOrg) e.vel.x = 0.0f;
-		if (steps[2].z != zaOrg) e.vel.z = 0.0f;
-		if (steps[0].y != yaOrg) {
-			e.onGround = (yaOrg < 0.0f);
-			e.vel.y = 0.0f;
-		} else {
-			e.onGround = false;
-		}
+			checkWorldItemInTile(e, region, itemTickRng);
 
-		float drag = std::pow(e.onGround ? 0.65f : 0.98f, tickScale);
-		e.vel.x *= drag;
-		e.vel.z *= drag;
+			AABB itemBB(e.pos.x - HALF_W, e.pos.y - RIDING_HEIGHT, e.pos.z - HALF_W,
+			            e.pos.x + HALF_W, e.pos.y - RIDING_HEIGHT + HEIGHT, e.pos.z + HALF_W);
+			std::vector<AABB>& aABBs = region.fetchCollisionShapes(region, itemBB.expanded(e.vel), nullptr, false, nullptr);
 
-		if (allowPickup && e.pickupDelay <= 0.0f && itemBB.intersects(pickupBox)) {
-			ItemInstance rem = guiCtx.addItemToInventoryRemainder(e.item);
-			if (rem.isNull() || rem.getStackSize() <= 0) {
+			float xaOrg = e.vel.x;
+			float yaOrg = e.vel.y;
+			float zaOrg = e.vel.z;
+
+			Vec3 steps[3] = { Vec3(0.0f, e.vel.y, 0.0f), Vec3(e.vel.x, 0.0f, 0.0f), Vec3(0.0f, 0.0f, e.vel.z) };
+			for (int axis = 0; axis < 3; ++axis) {
+				for (const auto& bb : aABBs) {
+					steps[axis] = bb.clipCollide(itemBB, steps[axis], false);
+				}
+				itemBB.move(steps[axis]);
+			}
+
+			e.pos.x = (itemBB.min.x + itemBB.max.x) * 0.5f;
+			e.pos.y = itemBB.min.y + RIDING_HEIGHT;
+			e.pos.z = (itemBB.min.z + itemBB.max.z) * 0.5f;
+
+			if (steps[1].x != xaOrg) e.vel.x = 0.0f;
+			if (steps[2].z != zaOrg) e.vel.z = 0.0f;
+			if (steps[0].y != yaOrg) {
+				e.onGround = (yaOrg < 0.0f);
+				e.vel.y = 0.0f;
+			} else {
+				e.onGround = false;
+			}
+
+			float friction = 0.98f;
+			if (e.onGround) {
+				friction = 0.588f;
+				const Block& below = region.getBlock(Math::floor(e.pos.x), Math::floor(itemBB.min.y) - 1, Math::floor(e.pos.z));
+				if (below.getId() > 0) {
+					friction = below.getFriction() * 0.98f;
+				}
+			}
+
+			e.vel.x *= friction;
+			e.vel.y *= 0.98f;
+			e.vel.z *= friction;
+			if (e.onGround) {
+				e.vel.y *= -0.5f;
+			}
+
+			++e.age;
+			if (e.age >= e.lifeTime || e.pos.y < -32.0f || e.item.isNull() || e.item.getStackSize() <= 0) {
 				items[i] = std::move(items.back());
 				items.pop_back();
 				continue;
 			}
-			e.item = rem;
+			++i;
 		}
-		++i;
+	}
+
+	if (allowPickup) {
+		AABB pickupBox = playerBB.expanded(Vec3(0.85f, 0.5f, 0.85f));
+		for (size_t i = 0; i < items.size(); ) {
+			WorldItemEntity& e = items[i];
+			if (e.delayBeforePickup <= 0) {
+				AABB itemBB(e.pos.x - HALF_W, e.pos.y - RIDING_HEIGHT, e.pos.z - HALF_W,
+				            e.pos.x + HALF_W, e.pos.y - RIDING_HEIGHT + HEIGHT, e.pos.z + HALF_W);
+				if (itemBB.intersects(pickupBox)) {
+					ItemInstance rem = guiCtx.addItemToInventoryRemainder(e.item);
+					if (rem.isNull() || rem.getStackSize() <= 0) {
+						items[i] = std::move(items.back());
+						items.pop_back();
+						continue;
+					}
+					e.item = rem;
+				}
+			}
+			++i;
+		}
 	}
 }
 
 void renderWorldItemEntities(const std::vector<WorldItemEntity>& items,
                              BlockSource& region,
                              float sunFactor,
+                             float mcpeCameraYaw,
+                             float partialTicks,
                              const glm::mat4& projection,
                              const glm::mat4& view) {
 	if (items.empty()) return;
+
+	// MCPE 0.8.1 ItemRenderer::rndFloats[16]
+	static float sRndFloats[16];
+	static bool sRndInited = false;
+	if (!sRndInited) {
+		Random rnd;
+		for (int i = 0; i < 16; ++i) {
+			float ff = rnd.nextFloat();
+			sRndFloats[i] = (ff + ff) - 1.0f;
+		}
+		sRndInited = true;
+	}
 
 	glUseProgram(0);
 	glMatrixMode(GL_PROJECTION);
@@ -1717,76 +1828,77 @@ void renderWorldItemEntities(const std::vector<WorldItemEntity>& items,
 	glEnable(GL_ALPHA_TEST);
 	glAlphaFunc(GL_GREATER, 0.1f);
 
-	auto drawCubeQuad = [](const std::string& tex, float shade,
-	                       float ax, float ay, float az,
-	                       float bx, float by, float bz,
-	                       float cx, float cy, float cz,
-	                       float dx, float dy, float dz,
-	                       float v0, float v1) {
-		if (tex.empty() || !GuiComponent::bindTexture(tex)) return;
-		glColor4f(shade, shade, shade, 1.0f);
-		glBegin(GL_QUADS);
-		glTexCoord2f(0.0f, v1); glVertex3f(ax, ay, az);
-		glTexCoord2f(1.0f, v1); glVertex3f(bx, by, bz);
-		glTexCoord2f(1.0f, v0); glVertex3f(cx, cy, cz);
-		glTexCoord2f(0.0f, v0); glVertex3f(dx, dy, dz);
-		glEnd();
-	};
-
 	for (const auto& e : items) {
 		if (e.item.isNull()) continue;
+
+		float rx = e.prevPos.x + (e.pos.x - e.prevPos.x) * partialTicks;
+		float ry = e.prevPos.y + (e.pos.y - e.prevPos.y) * partialTicks;
+		float rz = e.prevPos.z + (e.pos.z - e.prevPos.z) * partialTicks;
+
+		// MCPE 0.8.1 Entity::getBrightness & Entity::setupLighting (clamp [0.35, 1.0])
+		int lightY = Math::floor((ry - 0.125f) + 0.25f * 0.66f);
 		float itemLight = WorldLighting::sampleWorldBrightness(
-			region, BlockPos(Math::floor(e.pos.x), Math::floor(e.pos.y + 0.25f), Math::floor(e.pos.z)), sunFactor);
-		float bob = std::sin(e.age * 3.0f + e.spinPhase) * 0.07f;
-		float yawDeg = e.age * 70.0f + e.spinPhase * 57.29578f;
+			region, BlockPos(Math::floor(rx), lightY, Math::floor(rz)), sunFactor);
+		if (itemLight > 1.0f) itemLight = 1.0f;
+		else if (itemLight <= 0.35f) itemLight = 0.35f;
+
+		// MCPE 0.8.1 ItemRenderer::render
+		float bobAge = static_cast<float>(e.age) + partialTicks;
+		float hoverStart = e.hoverStart;
+		int count = e.item.getStackSize();
+		int renderCount = 2;
+		if (count > 20) renderCount = 4;
+		else if (count > 5) renderCount = 3;
+		else if (count <= 1) renderCount = 1;
 
 		glPushMatrix();
-		glTranslatef(e.pos.x, e.pos.y + 0.18f + bob, e.pos.z);
-		glRotatef(yawDeg, 0.0f, 1.0f, 0.0f);
+		glTranslatef(rx, ry + (std::sin((bobAge / 10.0f) + hoverStart) * 0.1f + 0.1f), rz);
 
-		BlockRenderInfo blockInfo = getBlockRenderInfo(e.item);
-		if (blockInfo.is3D) {
-			float y0 = -0.5f;
-			float y1 = blockInfo.isSlab ? 0.0f : 0.5f;
-			float vTop = blockInfo.isSlab ? 0.5f : 0.0f;
-
-			glScalef(0.25f, 0.25f, 0.25f);
-			if (blockInfo.isTransparent) {
-				glEnable(GL_BLEND);
-				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-			} else {
-				glDisable(GL_BLEND);
-			}
-
-			// Top (+Y) & Bottom (-Y)
-			drawCubeQuad(blockInfo.topTex, 1.0f * itemLight, -0.5f, y1, 0.5f, 0.5f, y1, 0.5f, 0.5f, y1, -0.5f, -0.5f, y1, -0.5f, 0.0f, 1.0f);
-			drawCubeQuad(blockInfo.topTex, 0.5f * itemLight, -0.5f, y0, -0.5f, 0.5f, y0, -0.5f, 0.5f, y0, 0.5f, -0.5f, y0, 0.5f, 0.0f, 1.0f);
-			// Front (+Z) & Back (-Z)
-			drawCubeQuad(blockInfo.frontTex, 0.8f * itemLight, -0.5f, y0, 0.5f, 0.5f, y0, 0.5f, 0.5f, y1, 0.5f, -0.5f, y1, 0.5f, vTop, 1.0f);
-			drawCubeQuad(blockInfo.frontTex, 0.8f * itemLight, 0.5f, y0, -0.5f, -0.5f, y0, -0.5f, -0.5f, y1, -0.5f, 0.5f, y1, -0.5f, vTop, 1.0f);
-			// Right (+X) & Left (-X)
-			drawCubeQuad(blockInfo.sideTex, 0.65f * itemLight, 0.5f, y0, 0.5f, 0.5f, y0, -0.5f, 0.5f, y1, -0.5f, 0.5f, y1, 0.5f, vTop, 1.0f);
-			drawCubeQuad(blockInfo.sideTex, 0.65f * itemLight, -0.5f, y0, -0.5f, -0.5f, y0, 0.5f, -0.5f, y1, 0.5f, -0.5f, y1, -0.5f, vTop, 1.0f);
-		} else {
-			std::string tex = getItemTexturePath(e.item);
+		if (GuiComponent::isBlock3D(e.item)) {
+			glRotatef(((bobAge / 20.0f) + hoverStart) * 57.296f, 0.0f, 1.0f, 0.0f);
+			float scale = 0.25f;
+			glScalef(scale, scale, scale);
 			glDisable(GL_BLEND);
-			glScalef(0.36f, 0.36f, 0.36f);
-			if (!tex.empty() && GuiComponent::bindTexture(tex)) {
-				glColor4f(itemLight, itemLight, itemLight, 1.0f);
-				glBegin(GL_QUADS);
-				glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, -0.5f, 0.0f);
-				glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, -0.5f, 0.0f);
-				glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, 0.5f, 0.0f);
-				glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, 0.0f);
-				glEnd();
-				if (e.item.getStackSize() > 1) {
-					glBegin(GL_QUADS);
-					glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.46f, -0.46f, -0.05f);
-					glTexCoord2f(1.0f, 1.0f); glVertex3f(0.54f, -0.46f, -0.05f);
-					glTexCoord2f(1.0f, 0.0f); glVertex3f(0.54f, 0.54f, -0.05f);
-					glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.46f, 0.54f, -0.05f);
-					glEnd();
+			float offsetScale = 0.2f / scale;
+			for (int layer = 0; layer < renderCount; ++layer) {
+				glPushMatrix();
+				if (layer > 0) {
+					glTranslatef(offsetScale * sRndFloats[layer * 3 + 0],
+					             offsetScale * sRndFloats[layer * 3 + 1],
+					             offsetScale * sRndFloats[layer * 3 + 2]);
 				}
+				GuiComponent::drawBlock3DModel(e.item, itemLight, false);
+				glPopMatrix();
+			}
+		} else {
+			std::string tex;
+			uint32_t tint = 0xFFFFFFu;
+			GuiComponent::getItemSpritePathAndTint(e.item, tex, tint);
+			glDisable(GL_BLEND);
+			glScalef(0.5f, 0.5f, 0.5f);
+			glRotatef(180.0f - mcpeCameraYaw, 0.0f, 1.0f, 0.0f);
+			GuiTextureInfo info = !tex.empty() ? GuiComponent::loadTexture(tex) : GuiTextureInfo{};
+			if (info.id != 0) {
+				glEnable(GL_TEXTURE_2D);
+				glBindTexture(GL_TEXTURE_2D, info.id);
+				float vMax = (info.width > 0 && info.height > info.width)
+					? (static_cast<float>(info.width) / static_cast<float>(info.height))
+					: 1.0f;
+				float tr = static_cast<float>((tint >> 16) & 0xFF) / 255.0f;
+				float tg = static_cast<float>((tint >> 8) & 0xFF) / 255.0f;
+				float tb = static_cast<float>(tint & 0xFF) / 255.0f;
+				glColor4f(itemLight * tr, itemLight * tg, itemLight * tb, 1.0f);
+				glBegin(GL_QUADS);
+				for (int layer = 0; layer < renderCount; ++layer) {
+					float ox = (layer > 0) ? (sRndFloats[layer * 3 + 0] * 0.3f) : 0.0f;
+					float oy = (layer > 0) ? (sRndFloats[layer * 3 + 1] * 0.3f) : 0.0f;
+					float oz = (layer > 0) ? (sRndFloats[layer * 3 + 2] * 0.3f) : 0.0f;
+					glTexCoord2f(0.0f, vMax); glVertex3f(-0.5f + ox, -0.25f + oy, oz);
+					glTexCoord2f(1.0f, vMax); glVertex3f( 0.5f + ox, -0.25f + oy, oz);
+					glTexCoord2f(1.0f, 0.0f); glVertex3f( 0.5f + ox,  0.75f + oy, oz);
+					glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f + ox,  0.75f + oy, oz);
+				}
+				glEnd();
 			}
 		}
 
@@ -2042,18 +2154,33 @@ void renderClouds(const glm::mat4& projection,
                   const glm::vec3& renderCamPos,
                   const CelestialInfo& sky,
                   int64_t worldTime,
+                  float fracTick,
                   bool fancy) {
 	if (!GuiComponent::bindTexture("textures/environment/clouds.png")) {
 		return;
 	}
 
+	const GLboolean prevTex2D = glIsEnabled(GL_TEXTURE_2D);
+	const GLboolean prevBlend = glIsEnabled(GL_BLEND);
+	const GLboolean prevAlphaTest = glIsEnabled(GL_ALPHA_TEST);
+	const GLboolean prevCullFace = glIsEnabled(GL_CULL_FACE);
+	const GLboolean prevDepthTest = glIsEnabled(GL_DEPTH_TEST);
+	const GLboolean prevFog = glIsEnabled(GL_FOG);
+	GLboolean prevDepthMask = GL_TRUE;
+	glGetBooleanv(GL_DEPTH_WRITEMASK, &prevDepthMask);
+	GLint prevFogMode = GL_LINEAR;
+	glGetIntegerv(GL_FOG_MODE, &prevFogMode);
+	GLfloat prevFogStart = 0.0f, prevFogEnd = 1.0f;
+	GLfloat prevFogColor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+	glGetFloatv(GL_FOG_START, &prevFogStart);
+	glGetFloatv(GL_FOG_END, &prevFogEnd);
+	glGetFloatv(GL_FOG_COLOR, prevFogColor);
+
 	glUseProgram(0);
-	glEnable(GL_TEXTURE_2D);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glEnable(GL_ALPHA_TEST);
-	glAlphaFunc(GL_GREATER, 0.1f);
-	glDisable(GL_CULL_FACE);
+	glDisable(GL_ALPHA_TEST);
+	glEnable(GL_DEPTH_TEST);
 
 	glMatrixMode(GL_PROJECTION);
 	glPushMatrix();
@@ -2063,14 +2190,15 @@ void renderClouds(const glm::mat4& projection,
 	glLoadMatrixf(glm::value_ptr(camRelView));
 
 	const float cloudHeight = 128.0f;
-	const float cloudY = cloudHeight - renderCamPos.y;
-	const float cellSize = 12.0f;
-	const float cloudThick = 4.0f;
-	const float cloudTime = static_cast<float>(worldTime) * 0.03f + static_cast<float>(glfwGetTime()) * 0.25f;
+	const float v7 = (cloudHeight - renderCamPos.y) + 0.33f;
+	const float cellSize = 16.0f;
+	const float invCellSize = 0.0625f;
+	const float cloudThick = 7.0f;
 
 	static bool sCloudMaskLoaded = false;
 	static int sCloudW = 0;
 	static int sCloudH = 0;
+	static std::vector<uint8_t> sCloudRGBA;
 	static std::vector<uint8_t> sCloudMask;
 	if (!sCloudMaskLoaded) {
 		GLint tw = 0, th = 0;
@@ -2079,11 +2207,11 @@ void renderClouds(const glm::mat4& projection,
 		if (tw > 0 && th > 0) {
 			sCloudW = tw;
 			sCloudH = th;
-			std::vector<uint8_t> rgba(static_cast<size_t>(tw) * th * 4);
-			glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+			sCloudRGBA.resize(static_cast<size_t>(tw) * th * 4);
+			glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, sCloudRGBA.data());
 			sCloudMask.resize(static_cast<size_t>(tw) * th);
 			for (size_t i = 0; i < sCloudMask.size(); ++i) {
-				sCloudMask[i] = (rgba[i * 4 + 3] > 127) ? 1 : 0;
+				sCloudMask[i] = (sCloudRGBA[i * 4 + 3] > 9) ? 1 : 0;
 			}
 			sCloudMaskLoaded = true;
 		}
@@ -2092,128 +2220,206 @@ void renderClouds(const glm::mat4& projection,
 	const float scaleW = (sCloudW > 0 ? static_cast<float>(sCloudW) : 256.0f) * cellSize;
 	const float scaleH = (sCloudH > 0 ? static_cast<float>(sCloudH) : 256.0f) * cellSize;
 
-	float cr = std::min(1.0f, 0.90f * sky.sunFactor + 0.12f * sky.skyColor.r);
-	float cg = std::min(1.0f, 0.90f * sky.sunFactor + 0.12f * sky.skyColor.g);
-	float cb = std::min(1.0f, 0.92f * sky.sunFactor + 0.14f * sky.skyColor.b);
+	// Level::getCloudColor (MCPE 0.8.1 Level.cpp:793-809)
+	const float v6 = std::max(0.0f, std::min(1.0f, 2.0f * std::cos(sky.timeOfDay * 6.2831853f) + 0.5f));
+	const float v7c = v6 * 0.9f + 0.1f;
+	const float cloudR = v7c;
+	const float cloudG = v7c;
+	const float cloudB = v6 * 0.85f + 0.15f;
+	const float cloudA = 0.7f;
 
-	glEnable(GL_DEPTH_TEST);
+	const double scrollX = static_cast<double>(renderCamPos.x) + (static_cast<double>(worldTime) + static_cast<double>(fracTick)) * 0.03;
+	const double scrollZ = static_cast<double>(renderCamPos.z);
+
+	const float v17 = std::sqrt(v7 * v7 + 262140.0f);
+	const GLfloat fogColor[4] = { sky.fogColor.r, sky.fogColor.g, sky.fogColor.b, 1.0f };
+	glEnable(GL_FOG);
+	glFogi(GL_FOG_MODE, GL_LINEAR);
+	glFogfv(GL_FOG_COLOR, fogColor);
+	glFogf(GL_FOG_START, 0.0f);
+	glFogf(GL_FOG_END, v17);
 
 	if (!fancy || !sCloudMaskLoaded) {
+		glEnable(GL_TEXTURE_2D);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		glDisable(GL_CULL_FACE);
 		glDepthMask(GL_FALSE);
-		const float extent = 384.0f;
-		float u0 = (renderCamPos.x - extent + cloudTime) / scaleW;
-		float u1 = (renderCamPos.x + extent + cloudTime) / scaleW;
-		float v0 = (renderCamPos.z - extent) / scaleH;
-		float v1 = (renderCamPos.z + extent) / scaleH;
 
-		glColor4f(cr, cg, cb, 0.8f);
+		const float extent = 512.0f;
+		const int gridN = 8;
+		const float step = (extent * 2.0f) / static_cast<float>(gridN);
 		glBegin(GL_QUADS);
-		glTexCoord2f(u0, v0); glVertex3f(-extent, cloudY, -extent);
-		glTexCoord2f(u1, v0); glVertex3f( extent, cloudY, -extent);
-		glTexCoord2f(u1, v1); glVertex3f( extent, cloudY,  extent);
-		glTexCoord2f(u0, v1); glVertex3f(-extent, cloudY,  extent);
-		glEnd();
-	} else {
-		glDepthMask(GL_TRUE);
-		glDisable(GL_ALPHA_TEST);
-		glEnable(GL_CULL_FACE);
-		glCullFace(GL_BACK);
-
-		auto isCloud = [&](int cx, int cz) -> bool {
-			int wx = ((cx % sCloudW) + sCloudW) % sCloudW;
-			int wz = ((cz % sCloudH) + sCloudH) % sCloudH;
-			return sCloudMask[static_cast<size_t>(wz) * sCloudW + wx] != 0;
-		};
-
-		const int radius = 24;
-		double scrollX = static_cast<double>(renderCamPos.x) + static_cast<double>(cloudTime);
-		double scrollZ = static_cast<double>(renderCamPos.z);
-		int baseCellX = static_cast<int>(std::floor(scrollX / cellSize));
-		int baseCellZ = static_cast<int>(std::floor(scrollZ / cellSize));
-		float fracX = static_cast<float>(scrollX - static_cast<double>(baseCellX) * cellSize);
-		float fracZ = static_cast<float>(scrollZ - static_cast<double>(baseCellZ) * cellSize);
-
-		float y0 = cloudY;
-		float y1 = cloudY + cloudThick;
-
-		glBegin(GL_QUADS);
-		for (int gx = -radius; gx < radius; ++gx) {
-			for (int gz = -radius; gz < radius; ++gz) {
-				int cx = baseCellX + gx;
-				int cz = baseCellZ + gz;
-				if (!isCloud(cx, cz)) {
-					continue;
-				}
-
-				float x0 = static_cast<float>(gx) * cellSize - fracX;
-				float x1 = x0 + cellSize;
-				float z0 = static_cast<float>(gz) * cellSize - fracZ;
-				float z1 = z0 + cellSize;
-
-				float u = (static_cast<float>(((cx % sCloudW) + sCloudW) % sCloudW) + 0.5f) / static_cast<float>(sCloudW);
-				float v = (static_cast<float>(((cz % sCloudH) + sCloudH) % sCloudH) + 0.5f) / static_cast<float>(sCloudH);
-
-				// Top face (+Y)
-				glColor4f(cr, cg, cb, 0.85f);
-				glTexCoord2f(u, v); glVertex3f(x0, y1, z0);
-				glTexCoord2f(u, v); glVertex3f(x0, y1, z1);
-				glTexCoord2f(u, v); glVertex3f(x1, y1, z1);
-				glTexCoord2f(u, v); glVertex3f(x1, y1, z0);
-
-				// Bottom face (-Y)
-				glColor4f(cr * 0.7f, cg * 0.7f, cb * 0.7f, 0.85f);
-				glTexCoord2f(u, v); glVertex3f(x0, y0, z0);
-				glTexCoord2f(u, v); glVertex3f(x1, y0, z0);
-				glTexCoord2f(u, v); glVertex3f(x1, y0, z1);
-				glTexCoord2f(u, v); glVertex3f(x0, y0, z1);
-
-				// West face (-X)
-				if (!isCloud(cx - 1, cz)) {
-					glColor4f(cr * 0.9f, cg * 0.9f, cb * 0.9f, 0.85f);
-					glTexCoord2f(u, v); glVertex3f(x0, y0, z0);
-					glTexCoord2f(u, v); glVertex3f(x0, y0, z1);
-					glTexCoord2f(u, v); glVertex3f(x0, y1, z1);
-					glTexCoord2f(u, v); glVertex3f(x0, y1, z0);
-				}
-				// East face (+X)
-				if (!isCloud(cx + 1, cz)) {
-					glColor4f(cr * 0.9f, cg * 0.9f, cb * 0.9f, 0.85f);
-					glTexCoord2f(u, v); glVertex3f(x1, y0, z0);
-					glTexCoord2f(u, v); glVertex3f(x1, y1, z0);
-					glTexCoord2f(u, v); glVertex3f(x1, y1, z1);
-					glTexCoord2f(u, v); glVertex3f(x1, y0, z1);
-				}
-				// North face (-Z)
-				if (!isCloud(cx, cz - 1)) {
-					glColor4f(cr * 0.8f, cg * 0.8f, cb * 0.8f, 0.85f);
-					glTexCoord2f(u, v); glVertex3f(x0, y0, z0);
-					glTexCoord2f(u, v); glVertex3f(x0, y1, z0);
-					glTexCoord2f(u, v); glVertex3f(x1, y1, z0);
-					glTexCoord2f(u, v); glVertex3f(x1, y0, z0);
-				}
-				// South face (+Z)
-				if (!isCloud(cx, cz + 1)) {
-					glColor4f(cr * 0.8f, cg * 0.8f, cb * 0.8f, 0.85f);
-					glTexCoord2f(u, v); glVertex3f(x0, y0, z1);
-					glTexCoord2f(u, v); glVertex3f(x1, y0, z1);
-					glTexCoord2f(u, v); glVertex3f(x1, y1, z1);
-					glTexCoord2f(u, v); glVertex3f(x0, y1, z1);
-				}
+		for (int ix = 0; ix < gridN; ++ix) {
+			for (int iz = 0; iz < gridN; ++iz) {
+				float x0 = -extent + static_cast<float>(ix) * step;
+				float x1 = x0 + step;
+				float z0 = -extent + static_cast<float>(iz) * step;
+				float z1 = z0 + step;
+				float u0 = static_cast<float>((scrollX + x0) / scaleW);
+				float u1 = static_cast<float>((scrollX + x1) / scaleW);
+				float v0 = static_cast<float>((scrollZ + z0) / scaleH);
+				float v1 = static_cast<float>((scrollZ + z1) / scaleH);
+				auto edgeAlpha = [&](float px, float pz) -> float {
+					float d = std::sqrt(px * px + pz * pz);
+					float f = std::max(0.0f, std::min(1.0f, (extent - d) / (extent * 0.5f)));
+					return cloudA * f;
+				};
+				glColor4f(cloudR, cloudG, cloudB, edgeAlpha(x0, z0)); glTexCoord2f(u0, v0); glVertex3f(x0, v7, z0);
+				glColor4f(cloudR, cloudG, cloudB, edgeAlpha(x1, z0)); glTexCoord2f(u1, v0); glVertex3f(x1, v7, z0);
+				glColor4f(cloudR, cloudG, cloudB, edgeAlpha(x1, z1)); glTexCoord2f(u1, v1); glVertex3f(x1, v7, z1);
+				glColor4f(cloudR, cloudG, cloudB, edgeAlpha(x0, z1)); glTexCoord2f(u0, v1); glVertex3f(x0, v7, z1);
 			}
 		}
 		glEnd();
+	} else {
+		glDisable(GL_TEXTURE_2D);
+		glEnable(GL_CULL_FACE);
+		glCullFace(GL_BACK);
+		glDepthMask(GL_TRUE);
+
+		const double scaledX = scrollX * static_cast<double>(invCellSize);
+		const double scaledZ = scrollZ * static_cast<double>(invCellSize);
+		const int baseCellX = static_cast<int>(std::floor(scaledX));
+		const int baseCellZ = static_cast<int>(std::floor(scaledZ));
+		const float fracX = static_cast<float>((scaledX - static_cast<double>(baseCellX)) * static_cast<double>(cellSize));
+		const float fracZ = static_cast<float>((scaledZ - static_cast<double>(baseCellZ)) * static_cast<double>(cellSize));
+
+		struct CloudVertex {
+			float x, y, z;
+			float r, g, b, a;
+		};
+		static bool sCloudMeshValid = false;
+		static int sCachedBaseCellX = 0;
+		static int sCachedBaseCellZ = 0;
+		static float sCachedCloudR = 0.0f;
+		static float sCachedCloudG = 0.0f;
+		static float sCachedCloudB = 0.0f;
+		static std::vector<CloudVertex> sCloudMesh;
+
+		const float colorDiff = std::fabs(cloudR - sCachedCloudR) + std::fabs(cloudG - sCachedCloudG) + std::fabs(cloudB - sCachedCloudB);
+		if (!sCloudMeshValid || baseCellX != sCachedBaseCellX || baseCellZ != sCachedBaseCellZ || colorDiff > 0.06f) {
+			sCloudMesh.clear();
+			auto wrapX = [&](int cx) -> int { return ((cx % sCloudW) + sCloudW) % sCloudW; };
+			auto wrapZ = [&](int cz) -> int { return ((cz % sCloudH) + sCloudH) % sCloudH; };
+			auto isCloud = [&](int cx, int cz) -> bool {
+				return sCloudMask[static_cast<size_t>(wrapZ(cz)) * sCloudW + wrapX(cx)] != 0;
+			};
+
+			auto pushQuad = [&](float x0, float y0, float z0,
+			                    float x1, float y1, float z1,
+			                    float x2, float y2, float z2,
+			                    float x3, float y3, float z3,
+			                    float r, float g, float b, float a) {
+				auto fadeA = [&](float px, float pz) -> float {
+					float d = std::sqrt(px * px + pz * pz);
+					float f = std::max(0.0f, std::min(1.0f, (512.0f - d) / 256.0f));
+					return a * f;
+				};
+				sCloudMesh.push_back({x0, y0, z0, r, g, b, fadeA(x0, z0)});
+				sCloudMesh.push_back({x1, y1, z1, r, g, b, fadeA(x1, z1)});
+				sCloudMesh.push_back({x2, y2, z2, r, g, b, fadeA(x2, z2)});
+				sCloudMesh.push_back({x3, y3, z3, r, g, b, fadeA(x3, z3)});
+			};
+
+			const float y0 = 0.0f;
+			const float y1 = cloudThick;
+
+			for (int gx = -32; gx < 32; ++gx) {
+				for (int gz = -32; gz < 32; ++gz) {
+					const int cx = baseCellX + gx;
+					const int cz = baseCellZ + gz;
+					if (!isCloud(cx, cz)) {
+						continue;
+					}
+
+					const size_t tidx = (static_cast<size_t>(wrapZ(cz)) * sCloudW + wrapX(cx)) * 4;
+					const float tr = static_cast<float>(sCloudRGBA[tidx + 0]) / 255.0f * cloudR;
+					const float tg = static_cast<float>(sCloudRGBA[tidx + 1]) / 255.0f * cloudG;
+					const float tb = static_cast<float>(sCloudRGBA[tidx + 2]) / 255.0f * cloudB;
+					const float ta = static_cast<float>(sCloudRGBA[tidx + 3]) / 255.0f * cloudA;
+
+					const float x0 = static_cast<float>(gx) * cellSize;
+					const float x1 = x0 + cellSize;
+					const float z0 = static_cast<float>(gz) * cellSize;
+					const float z1 = z0 + cellSize;
+
+					// TextureTesselator::_addLighting (f10 = (0, 0.70711, 0.70711), ambient = 0.6):
+					// +Y: 1.0f, -Y: 0.746445f, +/-X: 1.0f, +Z: 1.0f, -Z: 0.746445f
+					// Top face (+Y)
+					pushQuad(x0, y1, z0, x0, y1, z1, x1, y1, z1, x1, y1, z0,
+					         tr * 1.0f, tg * 1.0f, tb * 1.0f, ta);
+
+					// Bottom face (-Y)
+					pushQuad(x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1,
+					         tr * 0.746445f, tg * 0.746445f, tb * 0.746445f, ta);
+
+					// West face (-X)
+					if (!isCloud(cx - 1, cz)) {
+						pushQuad(x0, y0, z0, x0, y0, z1, x0, y1, z1, x0, y1, z0,
+						         tr * 1.0f, tg * 1.0f, tb * 1.0f, ta);
+					}
+					// East face (+X)
+					if (!isCloud(cx + 1, cz)) {
+						pushQuad(x1, y0, z0, x1, y1, z0, x1, y1, z1, x1, y0, z1,
+						         tr * 1.0f, tg * 1.0f, tb * 1.0f, ta);
+					}
+					// North face (-Z)
+					if (!isCloud(cx, cz - 1)) {
+						pushQuad(x0, y0, z0, x0, y1, z0, x1, y1, z0, x1, y0, z0,
+						         tr * 0.746445f, tg * 0.746445f, tb * 0.746445f, ta);
+					}
+					// South face (+Z)
+					if (!isCloud(cx, cz + 1)) {
+						pushQuad(x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1,
+						         tr * 1.0f, tg * 1.0f, tb * 1.0f, ta);
+					}
+				}
+			}
+
+			sCachedBaseCellX = baseCellX;
+			sCachedBaseCellZ = baseCellZ;
+			sCachedCloudR = cloudR;
+			sCachedCloudG = cloudG;
+			sCachedCloudB = cloudB;
+			sCloudMeshValid = true;
+		}
+
+		glPushMatrix();
+		glTranslatef(-fracX, v7, -fracZ);
+		if (!sCloudMesh.empty()) {
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+			glEnableClientState(GL_VERTEX_ARRAY);
+			glEnableClientState(GL_COLOR_ARRAY);
+			glVertexPointer(3, GL_FLOAT, sizeof(CloudVertex), &sCloudMesh[0].x);
+			glColorPointer(4, GL_FLOAT, sizeof(CloudVertex), &sCloudMesh[0].r);
+			glDrawArrays(GL_QUADS, 0, static_cast<GLsizei>(sCloudMesh.size()));
+			glDisableClientState(GL_COLOR_ARRAY);
+			glDisableClientState(GL_VERTEX_ARRAY);
+		}
+		glPopMatrix();
 	}
 
-	glDisable(GL_ALPHA_TEST);
-	glDisable(GL_BLEND);
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 	glMatrixMode(GL_MODELVIEW);
 	glPopMatrix();
 	glMatrixMode(GL_PROJECTION);
 	glPopMatrix();
 	glMatrixMode(GL_MODELVIEW);
-	glDepthMask(GL_TRUE);
-	glEnable(GL_DEPTH_TEST);
+
+	if (prevFog) glEnable(GL_FOG); else glDisable(GL_FOG);
+	glFogi(GL_FOG_MODE, prevFogMode);
+	glFogf(GL_FOG_START, prevFogStart);
+	glFogf(GL_FOG_END, prevFogEnd);
+	glFogfv(GL_FOG_COLOR, prevFogColor);
+
+	if (prevTex2D) glEnable(GL_TEXTURE_2D); else glDisable(GL_TEXTURE_2D);
+	if (prevBlend) glEnable(GL_BLEND); else glDisable(GL_BLEND);
+	if (prevAlphaTest) glEnable(GL_ALPHA_TEST); else glDisable(GL_ALPHA_TEST);
+	if (prevCullFace) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+	if (prevDepthTest) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+	glDepthMask(prevDepthMask);
 }
 
 GLuint createWhiteTexture() {
@@ -2319,9 +2525,10 @@ const std::vector<ExtrudedEdgeQuad>& getExtrudedEdges(const std::string& texPath
 
 	std::vector<ExtrudedEdgeQuad> edges;
 	std::string fullPath = GuiComponent::resolveAssetPath(texPath);
-	int w = 0, h = 0, ch = 0;
+	int w = 0, fullH = 0, ch = 0;
 	stbi_set_flip_vertically_on_load(0);
-	unsigned char* data = stbi_load(fullPath.c_str(), &w, &h, &ch, 4);
+	unsigned char* data = stbi_load(fullPath.c_str(), &w, &fullH, &ch, 4);
+	int h = (w > 0 && fullH > w) ? w : fullH;
 	if (data && w > 0 && h > 0 && w <= 64 && h <= 64) {
 		auto isOpaque = [&](int px, int py) -> bool {
 			if (px < 0 || py < 0 || px >= w || py >= h) return false;
@@ -2330,10 +2537,11 @@ const std::vector<ExtrudedEdgeQuad>& getExtrudedEdges(const std::string& texPath
 		const float halfZ = 0.03125f;
 		const float fw = static_cast<float>(w);
 		const float fh = static_cast<float>(h);
+		const float fFullH = static_cast<float>(fullH);
 		for (int py = 0; py < h; ++py) {
 			float y1 = 0.5f - static_cast<float>(py) / fh;
 			float y0 = 0.5f - static_cast<float>(py + 1) / fh;
-			float v = (static_cast<float>(py) + 0.5f) / fh;
+			float v = (static_cast<float>(py) + 0.5f) / fFullH;
 			for (int px = 0; px < w; ++px) {
 				if (!isOpaque(px, py)) continue;
 				float x0 = -0.5f + static_cast<float>(px) / fw;
@@ -2360,30 +2568,41 @@ const std::vector<ExtrudedEdgeQuad>& getExtrudedEdges(const std::string& texPath
 	return res.first->second;
 }
 
-void drawTexturedSprite3D(const std::string& tex, float shade = 1.0f) {
-	if (tex.empty() || !GuiComponent::bindTexture(tex)) return;
+void drawTexturedSprite3D(const std::string& tex, float shade = 1.0f, uint32_t rgbColor = 0xFFFFFFu) {
+	if (tex.empty()) return;
+	GuiTextureInfo info = GuiComponent::loadTexture(tex);
+	if (info.id == 0) return;
+	glEnable(GL_TEXTURE_2D);
+	glBindTexture(GL_TEXTURE_2D, info.id);
+
+	float vMax = (info.width > 0 && info.height > info.width)
+		? (static_cast<float>(info.width) / static_cast<float>(info.height))
+		: 1.0f;
+	float tr = static_cast<float>((rgbColor >> 16) & 0xFF) / 255.0f;
+	float tg = static_cast<float>((rgbColor >> 8) & 0xFF) / 255.0f;
+	float tb = static_cast<float>(rgbColor & 0xFF) / 255.0f;
 	const float halfZ = 0.03125f;
 
 	glBegin(GL_QUADS);
 	// Front face (+Z)
-	glColor4f(shade, shade, shade, 1.0f);
-	glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, -0.5f, halfZ);
-	glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, -0.5f, halfZ);
+	glColor4f(shade * tr, shade * tg, shade * tb, 1.0f);
+	glTexCoord2f(0.0f, vMax); glVertex3f(-0.5f, -0.5f, halfZ);
+	glTexCoord2f(1.0f, vMax); glVertex3f(0.5f, -0.5f, halfZ);
 	glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, 0.5f, halfZ);
 	glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, halfZ);
 
 	// Back face (-Z)
-	glColor4f(shade * 0.85f, shade * 0.85f, shade * 0.85f, 1.0f);
-	glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f, -0.5f, -halfZ);
+	glColor4f(shade * 0.85f * tr, shade * 0.85f * tg, shade * 0.85f * tb, 1.0f);
+	glTexCoord2f(0.0f, vMax); glVertex3f(-0.5f, -0.5f, -halfZ);
 	glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, -halfZ);
 	glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, 0.5f, -halfZ);
-	glTexCoord2f(1.0f, 1.0f); glVertex3f(0.5f, -0.5f, -halfZ);
+	glTexCoord2f(1.0f, vMax); glVertex3f(0.5f, -0.5f, -halfZ);
 
 	// Extruded pixel edges
 	const auto& edges = getExtrudedEdges(tex);
 	for (const auto& q : edges) {
 		float c = shade * q.shade;
-		glColor4f(c, c, c, 1.0f);
+		glColor4f(c * tr, c * tg, c * tb, 1.0f);
 		glTexCoord2f(q.u, q.v);
 		if (q.axis == 0) {
 			glVertex3f(q.x0, q.y0, q.z0);
@@ -2509,11 +2728,12 @@ void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspe
 			glRotatef(335.0f, 0.0f, 0.0f, 1.0f);
 		}
 
-		BlockRenderInfo blockInfo = getBlockRenderInfo(held);
-		if (blockInfo.is3D) {
-			drawTexturedCube3D(blockInfo, lightShade);
+		if (GuiComponent::isBlock3D(held)) {
+			GuiComponent::drawBlock3DModel(held, lightShade, false);
 		} else {
-			std::string tex = getItemTexturePath(held);
+			std::string tex;
+			uint32_t tint = 0xFFFFFFu;
+			GuiComponent::getItemSpritePathAndTint(held, tex, tint);
 			if (isPullingBow) {
 				if (gBowPullTime >= 0.85f) tex = "textures/items/bow_pulling_2.png";
 				else if (gBowPullTime >= 0.45f) tex = "textures/items/bow_pulling_1.png";
@@ -2537,7 +2757,7 @@ void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspe
 			glTranslatef(8.0f, 0.5f, 8.0f);
 			glScalef(16.0f, 16.0f, -16.0f);
 			glRotatef(90.0f, 1.0f, 0.0f, 0.0f);
-			drawTexturedSprite3D(tex, lightShade);
+			drawTexturedSprite3D(tex, lightShade, tint);
 		}
 	}
 
@@ -2950,14 +3170,13 @@ void renderWorldSteve3D(const Camera& c,
 		steveModel.rightArmModel.translateTo(kPxScale);
 		glTranslatef(-0.0625f, 0.4375f, 0.0625f);
 
-		BlockRenderInfo blockInfo = getBlockRenderInfo(held);
-		if (blockInfo.is3D) {
+		if (GuiComponent::isBlock3D(held)) {
 			// HumanoidMobRenderer.cpp L48-56: 3D Tile / Block
 			glTranslatef(0.0f, 0.1875f, -0.3125f);
 			glRotatef(200.0f, 1.0f, 0.0f, 0.0f);
 			glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
 			glScalef(0.375f, 0.375f, 0.375f);
-			drawTexturedCube3D(blockInfo, lightShade);
+			GuiComponent::drawBlock3DModel(held, lightShade, false);
 		} else {
 			if (Item::mBow && held.getItem() == Item::mBow) {
 				// HumanoidMobRenderer.cpp L58-63 + L80-85: Item::bow
@@ -2983,7 +3202,9 @@ void renderWorldSteve3D(const Camera& c,
 				glRotatef(20.0f, 0.0f, 0.0f, 1.0f);
 			}
 
-			std::string tex = getItemTexturePath(held);
+			std::string tex;
+			uint32_t tint = 0xFFFFFFu;
+			GuiComponent::getItemSpritePathAndTint(held, tex, tint);
 			if (isUsingBow && gBowPullTime > 0.0f) {
 				if (gBowPullTime >= 0.85f) tex = "textures/items/bow_pulling_2.png";
 				else if (gBowPullTime >= 0.45f) tex = "textures/items/bow_pulling_1.png";
@@ -3004,7 +3225,7 @@ void renderWorldSteve3D(const Camera& c,
 			glTranslatef(8.0f, 0.5f, 8.0f);
 			glScalef(16.0f, 16.0f, -16.0f);
 			glRotatef(90.0f, 1.0f, 0.0f, 0.0f);
-			drawTexturedSprite3D(tex, lightShade);
+			drawTexturedSprite3D(tex, lightShade, tint);
 		}
 		glPopMatrix();
 	}
@@ -3166,6 +3387,7 @@ void renderThreadStuff()
 	Recipes::getInstance()->init();
 
 	std::vector<WorldItemEntity> worldItems;
+	float worldItemTickAccum = 0.0f;
 	MobManager mobManager;
 	float lastLightmapSun = -1.0f;
 	bool hasInitialSpawn = false;
@@ -3235,6 +3457,7 @@ void renderThreadStuff()
 		loadedChunkSet.clear();
 		litChunks.clear();
 		worldItems.clear();
+		worldItemTickAccum = 0.0f;
 		mobManager.clear();
 		lastLightmapSun = -1.0f;
 		isMining = false;
@@ -3295,6 +3518,7 @@ void renderThreadStuff()
 
 
 
+	std::string lastSavedOptions = gGuiOptions.serialize();
 	while (!glfwWindowShouldClose(window)) 
 	{
 		lastFrame = currentFrame;
@@ -4364,7 +4588,7 @@ void renderThreadStuff()
 				float clampedDt = std::min(std::max(deltaTime, 0.0001f), 0.1f);
 				tickFurnaces(gGuiContext, clampedDt);
 				bool allowPickup = (gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen);
-				updateWorldItemEntities(worldItems, deltaTime, c.getRegion(), c.mBB, gGuiContext, allowPickup);
+				updateWorldItemEntities(worldItems, worldItemTickAccum, deltaTime, c.getRegion(), c.mBB, gGuiContext, allowPickup);
 				SoundEngine::setMasterVolume(gGuiOptions.soundVolume);
 				ParticleSystem::tick(clampedDt, &c.getRegion());
 				{
@@ -4679,7 +4903,8 @@ void renderThreadStuff()
 
 			ChunkPos camChunkPos(Math::floor(c.mPos.x / 16.0f), Math::floor(c.mPos.z / 16.0f));
 			int renderDistance = std::max(1, std::min(3, 1 + gGuiOptions.renderDistance));
-			int lightDistance = renderDistance + 1;
+			int activeRenderDist = gGuiContext.loadingChunks ? std::min(renderDistance, 2) : renderDistance;
+			int lightDistance = activeRenderDist + 1;
 			int loadDistance = lightDistance + 2;
 			ChunkSource& chunkSrc = commandContext.dim->getChunkSource();
 
@@ -4698,24 +4923,49 @@ void renderThreadStuff()
 				}
 			};
 
-			for (int x = -loadDistance; x <= loadDistance; x++) {
-				for (int z = -loadDistance; z <= loadDistance; z++) {
-					ChunkPos cp(camChunkPos.x + x, camChunkPos.z + z);
-					auto* lc = chunkSrc.getExistingChunk(cp);
-					if (!lc) {
-						lc = chunkSrc.getOrLoadChunk(cp, ChunkSource::LoadMode::Deferred);
+			auto buildSpiralOffsets = [](int radius) {
+				struct OffsetEntry { int dx, dz, d2; };
+				std::vector<OffsetEntry> out;
+				out.reserve((2 * radius + 1) * (2 * radius + 1));
+				for (int x = -radius; x <= radius; ++x) {
+					for (int z = -radius; z <= radius; ++z) {
+						out.push_back({x, z, x * x + z * z});
 					}
-					bool inRenderRange = (std::abs(x) <= renderDistance && std::abs(z) <= renderDistance);
+				}
+				std::sort(out.begin(), out.end(), [](const OffsetEntry& a, const OffsetEntry& b) {
+					return a.d2 < b.d2;
+				});
+				return out;
+			};
 
-					if (lc && lc->getState() == ChunkState::Loaded) {
-						if (loadedChunkSet.insert(cp).second) {
-							queueChunkAndNeighbors(cp);
-						} else if (inRenderRange && (rc.find(cp) == rc.end() || litChunks.find(cp) == litChunks.end())) {
-							needsReRendering2.insert(cp);
-						}
-					} else if (std::abs(x) <= lightDistance + 1 && std::abs(z) <= lightDistance + 1) {
-						needsReRendering.insert(cp);
+			const double frameBudgetMs = gGuiContext.loadingChunks ? 20.0 : 10.0;
+			auto tChunkPhase0 = std::chrono::high_resolution_clock::now();
+			auto chunkElapsedMs = [&]() {
+				return std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - tChunkPhase0).count();
+			};
+
+			int loadedThisFrame = 0;
+			auto loadOffsets = buildSpiralOffsets(loadDistance);
+			for (const auto& off : loadOffsets) {
+				ChunkPos cp(camChunkPos.x + off.dx, camChunkPos.z + off.dz);
+				auto* lc = chunkSrc.getExistingChunk(cp);
+				if (!lc || lc->getState() == ChunkState::Unloaded) {
+					if (loadedThisFrame > 0 && chunkElapsedMs() >= frameBudgetMs) {
+						break;
 					}
+					lc = chunkSrc.getOrLoadChunk(cp, ChunkSource::LoadMode::Deferred);
+					++loadedThisFrame;
+				}
+				bool inRenderRange = (std::abs(off.dx) <= activeRenderDist && std::abs(off.dz) <= activeRenderDist);
+
+				if (lc && lc->getState() == ChunkState::Loaded) {
+					if (loadedChunkSet.insert(cp).second) {
+						queueChunkAndNeighbors(cp);
+					} else if (inRenderRange && (rc.find(cp) == rc.end() || litChunks.find(cp) == litChunks.end())) {
+						needsReRendering2.insert(cp);
+					}
+				} else if (std::abs(off.dx) <= lightDistance + 1 && std::abs(off.dz) <= lightDistance + 1) {
+					needsReRendering.insert(cp);
 				}
 			}
 
@@ -4730,42 +4980,47 @@ void renderThreadStuff()
 					++it;
 				}
 			}
+			// Decoupled Lighting Pass over [-lightDistance..lightDistance]^2 (nearest-first, budgeted)
+			int litThisFrame = 0;
+			auto lightOffsets = buildSpiralOffsets(lightDistance);
+			for (const auto& off : lightOffsets) {
+				if ((loadedThisFrame > 0 || litThisFrame > 0) && chunkElapsedMs() >= frameBudgetMs) {
+					break;
+				}
+				ChunkPos pos(camChunkPos.x + off.dx, camChunkPos.z + off.dz);
+				if (litChunks.find(pos) != litChunks.end()) continue;
+				if (!areChunkNeighborsLoaded(chunkSrc, pos)) continue;
 
-			// Decoupled Lighting Pass over [-lightDistance..lightDistance]^2 ([-4..4]^2)
-			for (int x = -lightDistance; x <= lightDistance; ++x) {
-				for (int z = -lightDistance; z <= lightDistance; ++z) {
-					ChunkPos pos(camChunkPos.x + x, camChunkPos.z + z);
-					if (litChunks.find(pos) != litChunks.end()) continue;
-					if (!areChunkNeighborsLoaded(chunkSrc, pos)) continue;
+				litChunks.insert(pos);
+				std::unordered_set<ChunkPos> touchedChunks;
+				WorldLighting::propagateChunkLighting(c.getRegion(), pos, &touchedChunks);
+				++litThisFrame;
 
-					litChunks.insert(pos);
-					std::unordered_set<ChunkPos> touchedChunks;
-					WorldLighting::propagateChunkLighting(c.getRegion(), pos, &touchedChunks);
+				touchedChunks.insert(pos);
+				touchedChunks.insert(ChunkPos(pos.x + 1, pos.z));
+				touchedChunks.insert(ChunkPos(pos.x - 1, pos.z));
+				touchedChunks.insert(ChunkPos(pos.x, pos.z + 1));
+				touchedChunks.insert(ChunkPos(pos.x, pos.z - 1));
 
-					touchedChunks.insert(pos);
-					touchedChunks.insert(ChunkPos(pos.x + 1, pos.z));
-					touchedChunks.insert(ChunkPos(pos.x - 1, pos.z));
-					touchedChunks.insert(ChunkPos(pos.x, pos.z + 1));
-					touchedChunks.insert(ChunkPos(pos.x, pos.z - 1));
-
-					for (const ChunkPos& np : touchedChunks) {
-						bool npInRender = (std::abs(np.x - camChunkPos.x) <= renderDistance &&
-						                   std::abs(np.z - camChunkPos.z) <= renderDistance);
-						auto rcIt = rc.find(np);
-						if (rcIt != rc.end()) {
-							for (int s = 0; s < 8; ++s) {
-								if (rcIt->second[s]) {
-									rcIt->second[s]->setDirty(Tick(0), true);
-								}
+				for (const ChunkPos& np : touchedChunks) {
+					bool npInRender = (std::abs(np.x - camChunkPos.x) <= renderDistance &&
+					                   std::abs(np.z - camChunkPos.z) <= renderDistance);
+					auto rcIt = rc.find(np);
+					if (rcIt != rc.end()) {
+						for (int s = 0; s < 8; ++s) {
+							if (rcIt->second[s]) {
+								rcIt->second[s]->setDirty(Tick(0), true);
 							}
-							needsReRendering2.insert(np);
-						} else if (npInRender) {
-							needsReRendering2.insert(np);
 						}
+						needsReRendering2.insert(np);
+					} else if (npInRender) {
+						needsReRendering2.insert(np);
 					}
 				}
 			}
-
+			// Meshing Pass (nearest-first, budgeted like MCPE 0.8.1 LevelRenderer::updateDirtyChunks)
+			std::vector<std::pair<int, ChunkPos>> meshCandidates;
+			meshCandidates.reserve(needsReRendering2.size());
 			for (auto it = needsReRendering2.begin(); it != needsReRendering2.end(); ) {
 				ChunkPos pos = *it;
 				if (!areChunkNeighborsLoaded(chunkSrc, pos)) {
@@ -4786,10 +5041,24 @@ void renderThreadStuff()
 						}
 					}
 				}
-				if (!readyToMesh) {
-					++it;
-					continue;
+				if (readyToMesh) {
+					int dx = pos.x - camChunkPos.x;
+					int dz = pos.z - camChunkPos.z;
+					meshCandidates.push_back({dx * dx + dz * dz, pos});
 				}
+				++it;
+			}
+			std::sort(meshCandidates.begin(), meshCandidates.end(),
+			          [](const std::pair<int, ChunkPos>& a, const std::pair<int, ChunkPos>& b) {
+				          return a.first < b.first;
+			          });
+
+			int meshedChunksThisFrame = 0;
+			for (const auto& cand : meshCandidates) {
+				if ((loadedThisFrame + litThisFrame + meshedChunksThisFrame) > 0 && chunkElapsedMs() >= frameBudgetMs) {
+					break;
+				}
+				const ChunkPos& pos = cand.second;
 				for (int i = 0; i < 8; i++) {
 					BlockPos cp(pos.x * 16, i * 16, pos.z * 16);
 					if (rc[pos][i] == nullptr)
@@ -4800,10 +5069,11 @@ void renderThreadStuff()
 					RenderChunk* chunkPart = rc[pos][i];
 					chunkPart->setDirty(Tick(0), true);
 					chunkPart->startRebuild(std::move(chunkBuilder));
-					chunkPart->rebuild(gGuiOptions.fancyGraphics, gGuiOptions.fancyGraphics);
+					chunkPart->rebuild(gGuiOptions.fancyGraphics, true);
 					chunkBuilder = chunkPart->endRebuild(Vec3(renderCamPos.x, renderCamPos.y, renderCamPos.z));
 				}
-				it = needsReRendering2.erase(it);
+				++meshedChunksThisFrame;
+				needsReRendering2.erase(pos);
 			}
 
 			// Bind lightmap (TEXTURE_1) & neutral foliage fallback (TEXTURE_2)
@@ -4834,9 +5104,9 @@ void renderThreadStuff()
 				(*sl)->myShader->setVector2("FOG_CONTROL", fogCtrl);
 			}
 
-			if (!camUnderwater && !camUnderlava) {
-				if (gGuiOptions.fancySkies) renderSkyAndCelestials(projection, camRelView, skyInfo, gGuiContext.worldTime);
-				renderClouds(projection, camRelView, renderCamPos, skyInfo, gGuiContext.worldTime, gGuiOptions.fancyGraphics);
+			if (!camUnderwater && !camUnderlava && gGuiOptions.fancySkies) {
+				renderSkyAndCelestials(projection, camRelView, skyInfo, gGuiContext.worldTime);
+				renderClouds(projection, camRelView, renderCamPos, skyInfo, gGuiContext.worldTime, gGuiContext.worldTimeSubTick, gGuiOptions.fancyGraphics);
 			}
 
 			// Rebind lightmap/atlas after sky rendering
@@ -4954,7 +5224,7 @@ void renderThreadStuff()
 
 			glActiveTexture(GL_TEXTURE0);
 
-			renderWorldItemEntities(worldItems, c.getRegion(), skyInfo.sunFactor, projection, view);
+			renderWorldItemEntities(worldItems, c.getRegion(), skyInfo.sunFactor, static_cast<float>(c.yaw) - 90.0f, worldItemTickAccum / 0.05f, projection, view);
 
 			mobManager.render(c.getRegion(), projection, view, skyInfo.sunFactor);
 
@@ -5014,13 +5284,15 @@ void renderThreadStuff()
 			if (commandContext.dim != nullptr) {
 				ChunkPos camCp(Math::floor(c.mPos.x / 16.0f), Math::floor(c.mPos.z / 16.0f));
 				ChunkSource& chunkSrc = commandContext.dim->getChunkSource();
-				const int rDist = 3;
+				const int renderDistOpt = std::max(1, std::min(3, 1 + gGuiOptions.renderDistance));
+				const int rDist = std::min(renderDistOpt, 2);
 				const int lDist = rDist + 1;
 				int loadedCount = 0;
 				int litCount = 0;
 				int meshedCount = 0;
-				const int totalLightChunks = (2 * lDist + 1) * (2 * lDist + 1); // 81
-				const int totalRenderChunks = (2 * rDist + 1) * (2 * rDist + 1); // 49
+				int innerPending = 0;
+				const int totalLightChunks = (2 * lDist + 1) * (2 * lDist + 1);
+				const int totalRenderChunks = (2 * rDist + 1) * (2 * rDist + 1);
 
 				for (int dx = -lDist; dx <= lDist; ++dx) {
 					for (int dz = -lDist; dz <= lDist; ++dz) {
@@ -5032,15 +5304,20 @@ void renderThreadStuff()
 						if (litChunks.find(cp) != litChunks.end()) {
 							++litCount;
 						}
-						if (std::abs(dx) <= rDist && std::abs(dz) <= rDist && rc.find(cp) != rc.end()) {
-							++meshedCount;
+						if (std::abs(dx) <= rDist && std::abs(dz) <= rDist) {
+							if (rc.find(cp) != rc.end()) {
+								++meshedCount;
+							}
+							if (needsReRendering2.find(cp) != needsReRendering2.end()) {
+								++innerPending;
+							}
 						}
 					}
 				}
 
 				bool allLoadedAndLit = (loadedCount == totalLightChunks && litCount == totalLightChunks);
 				bool allMeshed = (meshedCount == totalRenderChunks);
-				if (allLoadedAndLit && allMeshed && needsReRendering2.empty()) {
+				if (allLoadedAndLit && allMeshed && innerPending == 0) {
 					gGuiContext.loadingProgress = 1.0f;
 				} else {
 					float loadFrac = static_cast<float>(loadedCount) / static_cast<float>(totalLightChunks);
@@ -5098,7 +5375,12 @@ void renderThreadStuff()
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();
+		{
+			std::string cur = gGuiOptions.serialize();
+			if (cur != lastSavedOptions) { gGuiOptions.save("options.txt"); lastSavedOptions = cur; }
+		}
 	}
+	gGuiOptions.save("options.txt");
 	saveActiveWorld();
 	closeActiveWorld();
 	SoundEngine::shutdown();

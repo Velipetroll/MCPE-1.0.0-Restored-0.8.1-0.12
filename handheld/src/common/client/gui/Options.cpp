@@ -1,6 +1,7 @@
 #include "Options.h"
 #include <algorithm>
 #include <sstream>
+#include <fstream>
 
 float Options::getProgressValue(Option opt) const {
 	switch (opt) {
@@ -131,4 +132,56 @@ std::string Options::getMessage(Option opt) const {
 		return std::string("Animated Water: ") + (animateTextures ? "ON" : "OFF");
 	}
 	return "";
+}
+
+std::string Options::serialize() const {
+	std::ostringstream o;
+	o << "music=" << musicVolume << "\nsound=" << soundVolume << "\nsensitivity=" << sensitivity
+	  << "\ninvertMouse=" << invertMouse << "\nrenderDistance=" << renderDistance
+	  << "\nviewBobbing=" << viewBobbing << "\nfancyGraphics=" << fancyGraphics
+	  << "\nguiScale=" << guiScale << "\ndifficulty=" << difficulty << "\nhideGUI=" << hideGUI
+	  << "\nthirdPerson=" << thirdPerson << "\nuseTouchUI=" << useTouchUI << "\nusername=" << username
+	  << "\nserverVisible=" << serverVisible << "\nleftHanded=" << leftHanded
+	  << "\nuseTouchJoypad=" << useTouchJoypad << "\ndpadSize=" << dpadSize
+	  << "\ndestroyVibration=" << destroyVibration << "\nfancySkies=" << fancySkies
+	  << "\nanimateTextures=" << animateTextures << "\n";
+	return o.str();
+}
+
+void Options::save(const std::string& path) const {
+	std::ofstream f(path, std::ios::trunc);
+	if (f) f << serialize();
+}
+
+void Options::load(const std::string& path) {
+	std::ifstream f(path);
+	if (!f) return;
+	std::string line;
+	while (std::getline(f, line)) {
+		size_t eq = line.find('=');
+		if (eq == std::string::npos) continue;
+		std::string k = line.substr(0, eq), v = line.substr(eq + 1);
+		try {
+			if (k == "music") musicVolume = std::stof(v);
+			else if (k == "sound") soundVolume = std::stof(v);
+			else if (k == "sensitivity") sensitivity = std::stof(v);
+			else if (k == "invertMouse") invertMouse = std::stoi(v) != 0;
+			else if (k == "renderDistance") renderDistance = std::max(0, std::min(3, std::stoi(v)));
+			else if (k == "viewBobbing") viewBobbing = std::stoi(v) != 0;
+			else if (k == "fancyGraphics") fancyGraphics = std::stoi(v) != 0;
+			else if (k == "guiScale") guiScale = std::stoi(v);
+			else if (k == "difficulty") difficulty = std::max(0, std::min(3, std::stoi(v)));
+			else if (k == "hideGUI") hideGUI = std::stoi(v) != 0;
+			else if (k == "thirdPerson") thirdPerson = std::stoi(v) != 0;
+			else if (k == "useTouchUI") useTouchUI = std::stoi(v) != 0;
+			else if (k == "username") username = v;
+			else if (k == "serverVisible") serverVisible = std::stoi(v) != 0;
+			else if (k == "leftHanded") leftHanded = std::stoi(v) != 0;
+			else if (k == "useTouchJoypad") useTouchJoypad = std::stoi(v) != 0;
+			else if (k == "dpadSize") dpadSize = std::stof(v);
+			else if (k == "destroyVibration") destroyVibration = std::stoi(v) != 0;
+			else if (k == "fancySkies") fancySkies = std::stoi(v) != 0;
+			else if (k == "animateTextures") animateTextures = std::stoi(v) != 0;
+		} catch (...) {}
+	}
 }

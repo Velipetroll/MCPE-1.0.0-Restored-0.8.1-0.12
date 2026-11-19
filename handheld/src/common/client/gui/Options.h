@@ -57,4 +57,8 @@ public:
 	void toggle(Option opt);
 
 	std::string getMessage(Option opt) const;
+
+	std::string serialize() const;
+	void load(const std::string& path);
+	void save(const std::string& path) const;
 };
