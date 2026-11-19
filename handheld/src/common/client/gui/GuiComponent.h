@@ -4,6 +4,7 @@
 #include <string>
 
 class Font;
+class ItemInstance;
 
 struct GuiTextureInfo {
 	unsigned int id = 0;
@@ -25,6 +26,7 @@ public:
 
 	void drawString(Font* font, const std::string& text, int x, int y, uint32_t color) const;
 	void drawCenteredString(Font* font, const std::string& text, int x, int y, uint32_t color) const;
+	void drawItemInSlot(Font* font, const ItemInstance& item, int x, int y, bool drawCount = true) const;
 
 	static bool bindTexture(const std::string& relativePath);
 	static GuiTextureInfo loadTexture(const std::string& relativePath);

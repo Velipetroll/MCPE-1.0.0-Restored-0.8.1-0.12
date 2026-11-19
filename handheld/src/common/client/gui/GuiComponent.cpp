@@ -1,5 +1,7 @@
 #include "GuiComponent.h"
 #include "Font.h"
+#include "world/crafting/CraftingRecipes.h"
+#include "world/item/ItemInstance.h"
 
 #include <glad/glad.h>
 #include "stb_image.h"
@@ -161,5 +163,87 @@ void GuiComponent::drawCenteredString(Font* font, const std::string& text, int x
 	if (font) {
 		int w = font->width(text);
 		font->drawShadow(text, x - w / 2, y, color);
+	}
+}
+
+void GuiComponent::drawItemInSlot(Font* font, const ItemInstance& item, int x, int y, bool drawCount) const {
+	if (item.isNull()) return;
+
+	BlockRenderInfo blockInfo = getBlockRenderInfo(item);
+	if (blockInfo.is3D) {
+		float y0 = -0.5f;
+		float y1 = blockInfo.isSlab ? 0.0f : 0.5f;
+		float vTop = blockInfo.isSlab ? 0.5f : 0.0f;
+
+		GLboolean wasDepthTest = glIsEnabled(GL_DEPTH_TEST);
+		GLboolean wasCullFace = glIsEnabled(GL_CULL_FACE);
+		GLboolean wasBlend = glIsEnabled(GL_BLEND);
+
+		glEnable(GL_DEPTH_TEST);
+		glDepthMask(blockInfo.isTransparent ? GL_FALSE : GL_TRUE);
+		glClear(GL_DEPTH_BUFFER_BIT);
+		glDisable(GL_CULL_FACE);
+		glEnable(GL_TEXTURE_2D);
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+		glMatrixMode(GL_MODELVIEW);
+		glPushMatrix();
+		glTranslatef(static_cast<float>(x) + 8.0f, static_cast<float>(y) + 8.0f, 100.0f);
+		glScalef(9.5f, -9.5f, 9.5f);
+		glRotatef(30.0f, 1.0f, 0.0f, 0.0f);
+		glRotatef(-45.0f, 0.0f, 1.0f, 0.0f);
+
+		auto drawQuad = [&](const std::string& tex, float shade,
+		                    float ax, float ay, float az,
+		                    float bx, float by, float bz,
+		                    float cx, float cy, float cz,
+		                    float dx, float dy, float dz,
+		                    float v0, float v1) {
+			if (!tex.empty() && bindTexture(tex)) {
+				glColor4f(shade, shade, shade, 1.0f);
+				glBegin(GL_QUADS);
+				glTexCoord2f(0.0f, v1); glVertex3f(ax, ay, az);
+				glTexCoord2f(1.0f, v1); glVertex3f(bx, by, bz);
+				glTexCoord2f(1.0f, v0); glVertex3f(cx, cy, cz);
+				glTexCoord2f(0.0f, v0); glVertex3f(dx, dy, dz);
+				glEnd();
+			}
+		};
+
+		if (blockInfo.isTransparent) {
+			// Back faces first for transparent blocks like glass
+			drawQuad(blockInfo.topTex, 0.5f, -0.5f, y0, -0.5f, 0.5f, y0, -0.5f, 0.5f, y0, 0.5f, -0.5f, y0, 0.5f, 0.0f, 1.0f);
+			drawQuad(blockInfo.frontTex, 0.6f, 0.5f, y0, -0.5f, -0.5f, y0, -0.5f, -0.5f, y1, -0.5f, 0.5f, y1, -0.5f, vTop, 1.0f);
+			drawQuad(blockInfo.sideTex, 0.6f, -0.5f, y0, -0.5f, -0.5f, y0, 0.5f, -0.5f, y1, 0.5f, -0.5f, y1, -0.5f, vTop, 1.0f);
+		}
+
+		// Top (+Y)
+		drawQuad(blockInfo.topTex, 1.0f, -0.5f, y1, 0.5f, 0.5f, y1, 0.5f, 0.5f, y1, -0.5f, -0.5f, y1, -0.5f, 0.0f, 1.0f);
+		// Front (+Z, faces front-left)
+		drawQuad(blockInfo.frontTex, 0.8f, -0.5f, y0, 0.5f, 0.5f, y0, 0.5f, 0.5f, y1, 0.5f, -0.5f, y1, 0.5f, vTop, 1.0f);
+		// Side (+X, faces front-right)
+		drawQuad(blockInfo.sideTex, 0.6f, 0.5f, y0, 0.5f, 0.5f, y0, -0.5f, 0.5f, y1, -0.5f, 0.5f, y1, 0.5f, vTop, 1.0f);
+
+		glPopMatrix();
+
+		if (!wasDepthTest) glDisable(GL_DEPTH_TEST);
+		glDepthMask(GL_FALSE);
+		if (wasCullFace) glEnable(GL_CULL_FACE);
+		if (!wasBlend) glDisable(GL_BLEND);
+		glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+	} else {
+		std::string tex = getItemTexturePath(item);
+		if (!tex.empty() && bindTexture(tex)) {
+			blitScaled(x, y, 16, 16, 0, 0, 16, 16, 16, 16);
+		} else {
+			fill(x + 1, y + 1, x + 15, y + 15, 0xFF7FA87F);
+			drawRect(x + 1, y + 1, x + 15, y + 15, 0xFF2B402B);
+		}
+	}
+
+	if (drawCount && font && item.getStackSize() > 1) {
+		std::string cnt = std::to_string(static_cast<int>(item.getStackSize()));
+		font->drawShadow(cnt, x + 17 - font->width(cnt), y + 9, 0xFFFFFFFF);
 	}
 }

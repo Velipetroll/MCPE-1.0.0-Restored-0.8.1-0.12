@@ -5,7 +5,6 @@
 #include "PauseScreen.h"
 #include "Options.h"
 #include "Font.h"
-#include "world/crafting/CraftingRecipes.h"
 #include <glad/glad.h>
 
 void Gui::render(float partialTicks, int guiW, int guiH, Options* options, Font* font, GuiContext* ctx) {
@@ -103,18 +102,8 @@ void Gui::renderHotbar(int guiW, int guiH, Font* font, GuiContext* ctx) {
 	if (ctx) {
 		for (int i = 0; i < 9; ++i) {
 			const ItemInstance& item = ctx->inventorySlots[static_cast<size_t>(i)];
-			if (item.isNull()) continue;
-			int ix = x + 3 + i * 20;
-			int iy = y + 3;
-			std::string tex = getItemTexturePath(item);
-			if (!tex.empty() && bindTexture(tex)) {
-				blitScaled(ix, iy, 16, 16, 0, 0, 16, 16, 16, 16);
-			} else {
-				fill(ix, iy, ix + 16, iy + 16, 0xFF88AA88);
-			}
-			if (font && item.getStackSize() > 1) {
-				std::string cnt = std::to_string(static_cast<int>(item.getStackSize()));
-				font->drawShadow(cnt, ix + 17 - font->width(cnt), iy + 9, 0xFFFFFFFF);
+			if (!item.isNull()) {
+				drawItemInSlot(font, item, x + 3 + i * 20, y + 3);
 			}
 		}
 	}

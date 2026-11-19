@@ -55,18 +55,7 @@ namespace {
 	}
 
 	void drawPcItemStack(const GuiComponent* s, Font* font, const ItemInstance& item, int ix, int iy) {
-		if (item.isNull()) return;
-		std::string tex = getItemTexturePath(item);
-		if (!tex.empty() && s->bindTexture(tex)) {
-			s->blitScaled(ix, iy, 16, 16, 0, 0, 16, 16, 16, 16);
-		} else {
-			s->fill(ix + 1, iy + 1, ix + 15, iy + 15, 0xFF7FA87F);
-			s->drawRect(ix + 1, iy + 1, ix + 15, iy + 15, 0xFF2B402B);
-		}
-		if (font && item.getStackSize() > 1) {
-			std::string cnt = std::to_string(static_cast<int>(item.getStackSize()));
-			font->drawShadow(cnt, ix + 17 - font->width(cnt), iy + 9, 0xFFFFFFFF);
-		}
+		if (s) s->drawItemInSlot(font, item, ix, iy, true);
 	}
 
 	void drawPcTooltip(const Screen* s, Font* font, const std::string& text, int mouseX, int mouseY, int screenW, int screenH) {
@@ -470,13 +459,7 @@ namespace {
 			for (size_t i = 0; i < count; ++i) {
 				int ix = static_cast<int>(v11 + v9 * static_cast<float>(i & 1));
 				int iy = static_cast<int>(v12 + v10 * static_cast<float>(i >> 1));
-				std::string tex = getItemTexturePath(mRecipe->reqs[i].item);
-				if (!tex.empty() && bindTexture(tex)) {
-					blitScaled(ix, iy, 16, 16, 0, 0, 16, 16, 16, 16);
-				} else {
-					fill(ix, iy, ix + 16, iy + 16, 0xFF7FA87F);
-					drawRect(ix, iy, ix + 16, iy + 16, 0xFF373737);
-				}
+				drawItemInSlot(nullptr, mRecipe->reqs[i].item, ix, iy, false);
 			}
 
 			if (ctx && ctx->font) {
@@ -604,7 +587,11 @@ void InventoryScreen::setupPositions() {
 
 void InventoryScreen::render(int mouseX, int mouseY, float partialTicks) {
 	if (isTouchUI(context)) {
-		renderDirtBackground();
+		static NinePatchLayer bgLayer("textures/gui/spritesheet.png", IntRectangle{ 0, 0, 16, 16 }, 4, 4, 4, 4, 256, 256);
+		static NinePatchLayer paneFrame("textures/gui/spritesheet.png", IntRectangle{ 28, 42, 4, 4 }, 1, 1, 1, 1, 256, 256);
+		paneFrame.setExcluded(16);
+
+		bgLayer.draw(0, 0, width, height);
 		Screen::render(mouseX, mouseY, partialTicks);
 
 		const int totalSlots = 27;
@@ -617,11 +604,14 @@ void InventoryScreen::render(int mouseX, int mouseY, float partialTicks) {
 			mScrollY = std::max(0, std::min(maxScroll, mScrollY + dy));
 		}
 
+		fill(mPaneX, mPaneY, mPaneX + mPaneW, mPaneY + mPaneH, 0xFF333333);
+
 		int scale = context ? context->guiScale : 2;
 		int winH = context ? context->windowHeight : (height * scale);
 		glEnable(GL_SCISSOR_TEST);
 		glScissor(mPaneX * scale, winH - (mPaneY + mPaneH) * scale, mPaneW * scale, mPaneH * scale);
 
+		bool hasSlotTex = bindTexture("textures/gui/gui.png");
 		for (int i = 0; i < totalSlots; ++i) {
 			int invIdx = 9 + i;
 			int col = i % mPaneCols;
@@ -629,20 +619,23 @@ void InventoryScreen::render(int mouseX, int mouseY, float partialTicks) {
 			int sx = mPaneX + col * 32;
 			int sy = mPaneY + row * 32 - mScrollY;
 			bool sel = (invIdx == mSelectedItem);
-			bool hov = (mouseX >= sx && mouseX < sx + 32 && mouseY >= sy && mouseY < sy + 32);
-			fill(sx + 2, sy + 2, sx + 30, sy + 30, sel ? 0xAA6B7EBF : (hov ? 0x80555555 : 0x802B2B2B));
-			drawRect(sx + 2, sy + 2, sx + 30, sy + 30, sel ? 0xFFFFFFFF : 0xFF555555);
+			if (hasSlotTex) {
+				blitScaled(sx, sy, 32, 32, 200, 46, 16, 16, 256, 256);
+			} else {
+				fill(sx + 2, sy + 2, sx + 30, sy + 30, 0xFF2B2B2B);
+				drawRect(sx + 2, sy + 2, sx + 30, sy + 30, 0xFF555555);
+			}
+			if (sel) {
+				drawRect(sx + 1, sy + 1, sx + 31, sy + 31, 0xFFFFFFFF);
+			}
 			if (context && !context->inventorySlots[static_cast<size_t>(invIdx)].isNull()) {
 				drawPcItemStack(this, font, context->inventorySlots[static_cast<size_t>(invIdx)], sx + 8, sy + 8);
+				hasSlotTex = bindTexture("textures/gui/gui.png");
 			}
 		}
 		glDisable(GL_SCISSOR_TEST);
 
-		if (bindTexture("textures/gui/itemframe.png")) {
-			blit(0, mPaneY - 6, 0, 0, width, mPaneH + 10, 215, 256);
-		} else {
-			drawRect(mPaneX - 1, mPaneY - 1, mPaneX + mPaneW + 1, mPaneY + mPaneH + 1, 0xFF1A1A1A);
-		}
+		paneFrame.draw(mPaneX - 1, mPaneY - 1, mPaneW + 2, mPaneH + 2);
 
 		drawHotbarOverlay(this, font, context, width, height);
 		return;
@@ -885,20 +878,29 @@ void ArmorScreen::render(int mouseX, int mouseY, float partialTicks) {
 		mScrollY = std::max(0, std::min(maxScroll, mScrollY + dy));
 	}
 
+	fill(mPaneX, mPaneY, mPaneX + mPaneW, mPaneY + mPaneH, 0xFF333333);
+
 	int scale = context ? context->guiScale : 2;
 	int winH = context ? context->windowHeight : (height * scale);
 	glEnable(GL_SCISSOR_TEST);
 	glScissor(mPaneX * scale, winH - (mPaneY + mPaneH) * scale, mPaneW * scale, mPaneH * scale);
-	for (int i = 0; i < totalArmorItems; ++i) {
+	int drawSlots = std::max(totalArmorItems, cols * std::max(1, (mPaneH + 31) / 32));
+	bool hasSlotTex = bindTexture("textures/gui/gui.png");
+	for (int i = 0; i < drawSlots; ++i) {
 		int c = i % cols;
 		int r = i / cols;
 		int sx = mPaneX + c * 32;
 		int sy = mPaneY + r * 32 - mScrollY;
-		fill(sx + 2, sy + 2, sx + 30, sy + 30, 0x80303030);
-		drawRect(sx + 2, sy + 2, sx + 30, sy + 30, 0xFF555555);
-		if (context) {
+		if (hasSlotTex) {
+			blitScaled(sx, sy, 32, 32, 200, 46, 16, 16, 256, 256);
+		} else {
+			fill(sx + 2, sy + 2, sx + 30, sy + 30, 0x80303030);
+			drawRect(sx + 2, sy + 2, sx + 30, sy + 30, 0xFF555555);
+		}
+		if (context && i < totalArmorItems) {
 			const ItemInstance& armorItem = context->inventorySlots[static_cast<size_t>(mArmorInvIndices[static_cast<size_t>(i)])];
 			drawPcItemStack(this, font, armorItem, sx + 8, sy + 8);
+			hasSlotTex = bindTexture("textures/gui/gui.png");
 		}
 	}
 	glDisable(GL_SCISSOR_TEST);

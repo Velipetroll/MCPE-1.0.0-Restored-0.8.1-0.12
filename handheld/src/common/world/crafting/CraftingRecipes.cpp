@@ -507,6 +507,58 @@ std::string getItemTexturePath(const ItemInstance& item) {
 	return "";
 }
 
+BlockRenderInfo getBlockRenderInfo(const ItemInstance& item) {
+	BlockRenderInfo info;
+	if (item.isNull()) return info;
+	int id = item.getId();
+	if (id <= 0 || id >= 256) return info;
+
+	// Flat 2D blocks in inventory
+	if ((Block::mTorch && id == Block::mTorch->getId()) ||
+	    (Block::mGlassPane && id == Block::mGlassPane->getId())) {
+		return info;
+	}
+
+	info.is3D = true;
+	std::string baseTex = getItemTexturePath(item);
+	info.topTex = baseTex;
+	info.frontTex = baseTex;
+	info.sideTex = baseTex;
+
+	if (Block::mLog && id == Block::mLog->getId()) {
+		info.topTex = "textures/blocks/log_oak_top.png";
+		info.frontTex = "textures/blocks/log_oak.png";
+		info.sideTex = "textures/blocks/log_oak.png";
+	} else if (Block::mWorkBench && id == Block::mWorkBench->getId()) {
+		info.topTex = "textures/blocks/crafting_table_top.png";
+		info.frontTex = "textures/blocks/crafting_table_front.png";
+		info.sideTex = "textures/blocks/crafting_table_side.png";
+	} else if (Block::mFurnace && id == Block::mFurnace->getId()) {
+		info.topTex = "textures/blocks/furnace_top.png";
+		info.frontTex = "textures/blocks/furnace_front_off.png";
+		info.sideTex = "textures/blocks/furnace_side.png";
+	} else if (Block::mSandStone && id == Block::mSandStone->getId()) {
+		info.topTex = "textures/blocks/sandstone_top.png";
+		info.frontTex = "textures/blocks/sandstone_normal.png";
+		info.sideTex = "textures/blocks/sandstone_normal.png";
+	} else if (Block::mStonecutterBench && id == Block::mStonecutterBench->getId()) {
+		info.topTex = "textures/blocks/stonecutter_top.png";
+		info.frontTex = "textures/blocks/stonecutter_side.png";
+		info.sideTex = "textures/blocks/stonecutter_other_side.png";
+	} else if (Block::mStoneSlab && id == Block::mStoneSlab->getId()) {
+		info.isSlab = true;
+		info.topTex = "textures/blocks/stone_slab_top.png";
+		info.frontTex = "textures/blocks/stone_slab_side.png";
+		info.sideTex = "textures/blocks/stone_slab_side.png";
+	} else if (Block::mWoodenSlab && id == Block::mWoodenSlab->getId()) {
+		info.isSlab = true;
+	} else if (Block::mGlass && id == Block::mGlass->getId()) {
+		info.isTransparent = true;
+	}
+
+	return info;
+}
+
 int getArmorSlotForItem(const ItemInstance& item) {
 	if (item.isNull()) return -1;
 	int id = item.getId();

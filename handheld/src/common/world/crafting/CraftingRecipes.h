@@ -106,7 +106,17 @@ private:
 	std::vector<std::unique_ptr<CraftingRecipe>> mRecipes;
 };
 
+struct BlockRenderInfo {
+	bool is3D = false;
+	bool isSlab = false;
+	bool isTransparent = false;
+	std::string topTex;
+	std::string frontTex;
+	std::string sideTex;
+};
+
 std::string getItemDisplayName(const ItemInstance& item);
 std::string getItemDescription(const ItemInstance& item);
 std::string getItemTexturePath(const ItemInstance& item);
+BlockRenderInfo getBlockRenderInfo(const ItemInstance& item);
 int getArmorSlotForItem(const ItemInstance& item);
