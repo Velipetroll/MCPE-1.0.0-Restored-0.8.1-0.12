@@ -130,7 +130,15 @@ bool loadWorldMetadata(const std::string& worldDir, WorldMetadata& outMeta) {
 		outMeta.seed = root["seed"].asInt64();
 	}
 	if (root.isMember("gameMode") && root["gameMode"].isString()) {
-		outMeta.isCreative = (root["gameMode"].asString() == "creative");
+		std::string gm = root["gameMode"].asString();
+		std::transform(gm.begin(), gm.end(), gm.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+		if (gm == "creative") {
+			outMeta.isCreative = true;
+		} else if (gm == "survival") {
+			outMeta.isCreative = false;
+		} else if (root.isMember("isCreative")) {
+			outMeta.isCreative = root["isCreative"].asBool();
+		}
 	} else if (root.isMember("isCreative")) {
 		outMeta.isCreative = root["isCreative"].asBool();
 	}

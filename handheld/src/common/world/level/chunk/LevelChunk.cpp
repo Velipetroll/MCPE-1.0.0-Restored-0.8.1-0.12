@@ -1486,7 +1486,7 @@ void LevelChunk::deserializeSubChunk(uint8_t idx, IDataInput& stream) {
 	
 	//finally replace the chunk at idx
 	mSubChunks[idx] = make_unique<SubChunk>(stream);
-	mDirtyTickCounters[enum_cast(LevelChunkDataField::_count) + idx] = &mSubChunks.back()->mDirtyTicksCounter;
+	mDirtyTickCounters[enum_cast(LevelChunkDataField::_count) + idx] = &mSubChunks[idx]->mDirtyTicksCounter;
 }
 
 void LevelChunk::deserializeFinalization(IDataInput& stream) {

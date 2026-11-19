@@ -228,7 +228,15 @@ namespace {
 		}
 
 		// Register items that are commented out in Item::registerItems()
+		ensureItem(Item::mFlintAndSteel, "flint_and_steel", 3, 1);
+		ensureItem(Item::mBow, "bow", 5, 1);
 		ensureItem(Item::mArrow, "arrow", 6);
+		ensureItem(Item::mSign, "sign", 67, 16);
+		ensureItem(Item::mDoor_wood, "door_wood", 68);
+		ensureItem(Item::mBucket, "bucket", 69, 16);
+		ensureItem(Item::mMinecart, "minecart", 72, 1);
+		ensureItem(Item::mSaddle, "saddle", 73, 1);
+		ensureItem(Item::mDoor_iron, "door_iron", 74);
 		ensureItem(Item::mCoal, "coal", 7);
 		ensureItem(Item::mDiamond, "diamond", 8);
 		ensureItem(Item::mIronIngot, "iron_ingot", 9);
@@ -239,21 +247,43 @@ namespace {
 		ensureItem(Item::mSulphur, "gunpowder", 33);
 		ensureItem(Item::mWheat, "wheat", 40);
 		ensureItem(Item::mFlint, "flint", 62);
+		ensureItem(Item::mPainting, "painting", 65);
 		ensureItem(Item::mRedStone, "redstone", 75);
+		ensureItem(Item::mSnowBall, "snowball", 76, 16);
+		ensureItem(Item::mBoat, "boat", 77, 1);
 		ensureItem(Item::mLeather, "leather", 78);
 		ensureItem(Item::mBrick, "brick", 80);
 		ensureItem(Item::mClay, "clay_ball", 81);
+		ensureItem(Item::mReeds, "reeds", 82);
 		ensureItem(Item::mPaper, "paper", 83);
 		ensureItem(Item::mBook, "book", 84);
+		ensureItem(Item::mSlimeBall, "slime_ball", 85);
+		ensureItem(Item::mEgg, "egg", 88, 16);
+		ensureItem(Item::mCompass, "compass", 89);
+		ensureItem(Item::mFishingRod, "fishing_rod", 90, 1);
+		ensureItem(Item::mClock, "clock", 91);
 		ensureItem(Item::mYellowDust, "glowstone_dust", 92);
 		ensureItem(Item::mDye_powder, "dye", 95);
 		ensureItem(Item::mBone, "bone", 96, 64, true, false);
 		ensureItem(Item::mSugar, "sugar", 97);
+		ensureItem(Item::mCake, "cake", 98, 1);
 		ensureItem(Item::mBed, "bed", 99, 1);
 		ensureItem(Item::mShears, "shears", 103, 1)->setMaxDamage(238);
+		ensureItem(Item::mMobPlacer, "spawn_egg", 127);
 		ensureItem(Item::mEmerald, "emerald", 132);
 		ensureItem(Item::mNetherbrick, "netherbrick", 149);
 		ensureItem(Item::mNetherQuartz, "quartz", 150);
+		ensureItem(Item::mDoor_spruce, "spruce_door", 171);
+		ensureItem(Item::mDoor_birch, "birch_door", 172);
+		ensureItem(Item::mDoor_jungle, "jungle_door", 173);
+		ensureItem(Item::mDoor_acacia, "acacia_door", 174);
+		ensureItem(Item::mDoor_darkoak, "dark_oak_door", 175);
+
+		ensureItem(Item::mHoe_wood, "wooden_hoe", 34, 1, true, false)->setMaxDamage(59);
+		ensureItem(Item::mHoe_stone, "stone_hoe", 35, 1, true, false)->setMaxDamage(131);
+		ensureItem(Item::mHoe_iron, "iron_hoe", 36, 1, true, false)->setMaxDamage(250);
+		ensureItem(Item::mHoe_diamond, "diamond_hoe", 37, 1, true, false)->setMaxDamage(1561);
+		ensureItem(Item::mHoe_gold, "golden_hoe", 38, 1, true, false)->setMaxDamage(32);
 
 		ensureItem(Item::mShovel_iron, "iron_shovel", 0, 1, true, false)->setMaxDamage(250);
 		ensureItem(Item::mPickAxe_iron, "iron_pickaxe", 1, 1, true, false)->setMaxDamage(250);
@@ -552,12 +582,99 @@ namespace {
 			regBlock(Block::mStonecutterBench, "Stonecutter", "textures/blocks/stonecutter_top.png");
 			regBlock(Block::mBrick, "Bricks", "textures/blocks/brick.png");
 			regBlock(Block::mBed, "Bed", "textures/items/bed.png");
+			regBlock(Block::mTrapdoor, "Oak Trapdoor", "textures/blocks/trapdoor.png");
+			regBlock(Block::mIronTrapdoor, "Iron Trapdoor", "textures/blocks/iron_trapdoor.png");
+			regBlock(Block::mFence, "Oak Fence", "textures/blocks/planks_oak.png");
+			regBlock(Block::mNetherFence, "Nether Brick Fence", "textures/blocks/nether_brick.png");
+			regBlock(Block::mSpuceFenceGate, "Spruce Fence Gate", "textures/blocks/planks_spruce.png");
+			regBlock(Block::mBirchFenceGate, "Birch Fence Gate", "textures/blocks/planks_birch.png");
+			regBlock(Block::mJungleFenceGate, "Jungle Fence Gate", "textures/blocks/planks_jungle.png");
+			regBlock(Block::mAcaciaFenceGate, "Acacia Fence Gate", "textures/blocks/planks_acacia.png");
+			regBlock(Block::mDarkOakFenceGate, "Dark Oak Fence Gate", "textures/blocks/planks_big_oak.png");
+			regBlock(Block::mIronFence, "Iron Bars", "textures/blocks/iron_bars.png");
+			regBlock(Block::mLadder, "Ladder", "textures/blocks/ladder.png");
+			regBlock(Block::mRail, "Rail", "textures/blocks/rail_normal.png");
+			regBlock(Block::mGoldenRail, "Powered Rail", "textures/blocks/rail_golden.png");
+			regBlock(Block::mDetectorRail, "Detector Rail", "textures/blocks/rail_detector.png");
+			regBlock(Block::mActivatorRail, "Activator Rail", "textures/blocks/rail_activator.png");
+			regBlock(Block::mGoldBlock, "Block of Gold", "textures/blocks/gold_block.png");
+			regBlock(Block::mIronBlock, "Block of Iron", "textures/blocks/iron_block.png");
+			regBlock(Block::mDiamondBlock, "Block of Diamond", "textures/blocks/diamond_block.png");
+			regBlock(Block::mEmeraldBlock, "Block of Emerald", "textures/blocks/emerald_block.png");
+			regBlock(Block::mRedstoneBlock, "Block of Redstone", "textures/blocks/redstone_block.png");
+			regBlock(Block::mQuartzBlock, "Block of Quartz", "textures/blocks/quartz_block_side.png");
+			regBlock(Block::mNetherBrick, "Nether Brick", "textures/blocks/nether_brick.png");
+			regBlock(Block::mWeb, "Cobweb", "textures/blocks/web.png");
+			regBlock(Block::mDeadBush, "Dead Bush", "textures/blocks/deadbush.png");
+			regBlock(Block::mBrownMushroom, "Brown Mushroom", "textures/blocks/mushroom_brown.png");
+			regBlock(Block::mRedMushroom, "Red Mushroom", "textures/blocks/mushroom_red.png");
+			regBlock(Block::mLitPumpkin, "Jack o'Lantern", "textures/blocks/pumpkin_face_on.png");
+			regBlock(Block::mTopSnow, "Snow", "textures/blocks/snow.png");
+			regBlock(Block::mPackedIce, "Packed Ice", "textures/blocks/ice_packed.png");
+			regBlock(Block::mMycelium, "Mycelium", "textures/blocks/mycelium_top.png");
+			regBlock(Block::mPodzol, "Podzol", "textures/blocks/dirt_podzol_top.png");
+			regBlock(Block::mHayBlock, "Hay Bale", "textures/blocks/hay_block_side.png");
+			regBlock(Block::mWoolCarpet, "Carpet", "textures/blocks/wool_colored_white.png");
+			regBlock(Block::mStainedClay, "Stained Clay", "textures/blocks/hardened_clay.png");
+			regBlock(Block::mRedSandstone, "Red Sandstone", "textures/blocks/red_sandstone_normal.png");
+			regBlock(Block::mPrismarine, "Prismarine", "textures/blocks/prismarine_rough.png");
+			regBlock(Block::mSeaLantern, "Sea Lantern", "textures/blocks/sea_lantern.png");
+			regBlock(Block::mEndStone, "End Stone", "textures/blocks/end_stone.png");
+			regBlock(Block::mEndBrick, "End Stone Bricks", "textures/blocks/end_bricks.png");
+			regBlock(Block::mPurpurBlock, "Purpur Block", "textures/blocks/purpur_block.png");
+			regBlock(Block::mVine, "Vines", "textures/blocks/vine_carried.png");
+			regBlock(Block::mWaterlily, "Lily Pad", "textures/blocks/waterlily.png");
+			regBlock(Block::mAnvil, "Anvil", "textures/blocks/anvil_base.png");
+			regBlock(Block::mTrappedChest, "Trapped Chest", "textures/blocks/chest_front.png");
+			regBlock(Block::mOakStairs, "Oak Wood Stairs", "textures/blocks/planks_oak.png");
+			regBlock(Block::mSpruceStairs, "Spruce Wood Stairs", "textures/blocks/planks_spruce.png");
+			regBlock(Block::mBirchStairs, "Birch Wood Stairs", "textures/blocks/planks_birch.png");
+			regBlock(Block::mJungleStairs, "Jungle Wood Stairs", "textures/blocks/planks_jungle.png");
+			regBlock(Block::mAcaciaStairs, "Acacia Wood Stairs", "textures/blocks/planks_acacia.png");
+			regBlock(Block::mDarkOakStairs, "Dark Oak Wood Stairs", "textures/blocks/planks_big_oak.png");
+			regBlock(Block::mStoneStairs, "Cobblestone Stairs", "textures/blocks/cobblestone.png");
+			regBlock(Block::mBrickStairs, "Brick Stairs", "textures/blocks/brick.png");
+			regBlock(Block::mStoneBrickStairs, "Stone Brick Stairs", "textures/blocks/stonebrick.png");
+			regBlock(Block::mSandstoneStairs, "Sandstone Stairs", "textures/blocks/sandstone_normal.png");
+			regBlock(Block::mRedSandstoneStairs, "Red Sandstone Stairs", "textures/blocks/red_sandstone_normal.png");
+			regBlock(Block::mNetherBrickStairs, "Nether Brick Stairs", "textures/blocks/nether_brick.png");
+			regBlock(Block::mQuartzStairs, "Quartz Stairs", "textures/blocks/quartz_block_side.png");
+			regBlock(Block::mLitRedStoneTorch, "Redstone Torch", "textures/blocks/redstone_torch_on.png");
 
 			// Materials & misc items
 			regItem(Item::mArrow, "Arrow", "textures/items/arrow.png");
 			regItem(Item::mBed, "Bed", "textures/items/bed.png");
 			regItem(Item::mStick, "Stick", "textures/items/stick.png");
 			regItem(Item::mBowl, "Bowl", "textures/items/bowl.png");
+			regItem(Item::mBow, "Bow", "textures/items/bow_standby.png");
+			regItem(Item::mFlintAndSteel, "Flint and Steel", "textures/items/flint_and_steel.png");
+			regItem(Item::mDoor_wood, "Oak Door", "textures/items/door_wood.png");
+			regItem(Item::mDoor_spruce, "Spruce Door", "textures/items/door_spruce.png");
+			regItem(Item::mDoor_birch, "Birch Door", "textures/items/door_birch.png");
+			regItem(Item::mDoor_jungle, "Jungle Door", "textures/items/door_jungle.png");
+			regItem(Item::mDoor_acacia, "Acacia Door", "textures/items/door_acacia.png");
+			regItem(Item::mDoor_darkoak, "Dark Oak Door", "textures/items/door_dark_oak.png");
+			regItem(Item::mDoor_iron, "Iron Door", "textures/items/door_iron.png");
+			regItem(Item::mSign, "Sign", "textures/items/sign.png");
+			regItem(Item::mPainting, "Painting", "textures/items/painting.png");
+			regItem(Item::mBucket, "Bucket", "textures/items/bucket_empty.png");
+			regItem(Item::mMinecart, "Minecart", "textures/items/minecart_normal.png");
+			regItem(Item::mBoat, "Boat", "textures/items/boat.png");
+			regItem(Item::mClock, "Clock", "textures/items/clock_item.png");
+			regItem(Item::mCompass, "Compass", "textures/items/compass_item.png");
+			regItem(Item::mSnowBall, "Snowball", "textures/items/snowball.png");
+			regItem(Item::mEgg, "Egg", "textures/items/egg.png");
+			regItem(Item::mCake, "Cake", "textures/items/cake.png");
+			regItem(Item::mReeds, "Sugar Canes", "textures/items/reeds.png");
+			regItem(Item::mSlimeBall, "Slimeball", "textures/items/slimeball.png");
+			regItem(Item::mMobPlacer, "Spawn Egg", "textures/items/spawn_egg.png");
+			regItem(Item::mHoe_wood, "Wooden Hoe", "textures/items/wood_hoe.png");
+			regItem(Item::mHoe_stone, "Stone Hoe", "textures/items/stone_hoe.png");
+			regItem(Item::mHoe_iron, "Iron Hoe", "textures/items/iron_hoe.png");
+			regItem(Item::mHoe_diamond, "Diamond Hoe", "textures/items/diamond_hoe.png");
+			regItem(Item::mHoe_gold, "Golden Hoe", "textures/items/gold_hoe.png");
+			regItem(Item::mFishingRod, "Fishing Rod", "textures/items/fishing_rod_uncast.png");
+			regBlock(Block::mFenceGateOak, "Oak Fence Gate", "textures/blocks/planks_oak.png");
 			regItem(Item::mCoal, "Coal", "textures/items/coal.png");
 			regItem(Item::mIronIngot, "Iron Ingot", "textures/items/iron_ingot.png");
 			regItem(Item::mGoldIngot, "Gold Ingot", "textures/items/gold_ingot.png");
@@ -675,11 +792,52 @@ namespace {
 std::string getItemDisplayName(const ItemInstance& item) {
 	if (item.isNull()) return "";
 	int id = item.getId();
-	if (Item::mCoal && id == Item::mCoal->getId() && item.getAuxValue() == 1) {
+	short aux = item.getAuxValue();
+	if (Item::mCoal && id == Item::mCoal->getId() && aux == 1) {
 		return "Charcoal";
 	}
-	if (Item::mDye_powder && id == Item::mDye_powder->getId() && item.getAuxValue() == 4) {
-		return "Lapis Lazuli";
+	if (Item::mDye_powder && id == Item::mDye_powder->getId()) {
+		static const char* dyeNames[16] = {
+			"Ink Sac", "Rose Red", "Cactus Green", "Cocoa Beans",
+			"Lapis Lazuli", "Purple Dye", "Cyan Dye", "Light Gray Dye",
+			"Gray Dye", "Pink Dye", "Lime Dye", "Dandelion Yellow",
+			"Light Blue Dye", "Magenta Dye", "Orange Dye", "Bone Meal"
+		};
+		if (aux >= 0 && aux < 16) return dyeNames[aux];
+	}
+	if (Item::mBucket && id == Item::mBucket->getId()) {
+		if (aux == 1) return "Milk Bucket";
+		if (Block::mFlowingWater && aux == Block::mFlowingWater->mID) return "Water Bucket";
+		if (Block::mFlowingLava && aux == Block::mFlowingLava->mID) return "Lava Bucket";
+		return "Bucket";
+	}
+	if (Item::mMobPlacer && id == Item::mMobPlacer->getId()) {
+		switch (aux) {
+			case 10: return "Spawn Chicken";
+			case 11: return "Spawn Cow";
+			case 12: return "Spawn Pig";
+			case 13: return "Spawn Sheep";
+			case 32: return "Spawn Zombie";
+			case 33: return "Spawn Creeper";
+			case 34: return "Spawn Skeleton";
+			case 35: return "Spawn Spider";
+			default: return "Spawn Egg";
+		}
+	}
+	if (Block::mWool && id == Block::mWool->getId()) {
+		static const char* woolColors[16] = {
+			"White Wool", "Orange Wool", "Magenta Wool", "Light Blue Wool",
+			"Yellow Wool", "Lime Wool", "Pink Wool", "Gray Wool",
+			"Light Gray Wool", "Cyan Wool", "Purple Wool", "Blue Wool",
+			"Brown Wool", "Green Wool", "Red Wool", "Black Wool"
+		};
+		if (aux >= 0 && aux < 16) return woolColors[aux];
+	}
+	if (Block::mWoodPlanks && id == Block::mWoodPlanks->getId()) {
+		static const char* plankNames[6] = {
+			"Oak Planks", "Spruce Planks", "Birch Planks", "Jungle Planks", "Acacia Planks", "Dark Oak Planks"
+		};
+		if (aux >= 0 && aux < 6) return plankNames[aux];
 	}
 	const auto& map = getItemVisualMap();
 	auto it = map.find(id);
@@ -717,11 +875,81 @@ std::string getItemDescription(const ItemInstance& item) {
 std::string getItemTexturePath(const ItemInstance& item) {
 	if (item.isNull()) return "";
 	int id = item.getId();
-	if (Item::mCoal && id == Item::mCoal->getId() && item.getAuxValue() == 1) {
+	short aux = item.getAuxValue();
+	if (Item::mCoal && id == Item::mCoal->getId() && aux == 1) {
 		return "textures/items/charcoal.png";
 	}
-	if (Item::mDye_powder && id == Item::mDye_powder->getId() && item.getAuxValue() == 4) {
-		return "textures/items/dye_powder_blue.png";
+	if (Item::mDye_powder && id == Item::mDye_powder->getId()) {
+		static const char* dyeTex[16] = {
+			"textures/items/dye_powder_black.png", "textures/items/dye_powder_red.png",
+			"textures/items/dye_powder_green.png", "textures/items/dye_powder_brown.png",
+			"textures/items/dye_powder_blue.png", "textures/items/dye_powder_purple.png",
+			"textures/items/dye_powder_cyan.png", "textures/items/dye_powder_silver.png",
+			"textures/items/dye_powder_gray.png", "textures/items/dye_powder_pink.png",
+			"textures/items/dye_powder_lime.png", "textures/items/dye_powder_yellow.png",
+			"textures/items/dye_powder_light_blue.png", "textures/items/dye_powder_magenta.png",
+			"textures/items/dye_powder_orange.png", "textures/items/dye_powder_white.png"
+		};
+		if (aux >= 0 && aux < 16) return dyeTex[aux];
+	}
+	if (Item::mBucket && id == Item::mBucket->getId()) {
+		if (aux == 1) return "textures/items/bucket_milk.png";
+		if (Block::mFlowingWater && aux == Block::mFlowingWater->mID) return "textures/items/bucket_water.png";
+		if (Block::mFlowingLava && aux == Block::mFlowingLava->mID) return "textures/items/bucket_lava.png";
+		return "textures/items/bucket_empty.png";
+	}
+	if (Item::mMobPlacer && id == Item::mMobPlacer->getId()) {
+		switch (aux) {
+			case 10: return "textures/items/egg_chicken.png";
+			case 11: return "textures/items/egg_cow.png";
+			case 12: return "textures/items/egg_pig.png";
+			case 13: return "textures/items/egg_sheep.png";
+			case 32: return "textures/items/egg_zombie.png";
+			case 33: return "textures/items/egg_creeper.png";
+			case 34: return "textures/items/egg_skeleton.png";
+			case 35: return "textures/items/egg_spider.png";
+			default: return "textures/items/spawn_egg.png";
+		}
+	}
+	if ((Block::mWool && id == Block::mWool->getId()) || (Block::mWoolCarpet && id == Block::mWoolCarpet->getId())) {
+		static const char* woolTex[16] = {
+			"textures/blocks/wool_colored_white.png", "textures/blocks/wool_colored_orange.png",
+			"textures/blocks/wool_colored_magenta.png", "textures/blocks/wool_colored_light_blue.png",
+			"textures/blocks/wool_colored_yellow.png", "textures/blocks/wool_colored_lime.png",
+			"textures/blocks/wool_colored_pink.png", "textures/blocks/wool_colored_gray.png",
+			"textures/blocks/wool_colored_silver.png", "textures/blocks/wool_colored_cyan.png",
+			"textures/blocks/wool_colored_purple.png", "textures/blocks/wool_colored_blue.png",
+			"textures/blocks/wool_colored_brown.png", "textures/blocks/wool_colored_green.png",
+			"textures/blocks/wool_colored_red.png", "textures/blocks/wool_colored_black.png"
+		};
+		if (aux >= 0 && aux < 16) return woolTex[aux];
+	}
+	if ((Block::mWoodPlanks && id == Block::mWoodPlanks->getId()) || (Block::mWoodenSlab && id == Block::mWoodenSlab->getId())) {
+		static const char* plankTex[6] = {
+			"textures/blocks/planks_oak.png", "textures/blocks/planks_spruce.png",
+			"textures/blocks/planks_birch.png", "textures/blocks/planks_jungle.png",
+			"textures/blocks/planks_acacia.png", "textures/blocks/planks_big_oak.png"
+		};
+		if (aux >= 0 && aux < 6) return plankTex[aux];
+	}
+	if (Block::mLog && id == Block::mLog->getId()) {
+		static const char* logTex[4] = {
+			"textures/blocks/log_oak.png", "textures/blocks/log_spruce.png",
+			"textures/blocks/log_birch.png", "textures/blocks/log_jungle.png"
+		};
+		if (aux >= 0 && aux < 4) return logTex[aux];
+	}
+	if (Block::mLog2 && id == Block::mLog2->getId()) {
+		return (aux == 1) ? "textures/blocks/log_big_oak.png" : "textures/blocks/log_acacia.png";
+	}
+	if (Block::mStoneBrick && id == Block::mStoneBrick->getId()) {
+		if (aux == 1) return "textures/blocks/stonebrick_mossy.png";
+		if (aux == 2) return "textures/blocks/stonebrick_cracked.png";
+		if (aux == 3) return "textures/blocks/stonebrick_carved.png";
+	}
+	if (Block::mQuartzBlock && id == Block::mQuartzBlock->getId()) {
+		if (aux == 1) return "textures/blocks/quartz_block_chiseled.png";
+		if (aux == 2) return "textures/blocks/quartz_block_lines.png";
 	}
 	const auto& map = getItemVisualMap();
 	auto it = map.find(id);
@@ -739,11 +967,24 @@ BlockRenderInfo getBlockRenderInfo(const ItemInstance& item) {
 
 	// Flat 2D blocks in inventory
 	if ((Block::mTorch && id == Block::mTorch->getId()) ||
+	    (Block::mLitRedStoneTorch && id == Block::mLitRedStoneTorch->getId()) ||
 	    (Block::mGlassPane && id == Block::mGlassPane->getId()) ||
 	    (Block::mSapling && id == Block::mSapling->getId()) ||
 	    (Block::mYellowFlower && id == Block::mYellowFlower->getId()) ||
 	    (Block::mRedFlower && id == Block::mRedFlower->getId()) ||
 	    (Block::mTallgrass && id == Block::mTallgrass->getId()) ||
+	    (Block::mDeadBush && id == Block::mDeadBush->getId()) ||
+	    (Block::mBrownMushroom && id == Block::mBrownMushroom->getId()) ||
+	    (Block::mRedMushroom && id == Block::mRedMushroom->getId()) ||
+	    (Block::mWeb && id == Block::mWeb->getId()) ||
+	    (Block::mLadder && id == Block::mLadder->getId()) ||
+	    (Block::mRail && id == Block::mRail->getId()) ||
+	    (Block::mGoldenRail && id == Block::mGoldenRail->getId()) ||
+	    (Block::mDetectorRail && id == Block::mDetectorRail->getId()) ||
+	    (Block::mActivatorRail && id == Block::mActivatorRail->getId()) ||
+	    (Block::mIronFence && id == Block::mIronFence->getId()) ||
+	    (Block::mVine && id == Block::mVine->getId()) ||
+	    (Block::mWaterlily && id == Block::mWaterlily->getId()) ||
 	    (Block::mReeds && id == Block::mReeds->getId())) {
 		return info;
 	}

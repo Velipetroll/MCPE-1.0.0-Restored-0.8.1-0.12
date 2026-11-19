@@ -4,6 +4,8 @@
 #include "GuiContext.h"
 #include "Options.h"
 #include "Font.h"
+#include "world/item/Item.h"
+#include "world/level/block/Block.h"
 #include <glad/glad.h>
 #include <algorithm>
 #include <chrono>
@@ -600,8 +602,9 @@ void InventoryScreen::setupPositions() {
 	}
 
 	int pw = 176, ph = 166;
-	int px = (width - pw) / 2, py = (height - ph) / 2;
-	if (mCloseButton) { mCloseButton->posX = px + pw - 20; mCloseButton->posY = py - 22; mCloseButton->width = 20; mCloseButton->height = 20; }
+	int px = mEmbedded ? mCustomX : (width - pw) / 2;
+	int py = mEmbedded ? mCustomY : (height - ph) / 2;
+	if (mCloseButton) { mCloseButton->visible = true; mCloseButton->posX = px + pw - 20; mCloseButton->posY = py - 22; mCloseButton->width = 20; mCloseButton->height = 20; }
 }
 
 void InventoryScreen::render(int mouseX, int mouseY, float partialTicks) {
@@ -660,9 +663,10 @@ void InventoryScreen::render(int mouseX, int mouseY, float partialTicks) {
 		return;
 	}
 
-	fillGradient(0, 0, width, height, 0xA0101010, 0xB0101010);
+	if (!mEmbedded) fillGradient(0, 0, width, height, 0xA0101010, 0xB0101010);
 	int pw = 176, ph = 166;
-	int px = (width - pw) / 2, py = (height - ph) / 2;
+	int px = mEmbedded ? mCustomX : (width - pw) / 2;
+	int py = mEmbedded ? mCustomY : (height - ph) / 2;
 	drawPcBevelPanel(this, px, py, pw, ph);
 
 	std::string hoverText;
@@ -707,11 +711,12 @@ void InventoryScreen::render(int mouseX, int mouseY, float partialTicks) {
 
 	Screen::render(mouseX, mouseY, partialTicks);
 
-	if (mCarriedItem.isNull() && !hoverText.empty()) {
+	ItemInstance& carried = mExternalCarried ? *mExternalCarried : mCarriedItem;
+	if (carried.isNull() && !hoverText.empty()) {
 		drawPcTooltip(this, font, hoverText, mouseX, mouseY, width, height);
 	}
-	if (!mCarriedItem.isNull()) {
-		drawPcItemStack(this, font, mCarriedItem, mouseX - 8, mouseY - 8);
+	if (!mExternalCarried && !carried.isNull()) {
+		drawPcItemStack(this, font, carried, mouseX - 8, mouseY - 8);
 	}
 }
 
@@ -738,13 +743,15 @@ void InventoryScreen::mouseClicked(int x, int y, int button) {
 	}
 
 	if ((button == 0 || button == 1) && context) {
+		ItemInstance& carried = mExternalCarried ? *mExternalCarried : carried;
 		int pw = 176, ph = 166;
-		int px = (width - pw) / 2, py = (height - ph) / 2;
+		int px = mEmbedded ? mCustomX : (width - pw) / 2;
+		int py = mEmbedded ? mCustomY : (height - ph) / 2;
 
 		for (int i = 0; i < 4; ++i) {
 			if (pointInSlot(x, y, px + 8, py + 8 + i * 18)) {
-				if (mCarriedItem.isNull() || getArmorSlotForItem(mCarriedItem) == i) {
-					handlePcNormalSlotClick(context->armorSlots[static_cast<size_t>(i)], mCarriedItem, button);
+				if (carried.isNull() || getArmorSlotForItem(carried) == i) {
+					handlePcNormalSlotClick(context->armorSlots[static_cast<size_t>(i)], carried, button);
 				}
 				return;
 			}
@@ -753,7 +760,7 @@ void InventoryScreen::mouseClicked(int x, int y, int button) {
 		for (int r = 0; r < 2; ++r) {
 			for (int c = 0; c < 2; ++c) {
 				if (pointInSlot(x, y, px + 98 + c * 18, py + 18 + r * 18)) {
-					if (handlePcNormalSlotClick(mCraftGrid.at(r * 2 + c), mCarriedItem, button)) {
+					if (handlePcNormalSlotClick(mCraftGrid.at(r * 2 + c), carried, button)) {
 						updateCraftingResult();
 					}
 					return;
@@ -762,16 +769,16 @@ void InventoryScreen::mouseClicked(int x, int y, int button) {
 		}
 
 		if (pointInSlot(x, y, px + 154, py + 28)) {
-			if (handlePcResultSlotClick(mResultSlot, mCarriedItem, mCraftGrid)) {
+			if (handlePcResultSlotClick(mResultSlot, carried, mCraftGrid)) {
 				updateCraftingResult();
 			}
 			return;
 		}
 
-		if (handlePcPlayerInventoryClick(context, mCarriedItem, px, py, x, y, button)) {
+		if (handlePcPlayerInventoryClick(context, carried, px, py, x, y, button)) {
 			return;
 		}
-		if (handlePcOutsideDrop(context, mCarriedItem, px, py, pw, ph, x, y, button)) {
+		if (handlePcOutsideDrop(context, carried, px, py, pw, ph, x, y, button)) {
 			return;
 		}
 	}
@@ -994,53 +1001,815 @@ void ArmorScreen::keyPressed(int key) {
 }
 
 // --- CreativeInventoryScreen ---
-void CreativeInventoryScreen::init() {
-	mCatButtons.clear();
-	static const char* cats[4] = { "Building", "Decor", "Tools", "Misc" };
-	for (int i = 0; i < 4; ++i) {
-		Button* b = makeInvBtn(context, 10 + i, cats[i]);
-		mCatButtons.push_back(b);
-		buttons.push_back(b);
+namespace {
+	ItemInstance getCreativeTabIcon(int cat) {
+		switch (cat) {
+			case 0: return Block::mBrick ? ItemInstance(Block::mBrick, 1, 0) : ItemInstance();
+			case 1: return Block::mBookshelf ? ItemInstance(Block::mBookshelf, 1, 0) : ItemInstance();
+			case 2: return Item::mSword_iron ? ItemInstance(Item::mSword_iron, 1, 0) : ItemInstance();
+			case 3: return Item::mSeeds_wheat ? ItemInstance(Item::mSeeds_wheat, 1, 0) : ItemInstance();
+			default: return ItemInstance();
+		}
 	}
-	mCloseButton = makeInvBtn(context, 1, "X");
-	buttons.push_back(mCloseButton);
+
+	class CreativeTouchTabButton : public Button {
+	public:
+		CreativeTouchTabButton(int id, int cat, const int* selectedCat)
+			: Button(id, "")
+			, mCat(cat)
+			, mSelectedCat(selectedCat)
+			, mBg("textures/gui/spritesheet.png", IntRectangle{ 49, 43, 14, 14 }, 3, 3, 3, 3, 256, 256) {}
+
+		void render(GuiContext* ctx, int mouseX, int mouseY) override {
+			if (!visible) return;
+			bool isSelected = (mSelectedCat && *mSelectedCat == mCat);
+			mBg.draw(posX, posY, width, height);
+			if (!isSelected) {
+				fill(posX + 1, posY + 1, posX + width - 1, posY + height - 1, 0x45000000);
+			}
+			ItemInstance icon = getCreativeTabIcon(mCat);
+			if (!icon.isNull()) {
+				int ix = posX + (width - 16) / 2;
+				int iy = posY + (height - 16) / 2 + (pressed ? 1 : 0);
+				drawItemInSlot(ctx ? ctx->font : nullptr, icon, ix, iy, false);
+			}
+		}
+
+	private:
+		int mCat;
+		const int* mSelectedCat;
+		NinePatchLayer mBg;
+	};
+
+	class CreativeTouchCloseButton : public Button {
+	public:
+		explicit CreativeTouchCloseButton(int id)
+			: Button(id, "")
+			, mBg("textures/gui/spritesheet.png", IntRectangle{ 49, 43, 14, 14 }, 3, 3, 3, 3, 256, 256) {}
+
+		void render(GuiContext* ctx, int mouseX, int mouseY) override {
+			if (!visible) return;
+			mBg.draw(posX, posY, width, height);
+			if (bindTexture("textures/gui/spritesheet.png")) {
+				int ix = posX + (width - 14) / 2;
+				int iy = posY + (height - 14) / 2 + (pressed ? 1 : 0);
+				blitScaled(ix, iy, 14, 14, 60, 0, 18, 18, 256, 256);
+			} else if (ctx && ctx->font) {
+				drawCenteredString(ctx->font, "X", posX + width / 2, posY + (height - 8) / 2, 0xFFFFFFFF);
+			}
+		}
+
+	private:
+		NinePatchLayer mBg;
+	};
+
+	void pushCreativeBlock(std::vector<ItemInstance>& dst, const Block* b, short aux = 0) {
+		if (!b || b->mID <= 0) return;
+		ItemInstance inst(b, 1, aux);
+		if (!inst.isNull()) dst.push_back(inst);
+	}
+
+	void pushCreativeItem(std::vector<ItemInstance>& dst, const Item* it, short aux = 0) {
+		if (!it || it->getId() <= 0) return;
+		ItemInstance inst(it, 1, aux);
+		if (!inst.isNull()) dst.push_back(inst);
+	}
+} // namespace
+
+CreativeInventoryScreen::~CreativeInventoryScreen() {
+	delete mSideInventory;
+	mSideInventory = nullptr;
+}
+
+bool CreativeInventoryScreen::renderGameBehind() const {
+	return !isTouchUI(context);
+}
+
+void CreativeInventoryScreen::ensureCreativeItems() {
+	if (!mFilteredItems[0].empty()) return;
+	Recipes::getInstance()->init();
+
+	auto& build = mFilteredItems[0];
+	auto& decor = mFilteredItems[1];
+	auto& tools = mFilteredItems[2];
+	auto& misc = mFilteredItems[3];
+
+	// Category 0: Building Blocks (MCPE 0.8.1 order + restored blocks)
+	pushCreativeBlock(build, Block::mRail);
+	pushCreativeBlock(build, Block::mGoldenRail);
+	pushCreativeBlock(build, Block::mDetectorRail);
+	pushCreativeBlock(build, Block::mActivatorRail);
+	pushCreativeBlock(build, Block::mCobblestone);
+	for (short a = 0; a < 4; ++a) pushCreativeBlock(build, Block::mStoneBrick, a);
+	pushCreativeBlock(build, Block::mMossyCobblestone);
+	for (short a = 0; a < 6; ++a) pushCreativeBlock(build, Block::mWoodPlanks, a);
+	pushCreativeBlock(build, Block::mBrick);
+	pushCreativeBlock(build, Block::mStone, 0);
+	pushCreativeBlock(build, Block::mDirt);
+	pushCreativeBlock(build, Block::mPodzol);
+	pushCreativeBlock(build, Block::mGrass);
+	pushCreativeBlock(build, Block::mMycelium);
+	pushCreativeBlock(build, Block::mClay);
+	pushCreativeBlock(build, Block::mHardenedClay);
+	for (short a = 0; a < 3; ++a) pushCreativeBlock(build, Block::mSandStone, a);
+	for (short a = 0; a < 3; ++a) pushCreativeBlock(build, Block::mRedSandstone, a);
+	pushCreativeBlock(build, Block::mSand, 0);
+	pushCreativeBlock(build, Block::mSand, 1);
+	pushCreativeBlock(build, Block::mGravel);
+	for (short a = 0; a < 4; ++a) pushCreativeBlock(build, Block::mLog, a);
+	for (short a = 0; a < 2; ++a) pushCreativeBlock(build, Block::mLog2, a);
+	pushCreativeBlock(build, Block::mNetherBrick);
+	pushCreativeBlock(build, Block::mNetherrack);
+	pushCreativeBlock(build, Block::mSoulSand);
+	pushCreativeBlock(build, Block::mEndStone);
+	pushCreativeBlock(build, Block::mEndBrick);
+	pushCreativeBlock(build, Block::mBedrock);
+	pushCreativeBlock(build, Block::mObsidian);
+	pushCreativeBlock(build, Block::mStoneStairs);
+	pushCreativeBlock(build, Block::mOakStairs);
+	pushCreativeBlock(build, Block::mSpruceStairs);
+	pushCreativeBlock(build, Block::mBirchStairs);
+	pushCreativeBlock(build, Block::mJungleStairs);
+	pushCreativeBlock(build, Block::mAcaciaStairs);
+	pushCreativeBlock(build, Block::mDarkOakStairs);
+	pushCreativeBlock(build, Block::mBrickStairs);
+	pushCreativeBlock(build, Block::mSandstoneStairs);
+	pushCreativeBlock(build, Block::mRedSandstoneStairs);
+	pushCreativeBlock(build, Block::mStoneBrickStairs);
+	pushCreativeBlock(build, Block::mNetherBrickStairs);
+	pushCreativeBlock(build, Block::mQuartzStairs);
+	pushCreativeBlock(build, Block::mStoneSlab, 0);
+	pushCreativeBlock(build, Block::mStoneSlab, 3);
+	for (short a = 0; a < 6; ++a) pushCreativeBlock(build, Block::mWoodenSlab, a);
+	pushCreativeBlock(build, Block::mStoneSlab, 4);
+	pushCreativeBlock(build, Block::mStoneSlab, 1);
+	pushCreativeBlock(build, Block::mStoneSlab, 5);
+	pushCreativeBlock(build, Block::mStoneSlab, 6);
+	pushCreativeBlock(build, Block::mStoneSlab, 7);
+	for (short a = 0; a < 3; ++a) pushCreativeBlock(build, Block::mQuartzBlock, a);
+	for (short a = 0; a < 3; ++a) pushCreativeBlock(build, Block::mPrismarine, a);
+	pushCreativeBlock(build, Block::mSeaLantern);
+	pushCreativeBlock(build, Block::mCoalOre);
+	pushCreativeBlock(build, Block::mIronOre);
+	pushCreativeBlock(build, Block::mGoldOre);
+	pushCreativeBlock(build, Block::mDiamondOre);
+	pushCreativeBlock(build, Block::mEmeraldOre);
+	pushCreativeBlock(build, Block::mLapisOre);
+	pushCreativeBlock(build, Block::mRedStoneOre);
+	pushCreativeBlock(build, Block::mQuartzOre);
+	pushCreativeBlock(build, Block::mCoalBlock);
+	pushCreativeBlock(build, Block::mIronBlock);
+	pushCreativeBlock(build, Block::mGoldBlock);
+	pushCreativeBlock(build, Block::mDiamondBlock);
+	pushCreativeBlock(build, Block::mEmeraldBlock);
+	pushCreativeBlock(build, Block::mLapisBlock);
+	pushCreativeBlock(build, Block::mRedstoneBlock);
+	pushCreativeBlock(build, Block::mIce);
+	pushCreativeBlock(build, Block::mPackedIce);
+	pushCreativeBlock(build, Block::mSnow);
+	pushCreativeBlock(build, Block::mTopSnow);
+	pushCreativeBlock(build, Block::mGlass);
+	pushCreativeBlock(build, Block::mGlowStone);
+	pushCreativeBlock(build, Block::mSponge);
+	pushCreativeBlock(build, Block::mHayBlock);
+	for (short c : { 0, 8, 7, 15, 12, 14, 1, 4, 5, 13, 9, 3, 11, 10, 2, 6 }) {
+		pushCreativeBlock(build, Block::mWool, c);
+	}
+	for (short c : { 0, 8, 7, 15, 12, 14, 1, 4, 5, 13, 9, 3, 11, 10, 2, 6 }) {
+		pushCreativeBlock(build, Block::mWoolCarpet, c);
+	}
+
+	// Category 1: Decorations
+	pushCreativeItem(decor, Item::mDoor_wood);
+	pushCreativeItem(decor, Item::mDoor_spruce);
+	pushCreativeItem(decor, Item::mDoor_birch);
+	pushCreativeItem(decor, Item::mDoor_jungle);
+	pushCreativeItem(decor, Item::mDoor_acacia);
+	pushCreativeItem(decor, Item::mDoor_darkoak);
+	pushCreativeItem(decor, Item::mDoor_iron);
+	pushCreativeBlock(decor, Block::mTrapdoor);
+	pushCreativeBlock(decor, Block::mIronTrapdoor);
+	for (short a = 0; a < 6; ++a) pushCreativeBlock(decor, Block::mFence, a);
+	pushCreativeBlock(decor, Block::mNetherFence);
+	pushCreativeBlock(decor, Block::mFenceGateOak);
+	pushCreativeBlock(decor, Block::mSpuceFenceGate);
+	pushCreativeBlock(decor, Block::mBirchFenceGate);
+	pushCreativeBlock(decor, Block::mJungleFenceGate);
+	pushCreativeBlock(decor, Block::mAcaciaFenceGate);
+	pushCreativeBlock(decor, Block::mDarkOakFenceGate);
+	pushCreativeBlock(decor, Block::mCobblestoneWall, 0);
+	pushCreativeBlock(decor, Block::mCobblestoneWall, 1);
+	pushCreativeBlock(decor, Block::mIronFence);
+	pushCreativeBlock(decor, Block::mLadder);
+	pushCreativeBlock(decor, Block::mTorch);
+	pushCreativeBlock(decor, Block::mLitRedStoneTorch);
+	pushCreativeBlock(decor, Block::mGlassPane);
+	pushCreativeItem(decor, Item::mBed);
+	pushCreativeBlock(decor, Block::mBookshelf);
+	pushCreativeItem(decor, Item::mPainting);
+	pushCreativeItem(decor, Item::mSign);
+	pushCreativeBlock(decor, Block::mWorkBench);
+	pushCreativeBlock(decor, Block::mStonecutterBench);
+	pushCreativeBlock(decor, Block::mChest);
+	pushCreativeBlock(decor, Block::mTrappedChest);
+	pushCreativeBlock(decor, Block::mFurnace);
+	pushCreativeBlock(decor, Block::mAnvil);
+	pushCreativeBlock(decor, Block::mYellowFlower);
+	pushCreativeBlock(decor, Block::mRedFlower);
+	pushCreativeBlock(decor, Block::mBrownMushroom);
+	pushCreativeBlock(decor, Block::mRedMushroom);
+	pushCreativeBlock(decor, Block::mCactus);
+	pushCreativeBlock(decor, Block::mMelon);
+	pushCreativeBlock(decor, Block::mPumpkin);
+	pushCreativeBlock(decor, Block::mLitPumpkin);
+	pushCreativeBlock(decor, Block::mWeb);
+	pushCreativeBlock(decor, Block::mVine);
+	pushCreativeBlock(decor, Block::mWaterlily);
+	pushCreativeBlock(decor, Block::mTallgrass, 1);
+	pushCreativeBlock(decor, Block::mDeadBush);
+	for (short a = 0; a < 6; ++a) pushCreativeBlock(decor, Block::mSapling, a);
+	for (short a = 0; a < 4; ++a) pushCreativeBlock(decor, Block::mLeaves, a);
+	for (short a = 0; a < 2; ++a) pushCreativeBlock(decor, Block::mLeaves2, a);
+
+	// Category 2: Tools, Weapons & Armor
+	pushCreativeItem(tools, Item::mSword_wood);
+	pushCreativeItem(tools, Item::mPickAxe_wood);
+	pushCreativeItem(tools, Item::mHatchet_wood);
+	pushCreativeItem(tools, Item::mShovel_wood);
+	pushCreativeItem(tools, Item::mHoe_wood);
+	pushCreativeItem(tools, Item::mSword_stone);
+	pushCreativeItem(tools, Item::mPickAxe_stone);
+	pushCreativeItem(tools, Item::mHatchet_stone);
+	pushCreativeItem(tools, Item::mShovel_stone);
+	pushCreativeItem(tools, Item::mHoe_stone);
+	pushCreativeItem(tools, Item::mSword_iron);
+	pushCreativeItem(tools, Item::mPickAxe_iron);
+	pushCreativeItem(tools, Item::mHatchet_iron);
+	pushCreativeItem(tools, Item::mShovel_iron);
+	pushCreativeItem(tools, Item::mHoe_iron);
+	pushCreativeItem(tools, Item::mSword_gold);
+	pushCreativeItem(tools, Item::mPickAxe_gold);
+	pushCreativeItem(tools, Item::mHatchet_gold);
+	pushCreativeItem(tools, Item::mShovel_gold);
+	pushCreativeItem(tools, Item::mHoe_gold);
+	pushCreativeItem(tools, Item::mSword_diamond);
+	pushCreativeItem(tools, Item::mPickAxe_diamond);
+	pushCreativeItem(tools, Item::mHatchet_diamond);
+	pushCreativeItem(tools, Item::mShovel_diamond);
+	pushCreativeItem(tools, Item::mHoe_diamond);
+	pushCreativeItem(tools, Item::mBow);
+	pushCreativeItem(tools, Item::mArrow);
+	pushCreativeItem(tools, Item::mFlintAndSteel);
+	pushCreativeItem(tools, Item::mShears);
+	pushCreativeItem(tools, Item::mFishingRod);
+	pushCreativeItem(tools, Item::mHelmet_cloth);
+	pushCreativeItem(tools, Item::mChestplate_cloth);
+	pushCreativeItem(tools, Item::mLeggings_cloth);
+	pushCreativeItem(tools, Item::mBoots_cloth);
+	pushCreativeItem(tools, Item::mHelmet_chain);
+	pushCreativeItem(tools, Item::mChestplate_chain);
+	pushCreativeItem(tools, Item::mLeggings_chain);
+	pushCreativeItem(tools, Item::mBoots_chain);
+	pushCreativeItem(tools, Item::mHelmet_iron);
+	pushCreativeItem(tools, Item::mChestplate_iron);
+	pushCreativeItem(tools, Item::mLeggings_iron);
+	pushCreativeItem(tools, Item::mBoots_iron);
+	pushCreativeItem(tools, Item::mHelmet_gold);
+	pushCreativeItem(tools, Item::mChestplate_gold);
+	pushCreativeItem(tools, Item::mLeggings_gold);
+	pushCreativeItem(tools, Item::mBoots_gold);
+	pushCreativeItem(tools, Item::mHelmet_diamond);
+	pushCreativeItem(tools, Item::mChestplate_diamond);
+	pushCreativeItem(tools, Item::mLeggings_diamond);
+	pushCreativeItem(tools, Item::mBoots_diamond);
+
+	// Category 3: Items, Food, Resources & Spawn Eggs
+	pushCreativeBlock(misc, Block::mTNT);
+	pushCreativeItem(misc, Item::mBucket, 0);
+	pushCreativeItem(misc, Item::mBucket, 1);
+	if (Block::mFlowingWater) pushCreativeItem(misc, Item::mBucket, Block::mFlowingWater->mID);
+	if (Block::mFlowingLava) pushCreativeItem(misc, Item::mBucket, Block::mFlowingLava->mID);
+	pushCreativeItem(misc, Item::mMinecart);
+	pushCreativeItem(misc, Item::mBoat);
+	pushCreativeItem(misc, Item::mClock);
+	pushCreativeItem(misc, Item::mCompass);
+	pushCreativeItem(misc, Item::mSnowBall);
+	pushCreativeItem(misc, Item::mCoal, 0);
+	pushCreativeItem(misc, Item::mCoal, 1);
+	pushCreativeItem(misc, Item::mDiamond);
+	pushCreativeItem(misc, Item::mIronIngot);
+	pushCreativeItem(misc, Item::mGoldIngot);
+	pushCreativeItem(misc, Item::mEmerald);
+	pushCreativeItem(misc, Item::mNetherQuartz);
+	pushCreativeItem(misc, Item::mRedStone);
+	pushCreativeItem(misc, Item::mYellowDust);
+	pushCreativeItem(misc, Item::mStick);
+	pushCreativeItem(misc, Item::mBowl);
+	pushCreativeItem(misc, Item::mPaper);
+	pushCreativeItem(misc, Item::mBook);
+	pushCreativeItem(misc, Item::mBrick);
+	pushCreativeItem(misc, Item::mNetherbrick);
+	pushCreativeItem(misc, Item::mClay);
+	pushCreativeItem(misc, Item::mFlint);
+	pushCreativeItem(misc, Item::mFeather);
+	pushCreativeItem(misc, Item::mSulphur);
+	pushCreativeItem(misc, Item::mLeather);
+	pushCreativeItem(misc, Item::mBone);
+	pushCreativeItem(misc, Item::mSugar);
+	pushCreativeItem(misc, Item::mSlimeBall);
+	pushCreativeItem(misc, Item::mSeeds_wheat);
+	pushCreativeItem(misc, Item::mSeeds_pumpkin);
+	pushCreativeItem(misc, Item::mSeeds_melon);
+	pushCreativeItem(misc, Item::mSeeds_beetroot);
+	pushCreativeItem(misc, Item::mWheat);
+	pushCreativeItem(misc, Item::mReeds);
+	pushCreativeItem(misc, Item::mEgg);
+	pushCreativeItem(misc, Item::mApple);
+	pushCreativeItem(misc, Item::mApple_gold);
+	pushCreativeItem(misc, Item::mBread);
+	pushCreativeItem(misc, Item::mPorkChop_raw);
+	pushCreativeItem(misc, Item::mPorkChop_cooked);
+	pushCreativeItem(misc, Item::mBeef_raw);
+	pushCreativeItem(misc, Item::mBeef_cooked);
+	pushCreativeItem(misc, Item::mChicken_raw);
+	pushCreativeItem(misc, Item::mChicken_cooked);
+	pushCreativeItem(misc, Item::mMutton_raw);
+	pushCreativeItem(misc, Item::mMutton_cooked);
+	pushCreativeItem(misc, Item::mRabbitRaw);
+	pushCreativeItem(misc, Item::mRabbitCooked);
+	pushCreativeItem(misc, Item::mFish_raw_cod);
+	pushCreativeItem(misc, Item::mFish_cooked_cod);
+	pushCreativeItem(misc, Item::mFish_raw_salmon);
+	pushCreativeItem(misc, Item::mFish_cooked_salmon);
+	pushCreativeItem(misc, Item::mCarrot);
+	pushCreativeItem(misc, Item::mGoldenCarrot);
+	pushCreativeItem(misc, Item::mPotato);
+	pushCreativeItem(misc, Item::mPotatoBaked);
+	pushCreativeItem(misc, Item::mCookie);
+	pushCreativeItem(misc, Item::mMelon);
+	pushCreativeItem(misc, Item::mPumpkinPie);
+	pushCreativeItem(misc, Item::mCake);
+	pushCreativeItem(misc, Item::mMushroomStew);
+	for (short d = 0; d < 16; ++d) {
+		pushCreativeItem(misc, Item::mDye_powder, d);
+	}
+	for (short eggId : { 10, 11, 12, 13, 32, 33, 34, 35 }) {
+		pushCreativeItem(misc, Item::mMobPlacer, eggId);
+	}
+}
+
+int CreativeInventoryScreen::getMaxScroll() const {
+	int cat = std::max(0, std::min(3, mCategory));
+	int total = static_cast<int>(mFilteredItems[cat].size());
+	int cols = std::max(1, mPaneCols);
+	int rows = (total + cols - 1) / cols;
+	return std::max(0, rows * mCellSize - mPaneH);
+}
+
+void CreativeInventoryScreen::init() {
+	if (context) context->ensureInventoryInitialized();
+	ensureCreativeItems();
+	mCatButtons.clear();
+	mCloseButton = nullptr;
+	mInventoryButton = nullptr;
+	delete mSideInventory;
+	mSideInventory = nullptr;
+	mShowSurvivalInv = false;
+	mCarriedItem.setNull();
+	mDragging = false;
+	mDidDrag = false;
+	mScrollY = 0;
+
+	if (isTouchUI(context)) {
+		for (int i = 0; i < 4; ++i) {
+			Button* b = new CreativeTouchTabButton(10 + i, i, &mCategory);
+			mCatButtons.push_back(b);
+			buttons.push_back(b);
+		}
+		mCloseButton = new CreativeTouchCloseButton(1);
+		buttons.push_back(mCloseButton);
+		mInventoryButton = new Button(2, "Inv");
+		buttons.push_back(mInventoryButton);
+	} else {
+		static const char* cats[4] = { "Building", "Decor", "Tools", "Misc" };
+		for (int i = 0; i < 4; ++i) {
+			Button* b = new Button(10 + i, cats[i]);
+			mCatButtons.push_back(b);
+			buttons.push_back(b);
+		}
+		mCloseButton = new Button(1, "X");
+		buttons.push_back(mCloseButton);
+		mInventoryButton = new Button(2, "Inv");
+		buttons.push_back(mInventoryButton);
+	}
 }
 
 void CreativeInventoryScreen::setupPositions() {
-	int pw = 220, ph = 150;
-	int px = (width - pw) / 2, py = (height - ph) / 2;
+	if (isTouchUI(context)) {
+		int tabSize = std::min(30, std::max(20, (height - 25) / 5 - 2));
+		mTabSize = tabSize;
+		mFrameX = tabSize + 2;
+		mFrameY = 2;
+		mFrameW = std::max(64, width - 4 - tabSize);
+		mFrameH = std::max(48, height - 25);
+
+		if (mCloseButton) {
+			mCloseButton->posX = mFrameX - tabSize + 3;
+			mCloseButton->posY = mFrameY;
+			mCloseButton->width = tabSize;
+			mCloseButton->height = tabSize - 1;
+		}
+		int tabY = mFrameY + mFrameH - tabSize;
+		for (size_t i = 0; i < mCatButtons.size(); ++i) {
+			mCatButtons[i]->posX = mFrameX - tabSize + 3;
+			mCatButtons[i]->posY = tabY;
+			mCatButtons[i]->width = tabSize;
+			mCatButtons[i]->height = tabSize;
+			mCatButtons[i]->active = true;
+			tabY -= (tabSize + 2);
+		}
+		if (mInventoryButton) {
+			mInventoryButton->posX = mFrameX - tabSize + 3;
+			mInventoryButton->posY = tabY;
+			mInventoryButton->width = tabSize;
+			mInventoryButton->height = tabSize;
+		}
+
+		mCellSize = 26;
+		int availW = std::max(mCellSize, mFrameW - 14);
+		mPaneCols = std::max(1, availW / mCellSize);
+		mPaneW = mPaneCols * mCellSize;
+		mPaneX = mFrameX + (availW - mPaneW) / 2 + 7;
+		mPaneY = mFrameY + 8;
+		mPaneH = std::max(mCellSize, mFrameH - 16);
+		mScrollY = std::max(0, std::min(getMaxScroll(), mScrollY));
+		return;
+	}
+
+	int pw = 196, ph = 136;
+	int invW = 176, invH = 166, gap = 8;
+	int px = mShowSurvivalInv ? (width - (pw + gap + invW)) / 2 : (width - pw) / 2;
+	int py = (height - ph) / 2;
 	for (size_t i = 0; i < mCatButtons.size(); ++i) {
-		mCatButtons[i]->posX = px + static_cast<int>(i) * 48;
-		mCatButtons[i]->posY = py - 22;
-		mCatButtons[i]->width = 46;
-		mCatButtons[i]->height = 20;
+		mCatButtons[i]->posX = px + static_cast<int>(i) * 44;
+		mCatButtons[i]->posY = py - 21;
+		mCatButtons[i]->width = 42;
+		mCatButtons[i]->height = 19;
 		mCatButtons[i]->active = (static_cast<int>(i) != mCategory);
 	}
-	if (mCloseButton) { mCloseButton->posX = px + pw - 20; mCloseButton->posY = py - 22; mCloseButton->width = 20; mCloseButton->height = 20; }
+	if (mCloseButton) {
+		mCloseButton->posX = px + pw - 20;
+		mCloseButton->posY = py - 21;
+		mCloseButton->width = 20;
+		mCloseButton->height = 19;
+	}
+	if (mInventoryButton) {
+		mInventoryButton->visible = !mShowSurvivalInv;
+		mInventoryButton->posX = px + pw + 4;
+		mInventoryButton->posY = py + 18;
+		mInventoryButton->width = 34;
+		mInventoryButton->height = 20;
+	}
+	if (mShowSurvivalInv && mSideInventory) {
+		mSideInventory->width = width;
+		mSideInventory->height = height;
+		mSideInventory->font = font;
+		mSideInventory->setEmbeddedPos(px + pw + gap, (height - invH) / 2);
+		mSideInventory->setupPositions();
+	}
+	mCellSize = 18;
+	mPaneCols = 9;
+	mPaneX = px + 8;
+	mPaneY = py + 18;
+	mPaneW = 9 * 18;
+	mPaneH = 5 * 18;
+	mScrollY = std::max(0, std::min(getMaxScroll(), mScrollY));
 }
 
 void CreativeInventoryScreen::render(int mouseX, int mouseY, float partialTicks) {
+	int cat = std::max(0, std::min(3, mCategory));
+	const auto& list = mFilteredItems[cat];
+	int maxScroll = getMaxScroll();
+
+	if (mDragging) {
+		int dy = mLastDragY - mouseY;
+		if (std::abs(mouseY - mPressStartY) > 4) mDidDrag = true;
+		mLastDragY = mouseY;
+		mScrollY = std::max(0, std::min(maxScroll, mScrollY + dy));
+	}
+
+	if (isTouchUI(context)) {
+		static NinePatchLayer bgLayer("textures/gui/spritesheet.png", IntRectangle{ 0, 0, 16, 16 }, 4, 4, 4, 4, 256, 256);
+		static NinePatchLayer frameLayer("textures/gui/spritesheet.png", IntRectangle{ 34, 43, 14, 14 }, 3, 3, 3, 3, 256, 256);
+		static NinePatchLayer paneFrame("textures/gui/spritesheet.png", IntRectangle{ 28, 42, 4, 4 }, 1, 1, 1, 1, 256, 256);
+		paneFrame.setExcluded(16);
+
+		bgLayer.draw(0, 0, width, height);
+
+		// Render inactive tabs behind main frame (MCPE 0.8.1 CreativeInventoryScreen::render)
+		for (size_t i = 0; i < mCatButtons.size(); ++i) {
+			if (static_cast<int>(i) != mCategory) {
+				mCatButtons[i]->render(context, mouseX, mouseY);
+			}
+		}
+		if (mCloseButton) mCloseButton->render(context, mouseX, mouseY);
+		if (mInventoryButton) mInventoryButton->render(context, mouseX, mouseY);
+
+		frameLayer.draw(mFrameX, mFrameY, mFrameW, mFrameH);
+
+		fill(mPaneX, mPaneY, mPaneX + mPaneW, mPaneY + mPaneH, 0xFF333333);
+
+		int scale = context ? context->guiScale : 2;
+		int winH = context ? context->windowHeight : (height * scale);
+		glEnable(GL_SCISSOR_TEST);
+		glScissor(mPaneX * scale, winH - (mPaneY + mPaneH) * scale, mPaneW * scale, mPaneH * scale);
+
+		bool hasSlotTex = bindTexture("textures/gui/gui.png");
+		int minRows = std::max(1, (mPaneH + mCellSize - 1) / mCellSize);
+		int totalCells = std::max(static_cast<int>(list.size()), minRows * mPaneCols);
+		for (int i = 0; i < totalCells; ++i) {
+			int col = i % mPaneCols;
+			int row = i / mPaneCols;
+			int sx = mPaneX + col * mCellSize;
+			int sy = mPaneY + row * mCellSize - mScrollY;
+			if (sy + mCellSize < mPaneY || sy > mPaneY + mPaneH) continue;
+
+			if (hasSlotTex) {
+				blitScaled(sx, sy, mCellSize, mCellSize, 200, 46, 16, 16, 256, 256);
+			} else {
+				fill(sx + 1, sy + 1, sx + mCellSize - 1, sy + mCellSize - 1, 0xFF2B2B2B);
+				drawRect(sx + 1, sy + 1, sx + mCellSize - 1, sy + mCellSize - 1, 0xFF555555);
+			}
+			if (i == mSelectedCreativeIdx) {
+				drawRect(sx + 1, sy + 1, sx + mCellSize - 1, sy + mCellSize - 1, 0xFFFFFFFF);
+			}
+			if (i < static_cast<int>(list.size())) {
+				drawPcItemStack(this, font, list[static_cast<size_t>(i)], sx + (mCellSize - 16) / 2, sy + (mCellSize - 16) / 2);
+				hasSlotTex = bindTexture("textures/gui/gui.png");
+			}
+		}
+		glDisable(GL_SCISSOR_TEST);
+		paneFrame.draw(mPaneX - 1, mPaneY - 1, mPaneW + 2, mPaneH + 2);
+
+		// Render active tab overlapping the frame edge
+		if (mCategory >= 0 && mCategory < static_cast<int>(mCatButtons.size())) {
+			mCatButtons[static_cast<size_t>(mCategory)]->render(context, mouseX, mouseY);
+		}
+
+		drawHotbarOverlay(this, font, context, width, height);
+		return;
+	}
+
+	// PC Mode
 	fillGradient(0, 0, width, height, 0xA0101010, 0xB0101010);
-	int pw = 220, ph = 150;
-	int px = (width - pw) / 2, py = (height - ph) / 2;
-	drawPanel(this, px, py, pw, ph);
-	if (font) drawString(font, "Creative Inventory", px + 8, py + 6, 0xFF404040);
-	drawSlotGrid(this, px + 28, py + 22, 9, 5);
-	drawSlotGrid(this, px + 28, py + 120, 9, 1);
+	int pw = 196, ph = 136;
+	int px = mShowSurvivalInv ? (width - (pw + 8 + 176)) / 2 : (width - pw) / 2;
+	int py = (height - ph) / 2;
+	drawPcBevelPanel(this, px, py, pw, ph);
+
+	static const char* catTitles[4] = { "Building Blocks", "Decorations", "Tools & Armor", "Miscellaneous" };
+	if (font) drawString(font, catTitles[cat], px + 8, py + 6, 0xFF404040);
+
+	std::string hoverText;
+
+	// Creative 9x5 scrollable grid
+	int scale = context ? context->guiScale : 2;
+	int winH = context ? context->windowHeight : (height * scale);
+	glEnable(GL_SCISSOR_TEST);
+	glScissor(mPaneX * scale, winH - (mPaneY + mPaneH) * scale, mPaneW * scale, mPaneH * scale);
+	int totalRows = std::max(5, (static_cast<int>(list.size()) + 8) / 9);
+	for (int r = 0; r < totalRows; ++r) {
+		int sy = mPaneY + r * 18 - mScrollY;
+		if (sy + 18 <= mPaneY || sy >= mPaneY + mPaneH) continue;
+		for (int c = 0; c < 9; ++c) {
+			int idx = r * 9 + c;
+			int sx = mPaneX + c * 18;
+			ItemInstance cellItem = (idx < static_cast<int>(list.size())) ? list[static_cast<size_t>(idx)] : ItemInstance();
+			int effMouseY = (mouseY >= mPaneY && mouseY < mPaneY + mPaneH) ? mouseY : -9999;
+			renderPcSlotWithItem(this, font, sx, sy, cellItem, mouseX, effMouseY, nullptr, hoverText);
+		}
+	}
+	glDisable(GL_SCISSOR_TEST);
+
+	// Scrollbar track on right
+	int sbX = px + pw - 16;
+	int sbY = mPaneY;
+	int sbW = 10;
+	int sbH = mPaneH;
+	fill(sbX, sbY, sbX + sbW, sbY + sbH, 0xFF555555);
+	drawRect(sbX, sbY, sbX + sbW, sbY + sbH, 0xFF222222);
+	int thumbH = (maxScroll > 0) ? std::max(14, sbH * mPaneH / (totalRows * 18)) : sbH - 2;
+	int thumbY = sbY + 1 + ((maxScroll > 0) ? (mScrollY * (sbH - 2 - thumbH) / maxScroll) : 0);
+	fill(sbX + 1, thumbY, sbX + sbW - 1, thumbY + thumbH, 0xFFC6C6C6);
+	drawRect(sbX + 1, thumbY, sbX + sbW - 1, thumbY + thumbH, 0xFF888888);
+
+	// Hotbar 9x1 (slots 0..8)
+	for (int c = 0; c < 9; ++c) {
+		ItemInstance hbItem = context ? context->inventorySlots[static_cast<size_t>(c)] : ItemInstance();
+		int sx = px + 8 + c * 18;
+		int sy = py + 112;
+		renderPcSlotWithItem(this, font, sx, sy, hbItem, mouseX, mouseY, nullptr, hoverText);
+		if (context && context->selectedHotbarSlot == c) {
+			drawRect(sx, sy, sx + 18, sy + 18, 0xFFFFFFFF);
+		}
+	}
+
 	Screen::render(mouseX, mouseY, partialTicks);
+	if (mShowSurvivalInv && mSideInventory) {
+		mSideInventory->render(mouseX, mouseY, partialTicks);
+	}
+
+	if (mCarriedItem.isNull() && !hoverText.empty()) {
+		drawPcTooltip(this, font, hoverText, mouseX, mouseY, width, height);
+	}
+	if (!mCarriedItem.isNull()) {
+		drawPcItemStack(this, font, mCarriedItem, mouseX - 8, mouseY - 8);
+	}
+}
+
+void CreativeInventoryScreen::mouseClicked(int x, int y, int button) {
+	if (isTouchUI(context)) {
+		if (button == 0) {
+			if (x >= mPaneX && x < mPaneX + mPaneW && y >= mPaneY && y < mPaneY + mPaneH) {
+				mDragging = true;
+				mDidDrag = false;
+				mLastDragY = y;
+				mPressStartY = y;
+				return;
+			}
+			int barX = width / 2 - 91;
+			int barY = height - 22;
+			if (x >= barX && x < barX + 180 && y >= barY && y < height && context) {
+				context->selectedHotbarSlot = std::max(0, std::min(8, (x - barX) / 20));
+				return;
+			}
+		}
+		Screen::mouseClicked(x, y, button);
+		return;
+	}
+
+	if ((button == 0 || button == 1) && context) {
+		int cat = std::max(0, std::min(3, mCategory));
+		const auto& list = mFilteredItems[cat];
+		int pw = 196, ph = 136;
+		int px = mShowSurvivalInv ? (width - (pw + 8 + 176)) / 2 : (width - pw) / 2;
+		int py = (height - ph) / 2;
+		if (mShowSurvivalInv && mSideInventory) {
+			Button* sideClose = mSideInventory->getCloseButton();
+			if (button == 0 && sideClose && sideClose->pointInside(x, y)) {
+				mShowSurvivalInv = false;
+				setupPositions();
+				return;
+			}
+			int invX = px + pw + 8;
+			int invY = (height - 166) / 2;
+			if (x >= invX && x < invX + 176 && y >= invY && y < invY + 166) {
+				mSideInventory->mouseClicked(x, y, button);
+				return;
+			}
+		}
+
+		// Click inside creative grid
+		if (x >= mPaneX && x < mPaneX + mPaneW && y >= mPaneY && y < mPaneY + mPaneH) {
+			int col = (x - mPaneX) / 18;
+			int row = (y - mPaneY + mScrollY) / 18;
+			int idx = row * 9 + col;
+			if (idx >= 0 && idx < static_cast<int>(list.size())) {
+				const ItemInstance& chosen = list[static_cast<size_t>(idx)];
+				int maxStack = std::max(1, static_cast<int>(chosen.getMaxStackSize()));
+				if (button == 1) {
+					// Quick equip into selected hotbar slot
+					int hbSlot = std::max(0, std::min(8, context->selectedHotbarSlot));
+					ItemInstance equip(chosen);
+					equip.set(maxStack);
+					context->inventorySlots[static_cast<size_t>(hbSlot)] = equip;
+				} else {
+					if (mCarriedItem.isNull()) {
+						mCarriedItem = chosen;
+						mCarriedItem.set(maxStack);
+					} else if (mCarriedItem.sameItemAndAux(&chosen) && mCarriedItem.hasSameUserData(chosen)) {
+						mCarriedItem.set(maxStack);
+					} else {
+						mCarriedItem.setNull();
+					}
+				}
+			} else if (button == 0 && !mCarriedItem.isNull()) {
+				mCarriedItem.setNull();
+			}
+			return;
+		}
+
+		// Click on scrollbar
+		int sbX = px + pw - 16;
+		if (button == 0 && x >= sbX && x < sbX + 10 && y >= mPaneY && y < mPaneY + mPaneH) {
+			int maxScroll = getMaxScroll();
+			if (maxScroll > 0) {
+				float frac = static_cast<float>(y - mPaneY) / static_cast<float>(std::max(1, mPaneH - 1));
+				mScrollY = static_cast<int>(std::max(0.0f, std::min(1.0f, frac)) * static_cast<float>(maxScroll));
+			}
+			return;
+		}
+
+		// Click on hotbar slots (0..8)
+		for (int c = 0; c < 9; ++c) {
+			if (pointInSlot(x, y, px + 8 + c * 18, py + 112)) {
+				ItemInstance& slot = context->inventorySlots[static_cast<size_t>(c)];
+				if (button == 1 && mCarriedItem.isNull()) {
+					slot.setNull();
+				} else {
+					handlePcNormalSlotClick(slot, mCarriedItem, button);
+				}
+				context->selectedHotbarSlot = c;
+				return;
+			}
+		}
+
+		// Click outside deletes carried item in creative
+		if ((x < px || x >= px + pw || y < py || y >= py + ph) && !mCarriedItem.isNull()) {
+			mCarriedItem.setNull();
+			return;
+		}
+	}
+
+	Screen::mouseClicked(x, y, button);
+}
+
+void CreativeInventoryScreen::mouseReleased(int x, int y, int button) {
+	if (mDragging && !mDidDrag && isTouchUI(context) && context && button == 0) {
+		if (x >= mPaneX && x < mPaneX + mPaneW && y >= mPaneY && y < mPaneY + mPaneH) {
+			int cat = std::max(0, std::min(3, mCategory));
+			const auto& list = mFilteredItems[cat];
+			int col = (x - mPaneX) / mCellSize;
+			int row = (y - mPaneY + mScrollY) / mCellSize;
+			int idx = row * mPaneCols + col;
+			if (idx >= 0 && idx < static_cast<int>(list.size())) {
+				mSelectedCreativeIdx = idx;
+				const ItemInstance& chosen = list[static_cast<size_t>(idx)];
+				// Match MCPE 0.8.1 CreativeInventoryScreen::addItem(): select if already in hotbar, else put in selected slot
+				int foundSlot = -1;
+				for (int i = 0; i < 9; ++i) {
+					const ItemInstance& cur = context->inventorySlots[static_cast<size_t>(i)];
+					if (!cur.isNull() && cur.sameItemAndAux(&chosen)) {
+						foundSlot = i;
+						break;
+					}
+				}
+				if (foundSlot >= 0) {
+					context->selectedHotbarSlot = foundSlot;
+				} else {
+					int hbSlot = std::max(0, std::min(8, context->selectedHotbarSlot));
+					ItemInstance equip(chosen);
+					equip.set(1);
+					context->inventorySlots[static_cast<size_t>(hbSlot)] = equip;
+				}
+			}
+		}
+	}
+	mDragging = false;
+	mDidDrag = false;
+	Screen::mouseReleased(x, y, button);
+}
+
+void CreativeInventoryScreen::mouseScrolled(double yoffset) {
+	if (yoffset == 0.0) return;
+	int step = isTouchUI(context) ? 26 : 18;
+	int maxScroll = getMaxScroll();
+	mScrollY = std::max(0, std::min(maxScroll, mScrollY - static_cast<int>(yoffset) * step));
 }
 
 void CreativeInventoryScreen::buttonClicked(Button* button) {
 	if (!context || !button) return;
-	if (button->id == 1) context->startGame();
-	else if (button->id >= 10 && button->id <= 13) {
+	if (button->id == 1) {
+		mCarriedItem.setNull();
+		context->startGame();
+	} else if (button->id == 2) {
+		if (isTouchUI(context)) {
+			mCarriedItem.setNull();
+			context->setScreen(new InventoryScreen());
+		} else {
+			mShowSurvivalInv = !mShowSurvivalInv;
+			if (mShowSurvivalInv && !mSideInventory) {
+				mSideInventory = new InventoryScreen();
+				mSideInventory->context = context;
+				mSideInventory->font = font;
+				mSideInventory->width = width;
+				mSideInventory->height = height;
+				mSideInventory->setExternalCarried(&mCarriedItem);
+				mSideInventory->init();
+			}
+			setupPositions();
+		}
+	} else if (button->id >= 10 && button->id <= 13) {
 		mCategory = button->id - 10;
+		mScrollY = 0;
+		mSelectedCreativeIdx = -1;
 		setupPositions();
 	}
 }
 
 void CreativeInventoryScreen::keyPressed(int key) {
 	if (key == 69 || key == 256) {
+		mCarriedItem.setNull();
 		if (context) context->startGame();
 		return;
 	}
@@ -1212,7 +1981,8 @@ void PaneCraftingScreen::setupPositions() {
 	}
 
 	int pw = 176, ph = 166;
-	int px = (width - pw) / 2, py = (height - ph) / 2;
+	int px = (width - pw) / 2;
+	int py = (height - ph) / 2;
 	if (mCloseButton) { mCloseButton->posX = px + pw - 20; mCloseButton->posY = py - 22; mCloseButton->width = 20; mCloseButton->height = 20; }
 }
 
@@ -1289,7 +2059,8 @@ void PaneCraftingScreen::render(int mouseX, int mouseY, float partialTicks) {
 
 	fillGradient(0, 0, width, height, 0xA0101010, 0xB0101010);
 	int pw = 176, ph = 166;
-	int px = (width - pw) / 2, py = (height - ph) / 2;
+	int px = (width - pw) / 2;
+	int py = (height - ph) / 2;
 	drawPcBevelPanel(this, px, py, pw, ph);
 
 	std::string hoverText;
@@ -1351,7 +2122,8 @@ void PaneCraftingScreen::mouseClicked(int x, int y, int button) {
 
 	if ((button == 0 || button == 1) && context) {
 		int pw = 176, ph = 166;
-		int px = (width - pw) / 2, py = (height - ph) / 2;
+		int px = (width - pw) / 2;
+		int py = (height - ph) / 2;
 
 		for (int r = 0; r < 3; ++r) {
 			for (int c = 0; c < 3; ++c) {
@@ -1655,7 +2427,8 @@ void FurnaceScreen::setupPositions() {
 	}
 
 	int pw = 176, ph = 166;
-	int px = (width - pw) / 2, py = (height - ph) / 2;
+	int px = (width - pw) / 2;
+	int py = (height - ph) / 2;
 	if (mCloseButton) { mCloseButton->posX = px + pw - 20; mCloseButton->posY = py - 22; mCloseButton->width = 20; mCloseButton->height = 20; }
 }
 
@@ -1793,7 +2566,8 @@ void FurnaceScreen::render(int mouseX, int mouseY, float partialTicks) {
 
 	fillGradient(0, 0, width, height, 0xA0101010, 0xB0101010);
 	int pw = 176, ph = 166;
-	int px = (width - pw) / 2, py = (height - ph) / 2;
+	int px = (width - pw) / 2;
+	int py = (height - ph) / 2;
 	drawPcBevelPanel(this, px, py, pw, ph);
 	if (font) drawString(font, "Furnace", px + 60, py + 6, 0xFF404040);
 
@@ -1877,7 +2651,8 @@ void FurnaceScreen::mouseClicked(int x, int y, int button) {
 
 	if ((button == 0 || button == 1) && context) {
 		int pw = 176, ph = 166;
-		int px = (width - pw) / 2, py = (height - ph) / 2;
+		int px = (width - pw) / 2;
+		int py = (height - ph) / 2;
 		FurnaceData& fd = context->furnaces[mPos];
 
 		if (pointInSlot(x, y, px + 56, py + 17)) {

@@ -27,6 +27,7 @@ public:
 	virtual void buttonClicked(Button* button) {}
 	virtual void mouseClicked(int x, int y, int button);
 	virtual void mouseReleased(int x, int y, int button);
+	virtual void mouseScrolled(double yoffset) {}
 	virtual void keyPressed(int key);
 	virtual bool renderGameBehind() const { return false; }
 

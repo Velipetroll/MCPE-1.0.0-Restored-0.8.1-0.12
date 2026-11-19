@@ -142,7 +142,7 @@ void DBChunkStorage::loadChunk(LevelChunk& lc, bool forceImmediateReplacementDat
 			for (int i = 0; i < 8; i++) {
 				ChunkKey keyNeighbor(neighbors[i], lc.getDimensionId());
 				
-				if (!_hasChunk(key)) {
+				if (!_hasChunk(keyNeighbor)) {
 					break;
 				}
 

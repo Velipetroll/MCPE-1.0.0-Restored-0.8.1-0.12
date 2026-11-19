@@ -15,11 +15,22 @@ namespace ProjectileTntSystem {
 struct ArrowEntity {
     float x, y, z;
     float vx, vy, vz;
+    float yaw = 0.0f;
+    float pitch = 0.0f;
     int damage = 4;
     bool fromPlayer = true;
     bool inGround = false;
     float age = 0.0f;
 };
+
+inline void updateArrowOrientation(ArrowEntity& a) {
+    float horiz = std::sqrt(a.vx * a.vx + a.vz * a.vz);
+    if (horiz > 0.0001f || std::abs(a.vy) > 0.0001f) {
+        constexpr float radToDeg = 180.0f / 3.14159265f;
+        a.yaw = std::atan2(a.vx, a.vz) * radToDeg;
+        a.pitch = std::atan2(a.vy, horiz) * radToDeg;
+    }
+}
 
 struct PrimedTntEntity {
     float x, y, z;
@@ -52,6 +63,7 @@ inline void spawnArrow(const Vec3& pos, const Vec3& dir, float speed, int damage
     a.vx = (dir.x / len) * speed;
     a.vy = (dir.y / len) * speed;
     a.vz = (dir.z / len) * speed;
+    updateArrowOrientation(a);
     a.damage = damage;
     a.fromPlayer = fromPlayer;
     a.inGround = false;
@@ -78,10 +90,13 @@ inline void renderArrows() {
     glLineWidth(2.5f);
     glBegin(GL_LINES);
     for (const auto& a : arrows) {
-        float speed = std::sqrt(a.vx * a.vx + a.vy * a.vy + a.vz * a.vz);
-        float dx = (speed > 0.01f) ? (a.vx / speed) : 0.0f;
-        float dy = (speed > 0.01f) ? (a.vy / speed) : 0.0f;
-        float dz = (speed > 0.01f) ? (a.vz / speed) : 1.0f;
+        constexpr float degToRad = 3.14159265f / 180.0f;
+        float yawRad = a.yaw * degToRad;
+        float pitchRad = a.pitch * degToRad;
+        float cosP = std::cos(pitchRad);
+        float dx = std::sin(yawRad) * cosP;
+        float dy = std::sin(pitchRad);
+        float dz = std::cos(yawRad) * cosP;
         // Wooden shaft
         glColor3f(0.55f, 0.38f, 0.20f);
         glVertex3f(a.x - dx * 0.35f, a.y - dy * 0.35f, a.z - dz * 0.35f);

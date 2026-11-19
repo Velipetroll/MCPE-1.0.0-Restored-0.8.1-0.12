@@ -14,16 +14,16 @@ void GuiContext::ensureInventoryInitialized() {
 
 	Recipes::getInstance()->init();
 
-	// Sample 3D blocks and 2D items in the hotbar for render testing
-	if (Block::mWoodPlanks) inventorySlots[0] = ItemInstance(Block::mWoodPlanks, 16, 0);
-	if (Block::mCobblestone) inventorySlots[1] = ItemInstance(Block::mCobblestone, 32, 0);
-	if (Block::mWorkBench) inventorySlots[2] = ItemInstance(Block::mWorkBench, 1, 0);
-	if (Block::mGlass) inventorySlots[3] = ItemInstance(Block::mGlass, 12, 0);
-	if (Block::mStone) inventorySlots[4] = ItemInstance(Block::mStone, 64, 0);
-	if (Item::mSword_iron) inventorySlots[5] = ItemInstance(Item::mSword_iron, 1, 0);
-	if (Item::mPickAxe_diamond) inventorySlots[6] = ItemInstance(Item::mPickAxe_diamond, 1, 0);
-	if (Item::mApple) inventorySlots[7] = ItemInstance(Item::mApple, 8, 0);
-	if (Item::mDiamond) inventorySlots[8] = ItemInstance(Item::mDiamond, 16, 0);
+	// Phase 7 test items in hotbar (bow, arrows, TNT, flint & steel, doors, torch, sword, food)
+	if (Item::mBow) inventorySlots[0] = ItemInstance(Item::mBow, 1, 0);
+	if (Item::mArrow) inventorySlots[1] = ItemInstance(Item::mArrow, 64, 0);
+	if (Block::mTNT) inventorySlots[2] = ItemInstance(Block::mTNT, 16, 0);
+	if (Item::mFlintAndSteel) inventorySlots[3] = ItemInstance(Item::mFlintAndSteel, 1, 0);
+	if (Item::mDoor_wood) inventorySlots[4] = ItemInstance(Item::mDoor_wood, 4, 0);
+	if (Block::mFenceGateOak) inventorySlots[5] = ItemInstance(Block::mFenceGateOak, 4, 0);
+	if (Block::mTorch) inventorySlots[6] = ItemInstance(Block::mTorch, 32, 0);
+	if (Item::mSword_iron) inventorySlots[7] = ItemInstance(Item::mSword_iron, 1, 0);
+	if (Item::mApple) inventorySlots[8] = ItemInstance(Item::mApple, 16, 0);
 }
 
 ItemInstance GuiContext::addItemToInventoryRemainder(const ItemInstance& item) {

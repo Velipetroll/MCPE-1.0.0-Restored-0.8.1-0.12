@@ -53,7 +53,11 @@ bool Gui::handleHudClick(int guiX, int guiY, int guiW, int guiH, GuiContext* ctx
 	int dotX = guiW / 2 - 91 + 182 + 2;
 	int dotY = guiH - 22;
 	if (guiX >= dotX && guiX < dotX + 20 && guiY >= dotY && guiY < dotY + 22) {
-		ctx->setScreen(new InventoryScreen());
+		if (ctx->isCreative) {
+			ctx->setScreen(new CreativeInventoryScreen());
+		} else {
+			ctx->setScreen(new InventoryScreen());
+		}
 		return true;
 	}
 	if (!ctx->options || !ctx->options->useTouchUI) return false;

@@ -38,7 +38,11 @@
 #include "ProjectileTntSystem.h"
 #include "world/level/block/Block.h"
 #include "world/level/block/BedBlock.h"
+#include "world/level/block/DoorBlock.h"
+#include "world/level/block/TrapDoorBlock.h"
+#include "world/level/block/FenceGateBlock.h"
 #include "world/level/block/TorchBlock.h"
+#include "world/level/GameType.h"
 #include "world/level/material/Material.h"
 #include "util/Random.h"
 #include "stb_image.h"
@@ -158,6 +162,15 @@ void GLInput::Clear()
 
 
 
+struct CCTX
+{
+	std::atomic<bool> running;
+	Level* level;
+	Dimension* dim;
+};
+
+extern CCTX commandContext;
+
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
 	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
@@ -176,6 +189,9 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 			gGuiContext.selectedHotbarSlot = key - GLFW_KEY_1;
 		} else if (key == GLFW_KEY_V) {
 			gGuiContext.isCreative = !gGuiContext.isCreative;
+			if (commandContext.level) {
+				commandContext.level->getLevelData().setGameType(gGuiContext.isCreative ? GameType::Creative : GameType::Survival);
+			}
 			if (!gGuiContext.isCreative && gGuiContext.health <= 0) {
 				gGuiContext.resetSurvivalStats();
 			}
@@ -188,7 +204,11 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 			gGuiContext.setScreen(new ChatScreen("/"));
 			return;
 		} else if (key == GLFW_KEY_E) {
-			gGuiContext.setScreen(new InventoryScreen());
+			if (gGuiContext.isCreative) {
+				gGuiContext.setScreen(new CreativeInventoryScreen());
+			} else {
+				gGuiContext.setScreen(new InventoryScreen());
+			}
 			return;
 		} else if (key == GLFW_KEY_F5) {
 			gGuiOptions.thirdPerson = !gGuiOptions.thirdPerson;
@@ -212,15 +232,9 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 	}
 }
 
-
-struct CCTX
-{
-	std::atomic<bool> running;
-	Level* level;
-	Dimension* dim;
-};
-
-extern CCTX commandContext;
+static float gBowPullTime = 0.0f;
+static bool gBowPulling = false;
+static float gItemUseSlowTimer = 0.0f;
 
 mce::TextureGroup texgroup;
 
@@ -433,12 +447,16 @@ public:
 		float cameraSpeed = mOnGround ? 2.7f : (mIsFlying ? 1.15f : 0.46f);
 		if (inWater) cameraSpeed = 0.85f;
 
-		bool sprinting = glinput.KeyDown(GLFW_KEY_LEFT_CONTROL) || glinput.KeyDown(GLFW_KEY_RIGHT_CONTROL);
+		bool usingItemSlow = gBowPulling || (gItemUseSlowTimer > 0.0f);
+		bool sprinting = !usingItemSlow && (glinput.KeyDown(GLFW_KEY_LEFT_CONTROL) || glinput.KeyDown(GLFW_KEY_RIGHT_CONTROL));
 		if (sprinting) {
 			cameraSpeed *= mIsFlying ? 1.8f : 1.4f;
 		}
 		if (!mIsFlying && isSneaking()) {
 			cameraSpeed *= 0.4f;
+		}
+		if (usingItemSlow) {
+			cameraSpeed *= 0.2f;
 		}
 
 		const float MAGIC_FRICTION_CONSTANT = 0.91f;
@@ -892,6 +910,10 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
 {
+	if (gGuiContext.currentScreen && yoffset != 0.0) {
+		gGuiContext.currentScreen->mouseScrolled(yoffset);
+		return;
+	}
 	if (gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen && yoffset != 0.0) {
 		int step = (yoffset > 0.0) ? -1 : 1;
 		int next = (gGuiContext.selectedHotbarSlot + step) % 9;
@@ -1996,9 +2018,6 @@ std::string getArmorTexturePath(const ItemInstance& item, bool layer2) {
 	return "";
 }
 
-static float gBowPullTime = 0.0f;
-static bool gBowPulling = false;
-
 void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspect, bool viewBobbing, float lightShade) {
 	glUseProgram(0);
 	glEnable(GL_DEPTH_TEST);
@@ -2050,19 +2069,52 @@ void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspe
 			drawPlayerBox3D(-2.0f, -6.0f, -2.0f, 4.0f, 12.0f, 4.0f, 40, 16, 4, 12, 4, 64.0f, 64.0f, lightShade);
 		}
 	} else {
-		glTranslatef(-swSqrtSin * 0.40f, swDoubleSin * 0.20f, -swSin * 0.20f);
+		bool isPullingBow = (Item::mBow && held.getItem() == Item::mBow && gBowPulling && gBowPullTime > 0.0f);
+		if (!isPullingBow) {
+			glTranslatef(-swSqrtSin * 0.40f, swDoubleSin * 0.20f, -swSin * 0.20f);
+		}
 		glTranslatef(0.56f + bobX, -0.52f - bobY, -0.72f);
 		glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
-		glRotatef(-swSqSin * 20.0f, 0.0f, 1.0f, 0.0f);
-		glRotatef(-swSqrtSin * 20.0f, 0.0f, 0.0f, 1.0f);
-		glRotatef(-swSqrtSin * 80.0f, 1.0f, 0.0f, 0.0f);
+		if (!isPullingBow) {
+			glRotatef(-swSqSin * 20.0f, 0.0f, 1.0f, 0.0f);
+			glRotatef(-swSqrtSin * 20.0f, 0.0f, 0.0f, 1.0f);
+			glRotatef(-swSqrtSin * 80.0f, 1.0f, 0.0f, 0.0f);
+		}
 		glScalef(0.40f, 0.40f, 0.40f);
+
+		if (isPullingBow) {
+			// Exact MCPE 0.8.1 ItemInHandRenderer::render() bow pulling transform (L226-251)
+			glRotatef(-18.0f, 0.0f, 0.0f, 1.0f);
+			glRotatef(-12.0f, 0.0f, 1.0f, 0.0f);
+			glRotatef(-8.0f, 1.0f, 0.0f, 0.0f);
+			glTranslatef(-0.9f, 0.2f, 0.0f);
+
+			float pullTicks = gBowPullTime * 20.0f;
+			float v24 = ((pullTicks / 20.0f) * 2.0f + (pullTicks / 20.0f) * (pullTicks / 20.0f)) / 3.0f;
+			if (v24 > 1.0f) v24 = 1.0f;
+			if (v24 > 0.1f) {
+				glTranslatef(0.0f, std::sin((pullTicks - 0.1f) * 1.3f) * 0.01f * (v24 - 0.1f), 0.0f);
+			}
+			glTranslatef(0.0f, 0.0f, v24 * 0.1f);
+			glRotatef(-335.0f, 0.0f, 0.0f, 1.0f);
+			glRotatef(-50.0f, 0.0f, 1.0f, 0.0f);
+			glTranslatef(0.0f, 0.5f, 0.0f);
+			glScalef(1.0f, 1.0f, (v24 * 0.2f) + 1.0f);
+			glTranslatef(0.0f, -0.5f, 0.0f);
+			glRotatef(50.0f, 0.0f, 1.0f, 0.0f);
+			glRotatef(335.0f, 0.0f, 0.0f, 1.0f);
+		}
 
 		BlockRenderInfo blockInfo = getBlockRenderInfo(held);
 		if (blockInfo.is3D) {
 			drawTexturedCube3D(blockInfo, lightShade);
 		} else {
 			std::string tex = getItemTexturePath(held);
+			if (isPullingBow) {
+				if (gBowPullTime >= 0.85f) tex = "textures/items/bow_pulling_2.png";
+				else if (gBowPullTime >= 0.45f) tex = "textures/items/bow_pulling_1.png";
+				else tex = "textures/items/bow_pulling_0.png";
+			}
 			if (held.getItem() && held.getItem()->isMirroredArt()) {
 				glRotatef(180.0f, 0.0f, 1.0f, 0.0f);
 			}
@@ -2081,28 +2133,7 @@ void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspe
 			glTranslatef(8.0f, 0.5f, 8.0f);
 			glScalef(16.0f, 16.0f, -16.0f);
 			glRotatef(90.0f, 1.0f, 0.0f, 0.0f);
-			if (Item::mBow && held.getItem() == Item::mBow && gBowPulling && gBowPullTime > 0.0f) {
-				float f = std::min(1.0f, gBowPullTime / 1.0f);
-				float jitter = (f > 0.9f) ? std::sin(gBowPullTime * 60.0f) * 0.02f : 0.0f;
-				glTranslatef(0.0f, jitter, -0.05f * f);
-				glScalef(1.0f, 1.0f + f * 0.2f, 1.0f);
-				const char* bowTex = "textures/items/bow_pulling_0.png";
-				if (gBowPullTime >= 0.85f) bowTex = "textures/items/bow_pulling_2.png";
-				else if (gBowPullTime >= 0.45f) bowTex = "textures/items/bow_pulling_1.png";
-				if (GuiComponent::bindTexture(bowTex)) {
-					glColor4f(lightShade, lightShade, lightShade, 1.0f);
-					glBegin(GL_QUADS);
-					glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, 0.0f);
-					glTexCoord2f(1.0f, 0.0f); glVertex3f( 0.5f, 0.5f, 0.0f);
-					glTexCoord2f(1.0f, 1.0f); glVertex3f( 0.5f,-0.5f, 0.0f);
-					glTexCoord2f(0.0f, 1.0f); glVertex3f(-0.5f,-0.5f, 0.0f);
-					glEnd();
-				} else {
-					drawTexturedSprite3D(tex, lightShade);
-				}
-			} else {
-				drawTexturedSprite3D(tex, lightShade);
-			}
+			drawTexturedSprite3D(tex, lightShade);
 		}
 	}
 
@@ -2519,6 +2550,7 @@ void renderThreadStuff()
 		Level* level = new Level(std::make_unique<DBStorage>(meta.name, dbPath));
 		level->getLevelData().setLevelName(meta.name);
 		level->getLevelData().setSeed(static_cast<RandomSeed>(meta.seed));
+		level->getLevelData().setGameType(meta.isCreative ? GameType::Creative : GameType::Survival);
 		level->setTime(static_cast<int>(gGuiContext.worldTime));
 		commandContext.level = level;
 		commandContext.dim = &level->createDimension(Overworld);
@@ -2714,6 +2746,7 @@ void renderThreadStuff()
 
 				float survDt = std::min(std::max(deltaTime, 0.0001f), 0.1f);
 				if (eatCooldown > 0.0f) eatCooldown = std::max(0.0f, eatCooldown - survDt);
+				if (gItemUseSlowTimer > 0.0f) gItemUseSlowTimer = std::max(0.0f, gItemUseSlowTimer - survDt);
 				if (hazardDamageCooldown > 0.0f) hazardDamageCooldown = std::max(0.0f, hazardDamageCooldown - survDt);
 
 				if (!gGuiContext.isCreative && gGuiContext.health > 0) {
@@ -3014,9 +3047,11 @@ void renderThreadStuff()
 								float power = std::min(1.0f, gBowPullTime / 1.0f);
 								float speed = 12.0f + power * 26.0f;
 								int dmg = 2 + static_cast<int>(power * 7.0f);
-								Vec3 spawnPos(c.mPos.x + c.cameraFront.x * 0.4f,
-								              c.mPos.y + 1.52f + c.cameraFront.y * 0.4f,
-								              c.mPos.z + c.cameraFront.z * 0.4f);
+								// Match MCPE 0.8.1 Arrow(Level*, Mob*, float) spawn at eye height - 0.10, right hand 0.16
+								glm::vec3 rightVec = glm::normalize(glm::cross(c.cameraFront, c.cameraUp));
+								Vec3 spawnPos(c.mPos.x + rightVec.x * 0.16f + c.cameraFront.x * 0.20f,
+								              c.mPos.y - 0.10f + c.cameraFront.y * 0.20f,
+								              c.mPos.z + rightVec.z * 0.16f + c.cameraFront.z * 0.20f);
 								ProjectileTntSystem::spawnArrow(spawnPos, Vec3(c.cameraFront.x, c.cameraFront.y, c.cameraFront.z), speed, dmg, true);
 								SoundEngine::play(SoundEngine::SND_BOW, 0.9f, 0.9f + power * 0.2f);
 								if (!gGuiContext.isCreative && arrowSlot >= 0) {
@@ -3036,14 +3071,54 @@ void renderThreadStuff()
 					if (hasTargetHit && !c.isSneaking()) {
 						BlockPos hitPos = targetHit.getBlock();
 						FullBlock fb = region.getBlockAndData(hitPos);
+						const Block* hitBlk = fb.id > 0 ? Block::mBlocks[fb.id] : nullptr;
 						if (Block::mTNT && fb.id == Block::mTNT->mID &&
 						    Item::mFlintAndSteel && !held.isNull() && held.getItem() == Item::mFlintAndSteel) {
 							region.removeBlock(hitPos);
+							rebuildChunksForBlock(hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
 							ProjectileTntSystem::spawnPrimedTnt(hitPos.x + 0.5f, static_cast<float>(hitPos.y), hitPos.z + 0.5f);
 							c.triggerSwing();
 							handledRightClick = true;
-						} else if ((Block::mWoodenDoor && fb.id == Block::mWoodenDoor->mID) || fb.id == 107) {
-							region.setBlockAndData(hitPos, FullBlock(fb.id, static_cast<DataID>(fb.data ^ 4)), Block::UPDATE_ALL);
+						} else if (hitBlk && hitBlk->hasProperty(BlockProperty::Door) && !hitBlk->getMaterial().isType(MaterialType::Metal)) {
+							const DoorBlock* door = static_cast<const DoorBlock*>(hitBlk);
+							bool wasOpen = door->isOpen(region, hitPos);
+							door->setOpen(region, hitPos, !wasOpen, nullptr);
+							BlockPos secondPos;
+							if (door->getSecondPart(region, hitPos, secondPos)) {
+								rebuildChunksForBlock(secondPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+							}
+							rebuildChunksForBlock(hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+							SoundEngine::play(SoundEngine::SND_DOOR, 0.75f);
+							c.triggerSwing();
+							handledRightClick = true;
+						} else if (hitBlk && hitBlk->hasProperty(BlockProperty::Trap) && !hitBlk->getMaterial().isType(MaterialType::Metal)) {
+							const TrapDoorBlock* trap = static_cast<const TrapDoorBlock*>(hitBlk);
+							bool wasOpen = hitBlk->getBlockState(BlockState::OpenBit).getBool(fb.data);
+							trap->setOpen(region, hitPos, !wasOpen);
+							rebuildChunksForBlock(hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+							SoundEngine::play(SoundEngine::SND_DOOR, 0.75f);
+							c.triggerSwing();
+							handledRightClick = true;
+						} else if (hitBlk && hitBlk->hasProperty(BlockProperty::FenceGate)) {
+							DataID newData = fb.data;
+							bool wasOpen = hitBlk->getBlockState(BlockState::OpenBit).getBool(newData);
+							if (wasOpen) {
+								hitBlk->getBlockState(BlockState::OpenBit).set(newData, false);
+							} else {
+								int dir = 0;
+								if (std::abs(c.cameraMoveFront.z) >= std::abs(c.cameraMoveFront.x)) {
+									dir = (c.cameraMoveFront.z >= 0.0f) ? 0 : 2;
+								} else {
+									dir = (c.cameraMoveFront.x >= 0.0f) ? 3 : 1;
+								}
+								int curDir = hitBlk->getBlockState(BlockState::Direction).get<int>(newData);
+								if (curDir == ((dir + 2) % 4)) {
+									hitBlk->getBlockState(BlockState::Direction).set(newData, dir);
+								}
+								hitBlk->getBlockState(BlockState::OpenBit).set(newData, true);
+							}
+							region.setBlockAndData(hitPos, FullBlock(fb.id, newData), Block::UPDATE_ALL);
+							rebuildChunksForBlock(hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
 							SoundEngine::play(SoundEngine::SND_DOOR, 0.75f);
 							c.triggerSwing();
 							handledRightClick = true;
@@ -3077,7 +3152,59 @@ void renderThreadStuff()
 							}
 							SoundEngine::play(SoundEngine::SND_EAT, 0.8f);
 							eatCooldown = 0.25f;
+							gItemUseSlowTimer = 0.35f;
 							handledRightClick = true;
+						}
+					}
+
+					if (!handledRightClick && hasTargetHit && !held.isNull() && held.getStackSize() > 0) {
+						const Block* doorBlockToPlace = nullptr;
+						int hid = held.getId();
+						if (Item::mDoor_wood && hid == Item::mDoor_wood->getId()) doorBlockToPlace = Block::mWoodenDoor;
+						else if (Item::mDoor_spruce && hid == Item::mDoor_spruce->getId()) doorBlockToPlace = Block::mWoodenDoorSpruce;
+						else if (Item::mDoor_birch && hid == Item::mDoor_birch->getId()) doorBlockToPlace = Block::mWoodenDoorBirch;
+						else if (Item::mDoor_jungle && hid == Item::mDoor_jungle->getId()) doorBlockToPlace = Block::mWoodenDoorJungle;
+						else if (Item::mDoor_acacia && hid == Item::mDoor_acacia->getId()) doorBlockToPlace = Block::mWoodenDoorAcacia;
+						else if (Item::mDoor_darkoak && hid == Item::mDoor_darkoak->getId()) doorBlockToPlace = Block::mWoodenDoorDarkOak;
+						else if (Item::mDoor_iron && hid == Item::mDoor_iron->getId()) doorBlockToPlace = Block::mIronDoor;
+
+						if (doorBlockToPlace) {
+							BlockPos hitPos = targetHit.getBlock();
+							FacingID face = targetHit.getFacing();
+							if (face == Facing::UP) {
+								BlockPos lowerPos = hitPos.above();
+								BlockPos upperPos = lowerPos.above();
+								auto isRepl = [&](const BlockPos& bp) {
+									if (bp.y < 1 || bp.y >= 127) return false;
+									BlockID eid = region.getBlockID(bp);
+									const Block* eb = Block::mBlocks[eid];
+									return eid == 0 || (eb && eb->getMaterial().isReplaceable());
+								};
+								if (isRepl(lowerPos) && isRepl(upperPos) && region.isSolidBlockingBlock(hitPos)) {
+									int dir = 0;
+									if (std::abs(c.cameraMoveFront.z) >= std::abs(c.cameraMoveFront.x)) {
+										dir = (c.cameraMoveFront.z >= 0.0f) ? 1 : 3;
+									} else {
+										dir = (c.cameraMoveFront.x >= 0.0f) ? 0 : 2;
+									}
+									DataID lowerData = 0;
+									doorBlockToPlace->getBlockState(BlockState::Direction).set(lowerData, dir);
+									DataID upperData = 0;
+									doorBlockToPlace->getBlockState(BlockState::UpperBlockBit).set(upperData, 1);
+									if (region.setBlockAndData(lowerPos, FullBlock(doorBlockToPlace->mID, lowerData), Block::UPDATE_ALL) &&
+									    region.setBlockAndData(upperPos, FullBlock(doorBlockToPlace->mID, upperData), Block::UPDATE_ALL)) {
+										SoundEngine::play(SoundEngine::SND_PLACE, 0.75f, 0.95f);
+										c.triggerSwing();
+										if (!gGuiContext.isCreative) {
+											held.remove(1);
+											if (held.getStackSize() <= 0) held.setNull();
+										}
+										updateLightingAndRebuildChunks(region, lowerPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+										rebuildChunksForBlock(upperPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+										handledRightClick = true;
+									}
+								}
+							}
 						}
 					}
 
@@ -3160,6 +3287,26 @@ void renderThreadStuff()
 											} else {
 												allowPlace = false;
 											}
+										} else if (placeBlock->hasProperty(BlockProperty::Trap)) {
+											int tdir = 0;
+											if (std::abs(c.cameraMoveFront.z) >= std::abs(c.cameraMoveFront.x)) {
+												tdir = (c.cameraMoveFront.z >= 0.0f) ? 3 : 2;
+											} else {
+												tdir = (c.cameraMoveFront.x >= 0.0f) ? 1 : 0;
+											}
+											placeData = 0;
+											placeBlock->getBlockState(BlockState::Direction).set(placeData, tdir);
+											bool upsideDown = (face == Facing::DOWN) || (face != Facing::UP && targetHit.getPos().y - hitPos.y > 0.5f);
+											placeBlock->getBlockState(BlockState::UpsideDownBit).set(placeData, upsideDown ? 1 : 0);
+										} else if (placeBlock->hasProperty(BlockProperty::FenceGate)) {
+											int gdir = 0;
+											if (std::abs(c.cameraMoveFront.z) >= std::abs(c.cameraMoveFront.x)) {
+												gdir = (c.cameraMoveFront.z >= 0.0f) ? 0 : 2;
+											} else {
+												gdir = (c.cameraMoveFront.x >= 0.0f) ? 3 : 1;
+											}
+											placeData = 0;
+											placeBlock->getBlockState(BlockState::Direction).set(placeData, gdir);
 										}
 										if (allowPlace && region.setBlockAndData(placePos, FullBlock(placeBlock->mID, placeData), Block::UPDATE_ALL)) {
 											SoundEngine::play(SoundEngine::SND_PLACE, 0.75f, 0.95f + (std::rand() % 15) * 0.01f);
@@ -3181,6 +3328,8 @@ void renderThreadStuff()
 			} else {
 				isMining = false;
 				miningProgress = 0.0f;
+				gBowPulling = false;
+				gBowPullTime = 0.0f;
 			}
 
 			if (!gGuiContext.loadingChunks) {
@@ -3292,6 +3441,7 @@ void renderThreadStuff()
 							a.vy -= 18.0f * clampedDt;
 							a.vx *= 0.995f;
 							a.vz *= 0.995f;
+							ProjectileTntSystem::updateArrowOrientation(a);
 							float nx = a.x + a.vx * clampedDt;
 							float ny = a.y + a.vy * clampedDt;
 							float nz = a.z + a.vz * clampedDt;
@@ -3329,7 +3479,19 @@ void renderThreadStuff()
 								arrows.pop_back();
 								continue;
 							}
-							if (reg.isSolidBlockingBlock(BlockPos(Math::floor(nx), Math::floor(ny), Math::floor(nz)))) {
+							HitResult blockHit = reg.clip(Vec3(a.x, a.y, a.z), Vec3(nx, ny, nz), false, true, 50, false);
+							if ((blockHit.isHit() && blockHit.isTile()) ||
+							    reg.isSolidBlockingBlock(BlockPos(Math::floor(nx), Math::floor(ny), Math::floor(nz)))) {
+								ProjectileTntSystem::updateArrowOrientation(a);
+								if (blockHit.isHit() && blockHit.isTile() && stepLen > 0.0001f) {
+									const Vec3& hp = blockHit.getPos();
+									float dirX = (nx - a.x) / stepLen;
+									float dirY = (ny - a.y) / stepLen;
+									float dirZ = (nz - a.z) / stepLen;
+									a.x = hp.x - dirX * 0.05f;
+									a.y = hp.y - dirY * 0.05f;
+									a.z = hp.z - dirZ * 0.05f;
+								}
 								a.inGround = true;
 								a.vx = a.vy = a.vz = 0.0f;
 							} else {

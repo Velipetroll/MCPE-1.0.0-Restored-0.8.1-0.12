@@ -43,6 +43,14 @@ private:
 	int mLastDragY = 0;
 	int mPressStartY = 0;
 	int mSelectedItem = 0;
+	bool mEmbedded = false;
+	int mCustomX = 0;
+	int mCustomY = 0;
+	ItemInstance* mExternalCarried = nullptr;
+public:
+	void setEmbeddedPos(int x, int y) { mEmbedded = true; mCustomX = x; mCustomY = y; }
+	void setExternalCarried(ItemInstance* ext) { mExternalCarried = ext; }
+	Button* getCloseButton() const { return mCloseButton; }
 };
 
 class ArmorScreen : public Screen {
@@ -80,17 +88,47 @@ private:
 
 class CreativeInventoryScreen : public Screen {
 public:
+	~CreativeInventoryScreen() override;
 	void init() override;
 	void setupPositions() override;
 	void render(int mouseX, int mouseY, float partialTicks) override;
+	void mouseClicked(int x, int y, int button) override;
+	void mouseReleased(int x, int y, int button) override;
+	void mouseScrolled(double yoffset) override;
 	void buttonClicked(Button* button) override;
 	void keyPressed(int key) override;
-	bool renderGameBehind() const override { return true; }
+	bool renderGameBehind() const override;
 
 private:
+	void ensureCreativeItems();
+	int getMaxScroll() const;
+
 	int mCategory = 0; // 0 = Building, 1 = Decoration, 2 = Tools, 3 = Misc
 	std::vector<Button*> mCatButtons;
 	Button* mCloseButton = nullptr;
+	Button* mInventoryButton = nullptr;
+	bool mShowSurvivalInv = false;
+	InventoryScreen* mSideInventory = nullptr;
+	std::vector<ItemInstance> mFilteredItems[4];
+	ItemInstance mCarriedItem;
+
+	int mFrameX = 0;
+	int mFrameY = 0;
+	int mFrameW = 0;
+	int mFrameH = 0;
+	int mTabSize = 24;
+	int mPaneX = 0;
+	int mPaneY = 0;
+	int mPaneW = 0;
+	int mPaneH = 0;
+	int mPaneCols = 9;
+	int mCellSize = 26;
+	int mScrollY = 0;
+	bool mDragging = false;
+	bool mDidDrag = false;
+	int mLastDragY = 0;
+	int mPressStartY = 0;
+	int mSelectedCreativeIdx = -1;
 };
 
 struct TouchRecipeReq {
