@@ -72,12 +72,12 @@ The Dungeons codebase contained part of Pocket Edition 1.0.2.0 (dating to 2016-2
 
 ---
 
-## Completed Features & Roadmap
-- [x] First-person hand/held-item rendering, third-person Steve rendering, and view bobbing.
-- [x] Fix water rendering and grass color banding.
-- [x] Restore more of the Renderer library and port 0.6.1 leak code.
-- [x] Add a debug menu (ImGui).
-- [ ] Reload neighboring chunks upon generation and load structure files.
+## Current Limitations & Missing Features
+- Online multiplayer / networking support is missing.
+- Some items are not yet fully implemented.
+- Certain block functionalities need completion.
+- Ongoing rendering fixes and edge-case refinements.
+- Reloading neighboring chunks upon generation and loading structure files.
 
 ---
 
