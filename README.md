@@ -85,6 +85,8 @@ Contributions are welcome. Create a pull request fixing an issue or restoring a 
 3. Compile that generated solution and launch it, then type 'render' if you want to go straight into the renderer or use the console for running other commands.
 
 ## Images
+![In-game gameplay](images/ingame.png)
+![UI and Touch interface](images/Captura%20de%20pantalla_20261119_205146.png)
 ![Minecraft rendered in the restoration first person view](images/theworld.png)
 ![Minecraft rendered in the restoration seen from above](images/screenshot-renderer.png)
 ![Side view of a chunk](images/SideLayer0.bmp)
