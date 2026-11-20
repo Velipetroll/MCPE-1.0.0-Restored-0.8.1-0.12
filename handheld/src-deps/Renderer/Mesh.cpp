@@ -2,9 +2,56 @@
 #include "TexturePtr.h"
 #include "hal/interface/RenderContextImmediate.h"
 #include "materialptr.h"
+#include <vector>
 #include <glad/glad.h>
 namespace mce
 {
+    uint64_t Mesh::sGlGenCalls = 0;
+    uint64_t Mesh::sGlDeleteCalls = 0;
+    uint64_t Mesh::sGlPoolHits = 0;
+
+    namespace {
+        constexpr size_t MAX_POOLED_GL_HANDLES = 1024;
+        std::vector<unsigned int> sFreeVAOs;
+        std::vector<unsigned int> sFreeVBOs;
+        std::vector<unsigned int> sFreeEBOs;
+        bool sPoolActive = true;
+
+        unsigned int acquireGlHandle(std::vector<unsigned int>& pool, bool isVao) {
+            if (!pool.empty()) {
+                unsigned int id = pool.back();
+                pool.pop_back();
+                ++Mesh::sGlPoolHits;
+                return id;
+            }
+            unsigned int id = 0;
+            if (isVao) {
+                glGenVertexArrays(1, &id);
+            } else {
+                glGenBuffers(1, &id);
+            }
+            ++Mesh::sGlGenCalls;
+            return id;
+        }
+
+        void recycleGlHandle(unsigned int& id, std::vector<unsigned int>& pool, bool isVao) {
+            constexpr unsigned int invalidId = static_cast<unsigned int>(-1);
+            if (id == invalidId) {
+                return;
+            }
+            if (sPoolActive && pool.size() < MAX_POOLED_GL_HANDLES) {
+                pool.push_back(id);
+            } else if (sPoolActive) {
+                if (isVao) {
+                    glDeleteVertexArrays(1, &id);
+                } else {
+                    glDeleteBuffers(1, &id);
+                }
+                ++Mesh::sGlDeleteCalls;
+            }
+            id = invalidId;
+        }
+    }
 
     int fieldSizes[] =
     {
@@ -70,8 +117,6 @@ namespace mce
 
     void VertexFormat::uploadToVAO(unsigned int VAO)
     {
-
-
             glBindVertexArray(VAO);
 
             int offs = 0;
@@ -90,34 +135,36 @@ namespace mce
                         glVertexAttribIPointer(i, fieldAmounts[i], fieldTypes[i], vSize, (void*)offs);
                     offs += fieldSizes[i];
                 }
+                else
+                {
+                    glDisableVertexAttribArray(i);
+                }
             }
             glBindVertexArray(0);
     }
 
 	void Mesh::upload()
 	{
-        glGenVertexArrays(1, &VAO);
-
-        
-
+        VAO = acquireGlHandle(sFreeVAOs, true);
         glBindVertexArray(VAO);
 
-        glGenBuffers(1, &VBO);
-
-
+        VBO = acquireGlHandle(sFreeVBOs, false);
         glBindBuffer(GL_ARRAY_BUFFER, VBO);
+        glBufferData(GL_ARRAY_BUFFER, vertexCount * vertexSize, byteData, GL_STATIC_DRAW);
+
         if (indexCount * indexSize > 0)
         {
-            glGenBuffers(1, &EBO);
+            EBO = acquireGlHandle(sFreeEBOs, false);
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
             glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexCount * indexSize, byteData + (vertexCount * vertexSize), GL_STATIC_DRAW);
         }
-
-        glBufferData(GL_ARRAY_BUFFER, vertexCount*vertexSize, byteData, GL_STATIC_DRAW);
-
+        else
+        {
+            // Clear any prior EBO binding on a recycled VAO until an index buffer is attached
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        }
 
         vf.uploadToVAO(VAO);//apparently this doesnt work if you put it at the start (setting up the VAO also binds the vbo etc to it)
-
 
         glBindVertexArray(0);
 	}
@@ -243,19 +290,9 @@ namespace mce
 
     void Mesh::reset()
     {
-        const unsigned int invalidId = static_cast<unsigned int>(-1);
-        if (VAO != invalidId) {
-            glDeleteVertexArrays(1, &VAO);
-            VAO = invalidId;
-        }
-        if (VBO != invalidId) {
-            glDeleteBuffers(1, &VBO);
-            VBO = invalidId;
-        }
-        if (EBO != invalidId) {
-            glDeleteBuffers(1, &EBO);
-            EBO = invalidId;
-        }
+        recycleGlHandle(VAO, sFreeVAOs, true);
+        recycleGlHandle(VBO, sFreeVBOs, false);
+        recycleGlHandle(EBO, sFreeEBOs, false);
 
         vf = VertexFormat::EMPTY;
         vertexCount = 0;
@@ -266,6 +303,29 @@ namespace mce
         byteData = nullptr;
     }
 
+    void Mesh::shutdownPool()
+    {
+        if (!sPoolActive) {
+            return;
+        }
+        sPoolActive = false;
+        if (!sFreeVAOs.empty()) {
+            glDeleteVertexArrays(static_cast<GLsizei>(sFreeVAOs.size()), sFreeVAOs.data());
+            sGlDeleteCalls += sFreeVAOs.size();
+            sFreeVAOs.clear();
+        }
+        if (!sFreeVBOs.empty()) {
+            glDeleteBuffers(static_cast<GLsizei>(sFreeVBOs.size()), sFreeVBOs.data());
+            sGlDeleteCalls += sFreeVBOs.size();
+            sFreeVBOs.clear();
+        }
+        if (!sFreeEBOs.empty()) {
+            glDeleteBuffers(static_cast<GLsizei>(sFreeEBOs.size()), sFreeEBOs.data());
+            sGlDeleteCalls += sFreeEBOs.size();
+            sFreeEBOs.clear();
+        }
+    }
+
     Mesh::~Mesh()
     {
         reset();
@@ -274,30 +334,25 @@ namespace mce
 
     void Mesh::loadIndexBuffer(uint32_t _indexSize, void const* data, unsigned int count)
     {
-        if (VBO == -1)
+        constexpr unsigned int invalidId = static_cast<unsigned int>(-1);
+        if (VBO == invalidId)
         {
             upload();
         }
         indexSize = _indexSize;
         indexCount = count;
         glBindVertexArray(VAO);
-        if (EBO != -1)
+        if (EBO == invalidId)
         {
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-
-            glBufferData(
-                GL_ELEMENT_ARRAY_BUFFER,
-                count*indexSize,
-                data,
-                GL_DYNAMIC_DRAW
-            );
+            EBO = acquireGlHandle(sFreeEBOs, false);
         }
-        else
-        {
-            glGenBuffers(1, &EBO);
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-            glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexCount * indexSize, data, GL_STATIC_DRAW);
-        }
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+        glBufferData(
+            GL_ELEMENT_ARRAY_BUFFER,
+            count * indexSize,
+            data,
+            GL_STATIC_DRAW
+        );
         glBindVertexArray(0);
     }
 

@@ -16,6 +16,7 @@
 #include "world/level/chunk/ChunkViewSource.h"
 #include "world/level/block/LeafBlock.h"
 #include "world/level/block/OldLeafBlock.h"
+#include "client/renderer/block/BlockGraphics.h"
 #include "client/renderer/block/BlockTessellator.h"
 #include "client/renderer/chunks/BlockQueue.h"
 // #include "Renderer/GlobalConstantBufferManager.h"
@@ -89,17 +90,16 @@ void RenderChunkBuilder::_checkPropagatedBrightness(BlockSource& source, const B
 bool RenderChunkBuilder::_seesSkyDirectly(RenderChunk& rc, BlockSource& region) {
 	BlockPos min = rc.getPosition();
 	BlockPos max = min + RENDERCHUNK_SIDE;
+	LevelChunk* lc = region.getChunk(min);
+	if (!lc) return false;
 
-	for (BlockPos p = min; p.x < max.x; p.x++) {
-		for (p.z = min.z; p.z < max.z; p.z++) {
-			p.y = region.getHeightmap(p);
-
-			//walk down ignoring water
-			while (Block::mTranslucency[region.getBlockID(p)] > 0 && p.y > 0) {
-				--p.y;
+	for (int lx = 0; lx < RENDERCHUNK_SIDE; ++lx) {
+		for (int lz = 0; lz < RENDERCHUNK_SIDE; ++lz) {
+			int y = static_cast<int>(lc->getHeightmap(ChunkBlockPos(lx, 0, lz)));
+			while (y > 0 && Block::mTranslucency[lc->getBlock(ChunkBlockPos(lx, y, lz))] > 0) {
+				--y;
 			}
-
-			if (p.y >= min.y && p.y <= max.y) {
+			if (y >= min.y && y <= max.y) {
 				return true;
 			}
 		}
@@ -108,65 +108,170 @@ bool RenderChunkBuilder::_seesSkyDirectly(RenderChunk& rc, BlockSource& region) 
 }
 
 bool RenderChunkBuilder::_sortBlocks(BlockSource& region, RenderChunk& rc, VisibilityExtimator* VE, bool transparentLeaves) {
-
 	BlockPos min = rc.getPosition();
-	BlockPos max = min + RENDERCHUNK_SIDE;
+	LevelChunk* lc = region.getChunk(min);
+	if (!lc) {
+		return true;
+	}
+	const size_t subY = static_cast<size_t>(min.y >> 4);
+	const auto subs = lc->getSubChunks();
+	const LevelChunk::SubChunk* sc = (subY < subs.size()) ? subs[subY].get() : nullptr;
+	if (!sc || !sc->hasBlocks()) {
+		if (!skyLit) {
+			if (subY >= subs.size() || !Util::isAllZero(subs[subY]->mSkyLight.span())) {
+				skyLit = true;
+			}
+		}
+		if (allDark) {
+			if (subY >= subs.size()) {
+				allDark = lc->getRawBrightness(ChunkBlockPos(0, min.y, 0), Brightness::MIN) <= 2;
+			} else if (!Util::isAllZero(sc->mSkyLight.span()) || !Util::isAllZero(sc->mBlockLight.span())) {
+				allDark = false;
+			}
+		}
+		return true;
+	}
 
-	//put all the blocks on their queue
-	for (BlockPos p = min; p.x < max.x; p.x++) {
-		for (p.z = min.z; p.z < max.z; p.z++) {
+	const LevelChunk::SubChunk* scAbove = (subY + 1 < subs.size()) ? subs[subY + 1].get() : nullptr;
+	const LevelChunk::SubChunk* scBelow = (subY > 0) ? subs[subY - 1].get() : nullptr;
+	auto getNeighborSubChunk = [&](int dx, int dz) -> const LevelChunk::SubChunk* {
+		LevelChunk* nlc = region.getChunk(ChunkPos(lc->getPosition().x + dx, lc->getPosition().z + dz));
+		if (!nlc) return nullptr;
+		const auto nsubs = nlc->getSubChunks();
+		return (subY < nsubs.size()) ? nsubs[subY].get() : nullptr;
+	};
+	const LevelChunk::SubChunk* scWest = getNeighborSubChunk(-1, 0);
+	const LevelChunk::SubChunk* scEast = getNeighborSubChunk(1, 0);
+	const LevelChunk::SubChunk* scNorth = getNeighborSubChunk(0, -1);
+	const LevelChunk::SubChunk* scSouth = getNeighborSubChunk(0, 1);
+	const bool checkTopRow = (min.y + RENDERCHUNK_SIDE) < region.getMaxHeight();
 
-			//check the brightness above the top of the column
-			_checkPropagatedBrightness(region, p.above());
+	static bool sOpaqueCubeInit = false;
+	static bool sIsFullOpaqueCube[256]{};
+	if (!sOpaqueCubeInit) {
+		sOpaqueCubeInit = true;
+		AABB dummyShape;
+		for (int bid = 1; bid < 256; ++bid) {
+			const Block* blk = Block::mBlocks[bid];
+			const BlockGraphics* bg = BlockGraphics::mBlocks[bid];
+			if (!blk || !bg) continue;
+			if (!Block::mSolid[bid] || !blk->isSolidBlockingBlock() ||
+			    Block::mLightBlock[bid] < Brightness::MAX ||
+			    blk->getRenderLayer() != BlockRenderLayer::RENDERLAYER_OPAQUE ||
+			    bg->getBlockShape() != BlockShape::BLOCK ||
+			    blk->canHaveExtraData() ||
+			    blk->hasProperty(BlockProperty::Leaf) ||
+			    blk->hasProperty(BlockProperty::TopSnow)) {
+				continue;
+			}
+			const AABB& sh = blk->getVisualShape(0, dummyShape, false);
+			if (sh.min.x <= 0.001f && sh.min.y <= 0.001f && sh.min.z <= 0.001f &&
+			    sh.max.x >= 0.999f && sh.max.y >= 0.999f && sh.max.z >= 0.999f) {
+				sIsFullOpaqueCube[bid] = true;
+			}
+		}
+	}
 
-			for (p.y = min.y; p.y < max.y; p.y++) {
-				auto& block = region.getBlock(p);
+	for (int lx = 0; lx < RENDERCHUNK_SIDE; ++lx) {
+		const int wx = min.x + lx;
+		for (int lz = 0; lz < RENDERCHUNK_SIDE; ++lz) {
+			const int wz = min.z + lz;
 
-				if (!block.isType(Block::mAir)) {
-
-					if (VE) {
-						VE->setBlock(p, &block);
-					}
-
-					BlockRenderLayer renderLayer = block.getRenderLayer(region, p);
-					if (block.hasProperty(BlockProperty::Leaf)) {
-						bool isSeasonsTinted = (renderLayer == BlockRenderLayer::RENDERLAYER_SEASONS_OPAQUE || renderLayer == BlockRenderLayer::RENDERLAYER_SEASONS_OPTIONAL_ALPHATEST);
-
-						int leafType = Block::mLeaves->getBlockState(BlockState::MappedType).get<int>(region.getData(p));
-						if (leafType == enum_cast(OldLeafBlock::LeafType::Jungle)) {
-							renderLayer = transparentLeaves && isSeasonsTinted ? BlockRenderLayer::RENDERLAYER_SEASONS_OPAQUE : BlockRenderLayer::RENDERLAYER_OPAQUE;
-						}
-						else if (LeafBlock::isDeepLeafBlock(region, p)) {
-							renderLayer = transparentLeaves && isSeasonsTinted ? BlockRenderLayer::RENDERLAYER_SEASONS_OPAQUE : BlockRenderLayer::RENDERLAYER_OPAQUE;
-						}
-					}
-					else if (block.canHaveExtraData()) {
-
-						uint16_t extraData = region.getExtraData(p);
-						if (extraData != 0) {
-							auto& pBlock = Block::mBlocks[extraData & 0xFF];
-							if (pBlock != nullptr) {
-								mQueues[pBlock->getRenderLayer()].add(p);
-							}
-						}
-					}
-
-					int extraLayers = block.getExtraRenderLayers();
-					if (extraLayers != 0) {
-						for (int i = 0; i < enum_cast(BlockRenderLayer::_RENDERLAYER_COUNT); i++) {
-							if ((extraLayers & (1 << i)) != 0) {
-								mQueues[i].add(p);
-							}
-						}
-					}
-
-					mQueues[renderLayer].add(p);
+			if (checkTopRow && (!skyLit || allDark)) {
+				const size_t topIdx = static_cast<size_t>(0 | (lz << 4) | (lx << 8));
+				const uint8_t topSky = scAbove ? scAbove->mSkyLight.get(topIdx) : static_cast<uint8_t>(lc->getBrightness(region.getDimension().getSkyLightLayer(), ChunkBlockPos(lx, min.y + RENDERCHUNK_SIDE, lz)));
+				if (topSky > 0) skyLit = true;
+				if (allDark && (topSky + (scAbove ? scAbove->mBlockLight.get(topIdx) : 0)) > 2) {
+					allDark = false;
 				}
-
-				_checkPropagatedBrightness(region, p);
 			}
 
-			_checkAllDark(region, p);
+			for (int ly = 0; ly < RENDERCHUNK_SIDE; ++ly) {
+				const size_t sbIdx = static_cast<size_t>(ly | (lz << 4) | (lx << 8));
+				const BlockID id = sc->mBlocks[sbIdx];
+
+				if (!skyLit || allDark) {
+					const uint8_t s = sc->mSkyLight.get(sbIdx);
+					if (s > 0) skyLit = true;
+					if (allDark && (s + sc->mBlockLight.get(sbIdx)) > 2) {
+						allDark = false;
+					}
+				}
+
+				if (id == BlockID::AIR) {
+					continue;
+				}
+
+				// Fast-cull completely buried full-opaque cubes (interior + subchunk borders) before BlockTessellator/BlockOccluder work
+				if (sIsFullOpaqueCube[id]) {
+					if (lx > 0 && lx < 15 && ly > 0 && ly < 15 && lz > 0 && lz < 15) {
+						if (sIsFullOpaqueCube[sc->mBlocks[sbIdx - 1]] &&
+						    sIsFullOpaqueCube[sc->mBlocks[sbIdx + 1]] &&
+						    sIsFullOpaqueCube[sc->mBlocks[sbIdx - 16]] &&
+						    sIsFullOpaqueCube[sc->mBlocks[sbIdx + 16]] &&
+						    sIsFullOpaqueCube[sc->mBlocks[sbIdx - 256]] &&
+						    sIsFullOpaqueCube[sc->mBlocks[sbIdx + 256]]) {
+							continue;
+						}
+					} else {
+						const BlockID nDown = (ly > 0) ? sc->mBlocks[sbIdx - 1]
+							: (scBelow ? scBelow->mBlocks[static_cast<size_t>(15 | (lz << 4) | (lx << 8))] : BlockID::AIR);
+						const BlockID nUp = (ly < 15) ? sc->mBlocks[sbIdx + 1]
+							: (scAbove ? scAbove->mBlocks[static_cast<size_t>(0 | (lz << 4) | (lx << 8))] : BlockID::AIR);
+						const BlockID nNorth = (lz > 0) ? sc->mBlocks[sbIdx - 16]
+							: (scNorth ? scNorth->mBlocks[static_cast<size_t>(ly | (15 << 4) | (lx << 8))] : BlockID::AIR);
+						const BlockID nSouth = (lz < 15) ? sc->mBlocks[sbIdx + 16]
+							: (scSouth ? scSouth->mBlocks[static_cast<size_t>(ly | (0 << 4) | (lx << 8))] : BlockID::AIR);
+						const BlockID nWest = (lx > 0) ? sc->mBlocks[sbIdx - 256]
+							: (scWest ? scWest->mBlocks[static_cast<size_t>(ly | (lz << 4) | (15 << 8))] : BlockID::AIR);
+						const BlockID nEast = (lx < 15) ? sc->mBlocks[sbIdx + 256]
+							: (scEast ? scEast->mBlocks[static_cast<size_t>(ly | (lz << 4) | (0 << 8))] : BlockID::AIR);
+						if (sIsFullOpaqueCube[nDown] && sIsFullOpaqueCube[nUp] &&
+						    sIsFullOpaqueCube[nNorth] && sIsFullOpaqueCube[nSouth] &&
+						    sIsFullOpaqueCube[nWest] && sIsFullOpaqueCube[nEast]) {
+							continue;
+						}
+					}
+				}
+
+				const BlockPos p(wx, min.y + ly, wz);
+				const Block& block = *Block::mBlocks[id];
+				if (VE) {
+					VE->setBlock(p, &block);
+				}
+
+				BlockRenderLayer renderLayer = block.getRenderLayer(region, p);
+				if (block.hasProperty(BlockProperty::Leaf)) {
+					const bool isSeasonsTinted = (renderLayer == BlockRenderLayer::RENDERLAYER_SEASONS_OPAQUE || renderLayer == BlockRenderLayer::RENDERLAYER_SEASONS_OPTIONAL_ALPHATEST);
+					const int leafType = Block::mLeaves->getBlockState(BlockState::MappedType).get<int>(sc->mData.get(sbIdx));
+					if (leafType == enum_cast(OldLeafBlock::LeafType::Jungle)) {
+						renderLayer = transparentLeaves && isSeasonsTinted ? BlockRenderLayer::RENDERLAYER_SEASONS_OPAQUE : BlockRenderLayer::RENDERLAYER_OPAQUE;
+					}
+					else if (LeafBlock::isDeepLeafBlock(region, p)) {
+						renderLayer = transparentLeaves && isSeasonsTinted ? BlockRenderLayer::RENDERLAYER_SEASONS_OPAQUE : BlockRenderLayer::RENDERLAYER_OPAQUE;
+					}
+				}
+				else if (block.canHaveExtraData()) {
+					const uint16_t extraData = region.getExtraData(p);
+					if (extraData != 0) {
+						auto& pBlock = Block::mBlocks[extraData & 0xFF];
+						if (pBlock != nullptr) {
+							mQueues[pBlock->getRenderLayer()].add(p);
+						}
+					}
+				}
+
+				const int extraLayers = block.getExtraRenderLayers();
+				if (extraLayers != 0) {
+					for (int i = 0; i < enum_cast(BlockRenderLayer::_RENDERLAYER_COUNT); i++) {
+						if ((extraLayers & (1 << i)) != 0) {
+							mQueues[i].add(p);
+						}
+					}
+				}
+
+				mQueues[renderLayer].add(p);
+			}
 		}
 	}
 
@@ -175,23 +280,36 @@ bool RenderChunkBuilder::_sortBlocks(BlockSource& region, RenderChunk& rc, Visib
 
 bool RenderChunkBuilder::_tessellateQueues(RenderChunk& rc, BlockSource& region) {
 	auto& t = renderer->getTessellator();
+	bool cacheReset = false;
+
+	const BlockPos rcPos = rc.getPosition();
+	LevelChunk* lc = region.getChunk(rcPos);
+	const size_t subY = static_cast<size_t>(rcPos.y >> 4);
+	const auto subs = lc ? lc->getSubChunks() : buffer_span<std::unique_ptr<LevelChunk::SubChunk>>{};
+	const LevelChunk::SubChunk* sc = (subY < subs.size()) ? subs[subY].get() : nullptr;
 
 	for (int l = 0; l < BlockRenderLayer::_RENDERLAYER_COUNT; ++l) {
 
 		if (!mQueues[l].empty()) {
 			if (!t.isTessellating()) {	//lazy-begin tessellating
  				t.begin(12000);	//made up average
-				t.setOffset(-rc.getPosition());
+				t.setOffset(-rcPos);
+			}
+			if (!cacheReset) {
+				renderer->resetCache(rcPos, region);
+				cacheReset = true;
 			}
 
 			auto existingVertices = t.getVertexCount();
 
 			renderer->setRenderLayer(l);
 			renderer->setForceOpaque(l == BlockRenderLayer::RENDERLAYER_DOUBLE_SIDED);
-			renderer->resetCache(rc.getPosition(), region);
 
 			for (BlockPos& pos : mQueues[l]) {
-				FullBlock fullBlock = region.getBlockAndData(pos);
+				FullBlock fullBlock = sc
+					? FullBlock(sc->mBlocks[static_cast<size_t>((pos.y & 15) | ((pos.z & 15) << 4) | ((pos.x & 15) << 8))],
+					            sc->mData.get(static_cast<size_t>((pos.y & 15) | ((pos.z & 15) << 4) | ((pos.x & 15) << 8))))
+					: region.getBlockAndData(pos);
 				const Block* block = Block::mBlocks[fullBlock.id];
 				renderer->tessellateInWorld(*block, pos, fullBlock.data);
 			}
@@ -229,9 +347,8 @@ void RenderChunkBuilder::_buildRanges() {
 
 
 VisibilityExtimator* RenderChunkBuilder::_getVisibilityHelper() {
-	// TODO: rherlitz
- 	return visibilityChanged ? &VisibilityExtimator::pool.getLocal() : nullptr;
-	//return nullptr;
+	// Visibility graph (canSeeChunkLookingFrom) is unused; frustum culling handles chunk visibility directly
+	return nullptr;
 }
 
 void RenderChunkBuilder::build(RenderChunk& rc, bool transparentLeaves, bool smoothLighting) {
@@ -245,6 +362,7 @@ void RenderChunkBuilder::build(RenderChunk& rc, bool transparentLeaves, bool smo
 		lc->updateCachedData(region);
 	}
 
+	mVisibility = VisibilityNode(true);
 	//get our local visibility extimator if needed
 	auto VE = _getVisibilityHelper();
 	if (VE) {

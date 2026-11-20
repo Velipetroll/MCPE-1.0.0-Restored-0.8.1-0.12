@@ -5,10 +5,62 @@
 
 
 
+#include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <iostream>
+
+struct ChunkPerfMetrics {
+    std::atomic<uint64_t> dbHasKeyCalls{0};
+    std::atomic<uint64_t> dbReadCalls{0};
+    std::atomic<uint64_t> dbChunkReadHits{0};
+    std::atomic<uint64_t> dbUs{0};
+    std::atomic<uint64_t> chunkNewCalls{0};
+    std::atomic<uint64_t> chunkDeleteCalls{0};
+    std::atomic<uint64_t> subChunkNewCalls{0};
+    std::atomic<uint64_t> subChunkDeleteCalls{0};
+    std::atomic<uint64_t> poolMallocCalls{0};
+    std::atomic<uint64_t> poolFreeCalls{0};
+    std::atomic<uint64_t> lightPropagateCalls{0};
+    std::atomic<uint64_t> lightUs{0};
+    std::atomic<uint64_t> meshRebuilds{0};
+    std::atomic<uint64_t> emptySubChunksSkipped{0};
+    std::atomic<uint64_t> meshUs{0};
+    std::atomic<uint64_t> faceSorts{0};
+    std::atomic<uint64_t> faceSortUs{0};
+    std::atomic<uint64_t> unloadUs{0};
+    std::atomic<uint64_t> loadPhaseUs{0};
+    std::atomic<uint64_t> renderUs{0};
+    std::atomic<uint64_t> frameUs{0};
+
+    void reset() {
+        dbHasKeyCalls.store(0, std::memory_order_relaxed);
+        dbReadCalls.store(0, std::memory_order_relaxed);
+        dbChunkReadHits.store(0, std::memory_order_relaxed);
+        dbUs.store(0, std::memory_order_relaxed);
+        chunkNewCalls.store(0, std::memory_order_relaxed);
+        chunkDeleteCalls.store(0, std::memory_order_relaxed);
+        subChunkNewCalls.store(0, std::memory_order_relaxed);
+        subChunkDeleteCalls.store(0, std::memory_order_relaxed);
+        poolMallocCalls.store(0, std::memory_order_relaxed);
+        poolFreeCalls.store(0, std::memory_order_relaxed);
+        lightPropagateCalls.store(0, std::memory_order_relaxed);
+        lightUs.store(0, std::memory_order_relaxed);
+        meshRebuilds.store(0, std::memory_order_relaxed);
+        emptySubChunksSkipped.store(0, std::memory_order_relaxed);
+        meshUs.store(0, std::memory_order_relaxed);
+        faceSorts.store(0, std::memory_order_relaxed);
+        faceSortUs.store(0, std::memory_order_relaxed);
+        unloadUs.store(0, std::memory_order_relaxed);
+        loadPhaseUs.store(0, std::memory_order_relaxed);
+        renderUs.store(0, std::memory_order_relaxed);
+        frameUs.store(0, std::memory_order_relaxed);
+    }
+
+    static ChunkPerfMetrics instance;
+};
 
 class ScopedProfilee
 {
@@ -112,4 +164,8 @@ private:
 };
 
 
+#ifdef ENABLE_SCOPED_PROFILE
 #define ScopedProfile(name) ScopedProfilee profiler___(name)
+#else
+#define ScopedProfile(name) ((void)0)
+#endif

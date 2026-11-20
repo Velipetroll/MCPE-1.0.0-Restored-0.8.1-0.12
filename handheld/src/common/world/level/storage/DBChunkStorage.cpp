@@ -57,6 +57,9 @@ public:
 		return string_span(reinterpret_cast<const char*>(this), sizeof(pos) + sizeOfId);
 	}
 
+	const ChunkPos& getPos() const { return pos; }
+	int getDimensionId() const { return id; }
+
 private:
 
 	const ChunkPos pos;
@@ -137,9 +140,30 @@ std::string join(string_span prefix, LevelChunk::Tag tag, uint32_t i) {
 	return join(prefix, tag) + (char)i;
 }
 
+uint8_t DBChunkStorage::_getChunkPresenceFlags(const ChunkPos& pos, int dimId) const {
+	std::lock_guard<std::mutex> lock(mChunkPresenceMutex);
+	auto it = mChunkPresenceCache.find(ChunkPresenceKey{pos.x, pos.z, dimId});
+	return (it != mChunkPresenceCache.end()) ? it->second : 0;
+}
+
+void DBChunkStorage::_updateChunkPresenceFlags(const ChunkPos& pos, int dimId, uint8_t setMask, uint8_t valueBits) const {
+	std::lock_guard<std::mutex> lock(mChunkPresenceMutex);
+	uint8_t& entry = mChunkPresenceCache[ChunkPresenceKey{pos.x, pos.z, dimId}];
+	entry = static_cast<uint8_t>((entry & ~setMask) | (valueBits & setMask));
+}
+
 bool DBChunkStorage::_hasChunk(const ChunkKey &key) {
-	return mStorage->hasKey(join(key.asSpan(), LevelChunk::Tag::Version)) ||
-		   mStorage->hasKey(join(key.asSpan(), LevelChunk::Tag::LegacyTerrain));
+	const uint8_t cached = _getChunkPresenceFlags(key.getPos(), key.getDimensionId());
+	if ((cached & PRESENCE_KNOWN) != 0) {
+		return (cached & PRESENCE_EXISTS) != 0;
+	}
+
+	bool found = mStorage->hasKey(join(key.asSpan(), LevelChunk::Tag::Version)) ||
+	             mStorage->hasKey(join(key.asSpan(), LevelChunk::Tag::LegacyTerrain));
+	_updateChunkPresenceFlags(key.getPos(), key.getDimensionId(),
+	                          PRESENCE_KNOWN | PRESENCE_EXISTS,
+	                          PRESENCE_KNOWN | (found ? PRESENCE_EXISTS : 0));
+	return found;
 }
 
 void DBChunkStorage::loadChunk(LevelChunk& lc, bool forceImmediateReplacementDataLoad) {
@@ -257,6 +281,13 @@ bool DBChunkStorage::_loadChunkFromDB(LevelChunk& lc) {
 		if(lc.deserialize(keyValues)) {
 			lc.setDebugDisplaySavedState(true);
 
+			const bool hasData2D =
+				keyValues.contains(std::string(1, static_cast<char>(LevelChunk::Tag::Data2D))) ||
+				keyValues.contains(std::string(1, static_cast<char>(LevelChunk::Tag::Data2DLegacy)));
+			_updateChunkPresenceFlags(lc.getPosition(), lc.getDimensionId(),
+			                          PRESENCE_KNOWN | PRESENCE_EXISTS | PRESENCE_DATA2D_KNOWN | PRESENCE_DATA2D_SAVED,
+			                          PRESENCE_KNOWN | PRESENCE_EXISTS | PRESENCE_DATA2D_KNOWN | (hasData2D ? PRESENCE_DATA2D_SAVED : 0));
+
 			//go either to fully loaded or generated waiting for postprocessing
 			// not that legacy chunks will get fixed up automatically by the lighting algorithm fixup later that all 
 			// modified chunks get
@@ -346,7 +377,15 @@ void DBChunkStorage::_serializeChunk(const LevelChunk& lc, leveldb::WriteBatch& 
  
  	//make sure that the chunk was saved in the proper format
  	//don't save only the minimal changeset if not
- 	bool alreadySavedWithSubChunks = mStorage->hasKey(join(prefix, LevelChunk::Tag::Data2D)) || mStorage->hasKey(join(prefix, LevelChunk::Tag::Data2DLegacy));
+	const uint8_t cachedPresence = _getChunkPresenceFlags(lc.getPosition(), lc.getDimensionId());
+	bool alreadySavedWithSubChunks = false;
+	if ((cachedPresence & PRESENCE_DATA2D_KNOWN) != 0) {
+		alreadySavedWithSubChunks = (cachedPresence & PRESENCE_DATA2D_SAVED) != 0;
+	} else {
+		alreadySavedWithSubChunks =
+			mStorage->hasKey(join(prefix, LevelChunk::Tag::Data2D)) ||
+			mStorage->hasKey(join(prefix, LevelChunk::Tag::Data2DLegacy));
+	}
  
  	bool anyTerrainSaved = false;
  
@@ -450,6 +489,11 @@ void DBChunkStorage::_serializeChunk(const LevelChunk& lc, leveldb::WriteBatch& 
  	if (lc.getLoadedFormat() < LevelChunkFormat::v17_0) {
  		batch.Delete(join(prefix, LevelChunk::Tag::LegacyTerrain));
  	}
+
+	const bool nowHasData2D = alreadySavedWithSubChunks || anyTerrainSaved;
+	_updateChunkPresenceFlags(lc.getPosition(), lc.getDimensionId(),
+	                          PRESENCE_KNOWN | PRESENCE_EXISTS | PRESENCE_DATA2D_KNOWN | PRESENCE_DATA2D_SAVED,
+	                          PRESENCE_KNOWN | PRESENCE_EXISTS | PRESENCE_DATA2D_KNOWN | (nowHasData2D ? PRESENCE_DATA2D_SAVED : 0));
 }
 
 void DBChunkStorage::_writeBatch() {

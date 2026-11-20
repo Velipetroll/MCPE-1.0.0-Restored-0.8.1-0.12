@@ -87,6 +87,11 @@ protected:
 		return nullptr;
 	}
 
+	void reserve(size_t bufferBytes, size_t spanCount = 16) {
+		mSpans.reserve(spanCount);
+		mBuffer.reserve(bufferBytes);
+	}
+
 	void clear() {
 		mSpans.clear();
 		mBuffer.clear();

@@ -13,6 +13,8 @@
 #include "world/level/biome/MobSpawnerData.h"
 #include "world/level/levelgen/structure/StructureFeatureType.h"
 #include "ChunkSourceView.h"
+#include <unordered_set>
+#include <vector>
 
 class LevelChunk;
 class Level;
@@ -105,6 +107,9 @@ public:
 	virtual bool findNearestFeature(StructureFeatureType feature, Player& player, BlockPos& pos);
 	virtual void prepareHeights(BlockVolume& box, int xOffs, int zOffs);
 
+	void setDeferPostProcessing(bool defer) { mDeferPostProcess = defer; }
+	int processDeferredPostProcesses(const ChunkPos& focusPos, int maxChunks, double maxBudgetMs);
+
 protected:
 
 	int mChunkSide;
@@ -113,9 +118,13 @@ protected:
 	Dimension* mDimension = nullptr;
 	ChunkSource* mParent = nullptr;
 	Unique<ChunkSource> mOwnedParent;
+	bool mDeferPostProcess = false;
+	std::vector<ChunkPos> mPendingPostProcessQueue;
+	std::unordered_set<ChunkPos> mPendingPostProcessSet;
 
 	void _startPostProcessingArea(LevelChunk& center);
 	void _startPostProcessing(LevelChunk& lc);
+	bool _canStartPostProcessing(LevelChunk& lc);
 	int _getChunkPriority(const LevelChunk& lc);
 
 	void _fireChunkLoaded(LevelChunk& lc);

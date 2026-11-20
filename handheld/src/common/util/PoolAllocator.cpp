@@ -1,6 +1,7 @@
 #include "common_header.h"
 
 #include "util/PoolAllocator.h"
+#include "util/PerfTimer.h"
 
 // #include "platform/threading/WorkerPool.h"
 //#include "platform/threading/atomicops.h"
@@ -37,6 +38,7 @@ void* PoolAllocator::get(){
 	void* block;
 	if (mIdlePool.empty()) {
 		block = malloc(BLOCK_SIZE); /*safe*/
+		ChunkPerfMetrics::instance.poolMallocCalls.fetch_add(1, std::memory_order_relaxed);
 		++mAllocated;
 	}
 	else {
@@ -80,6 +82,7 @@ bool PoolAllocator::trim(){
 	while (!mIdlePool.empty()) {
 		if (mIdlePool.front() != nullptr) {
 			free(mIdlePool.front()); 	 /*safe*/
+			ChunkPerfMetrics::instance.poolFreeCalls.fetch_add(1, std::memory_order_relaxed);
 		}
 		mIdlePool.pop();
 		--mAllocated;

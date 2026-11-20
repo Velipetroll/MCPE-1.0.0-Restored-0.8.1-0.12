@@ -5,6 +5,7 @@
 #include "world/level/GeneratorType.h"
 #include "CommonTypes.h"
 #include "platform/threading/ThreadLocal.h"
+#include <mutex>
 
 class Level;
 class Biome;
@@ -40,10 +41,20 @@ public:
 
 private:
 
+	struct LayerPair {
+		LayerPtr biomeLayer;
+		LayerPtr zoomedLayer;
+	};
+
 	LayerPtr getZoomedLayer();
+	const LayerPair& _getLayers() const;
 
 	LayerPtr biomeLayer;
 	LayerPtr zoomedLayer;
 	std::array<int, 7> playerValidSpawns;
 	RandomSeed seed;
+	GeneratorType mGenType = GeneratorType::Overworld;
+	bool mHasDefaultLayers = false;
+	mutable ThreadLocal<LayerPair> mThreadLayers;
+	mutable std::mutex mLayerMutex;
 };

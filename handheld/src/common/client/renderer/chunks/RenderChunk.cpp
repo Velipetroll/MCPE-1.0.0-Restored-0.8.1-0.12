@@ -90,6 +90,11 @@ RenderChunk::RenderChunk(const BlockPos& p) :
 
 RenderChunk::~RenderChunk() {
 	reset();
+	Util::freeVectorMemory(mData);
+	Util::freeVectorMemory(mData32bit);
+	for (int i = 0; i < Facing::NUM_CULLING_IDS; ++i) {
+		Util::freeVectorMemory(mFaces[i]);
+	}
 }
 
 void RenderChunk::setPos(const BlockPos& p) {
@@ -290,12 +295,6 @@ Unique<RenderChunkBuilder>&& RenderChunk::endRebuild(const Vec3& viewPos) {
 
 			t.setOffset(0, 0, 0);
 
-			{
- 				ScopedProfile("Memory clean up");
-				//clear up memory
-				builder.trim();
-			}
-
 			//update polycounts
 #ifdef DEBUG_STATS
 
@@ -306,6 +305,12 @@ Unique<RenderChunkBuilder>&& RenderChunk::endRebuild(const Vec3& viewPos) {
 		}
 		else {
  			mMesh.reset();
+			mNumFaces = 0;
+			mData.clear();
+			mData32bit.clear();
+			for (int i = 0; i < Facing::NUM_CULLING_IDS; ++i) {
+				mFaces[i].clear();
+			}
 
 #ifdef DEBUG_STATS
 			memset(mPolyCount, 0, sizeof(mPolyCount));
@@ -328,7 +333,13 @@ Unique<RenderChunkBuilder>&& RenderChunk::endRebuild(const Vec3& viewPos) {
 			_changeBuildState(BuildState::Building, isEmpty() ? BuildState::Empty : BuildState::Ready);
 		}
 
-		updateFaceSortState(viewPos);
+		if (mNumFaces == 0) {
+			_tryChangeSortState(SortState::SortDirty, SortState::Ready);
+			_tryChangeSortState(SortState::RestartSort, SortState::Ready);
+		}
+		else {
+			updateFaceSortState(viewPos);
+		}
 
 		if (!mCanRender) {
 			//store when the chunk was first ready to do the fade in
@@ -353,6 +364,15 @@ void RenderChunk::makeReadyAsEmpty(bool hasNoSkyLight) {
 
  	mMesh.reset();
 	mNumFaces = 0;
+	memset(mIndexRange, 0, sizeof(mIndexRange));
+	memset(mSortedIndexRange, 0, sizeof(mSortedIndexRange));
+	memset(mRenderLayerIndexRange, 0, sizeof(mRenderLayerIndexRange));
+	memset(mSortedRenderLayerIndexRange, 0, sizeof(mSortedRenderLayerIndexRange));
+	mData.clear();
+	mData32bit.clear();
+	for (int i = 0; i < Facing::NUM_CULLING_IDS; ++i) {
+		mFaces[i].clear();
+	}
 
 	mVisibility = VisibilityNode(true);
 
@@ -369,9 +389,13 @@ void RenderChunk::makeReadyAsEmpty(bool hasNoSkyLight) {
 	DebugStats::instance.mRebuiltChunks.push_back(ChunkPos(mPosition));
 #endif
 
-	_changeBuildState(BuildState::Dirty, BuildState::Ready);
+	if (!_tryChangeBuildState(BuildState::Dirty, BuildState::Ready)) {
+		_tryChangeBuildState(BuildState::Empty, BuildState::Ready);
+	}
 
-	_tryChangeSortState(SortState::SortDirty, SortState::Ready);
+	if (!_tryChangeSortState(SortState::SortDirty, SortState::Ready)) {
+		_tryChangeSortState(SortState::RestartSort, SortState::Ready);
+	}
 }
 
 
@@ -409,6 +433,12 @@ void RenderChunk::makeReadyAsEmpty(bool hasNoSkyLight) {
  }
 
 void RenderChunk::updateFaceSortState(BlockPos cameraPos) {
+	if (mNumFaces == 0) {
+		_tryChangeSortState(SortState::SortDirty, SortState::Ready);
+		_tryChangeSortState(SortState::RestartSort, SortState::Ready);
+		return;
+	}
+
 	if (!(mSortState == SortState::Ready || mSortState == SortState::Sorting || mSortState == SortState::RestartSort || mSortState == SortState::SortDirty)) {
 		return;
 	}
@@ -424,32 +454,12 @@ void RenderChunk::updateFaceSortState(BlockPos cameraPos) {
 		Math::floor((float)cameraPos.z / RENDERCHUNK_SIDE));
 	BlockPos cameraDelta = chunkPos - camPos;
 
-	// Clamp the camera delta.  
-	// -1 signifies that the chunk is entirely in the negative space of the camera for that axis
-	// 0 signifies that the camera is within the min/max bounds of the chunk for that axis
-	// 1 signifies that the chunk is entirely in the positive space of the camera for that axis
 	cameraDelta.x = Math::clamp(cameraDelta.x, -1, 1);
 	cameraDelta.y = Math::clamp(cameraDelta.y, -1, 1);
 	cameraDelta.z = Math::clamp(cameraDelta.z, -1, 1);
 
-	// Sort the chunk indices if the camera delta has changed
-	if (mLastSortCameraDelta != cameraDelta) {
-		mLastSortCameraDelta = cameraDelta;
-		if (mSortState == SortState::Ready) {
-			// The mesh has an out of date sorting, and needs to be sorted.
-			_changeSortState(SortState::Ready, SortState::SortDirty);
-		}
-		else if (mSortState == SortState::Sorting) {
-			// Sorting has already been started.  Need to redo the sort once it has finished.
-			_changeSortState(SortState::Sorting, SortState::RestartSort);
-		}
-
-		// If the sort state is in RestartSort or SortDirty, the state doesn't need to change, 
-		// just need to update mLastSortCameraDelta, which has already been done. Later on, 
-		// this will be used to sort the faces
-	}
-
-	return;
+	// sortFaces() emits all 7 face buckets in fixed order, so already-Ready EBOs remain valid across boundary moves.
+	mLastSortCameraDelta = cameraDelta;
 }
 
 void RenderChunk::sortFaces() {
@@ -562,7 +572,7 @@ void RenderChunk::render(const RenderChunkRenderParameters& renderChunkRenderPar
 }
 
 bool RenderChunk::isEmpty() const {
-	return mCanRender /*&& !mMesh.isValid()*/;
+	return mMesh.VBO == static_cast<unsigned int>(-1) && mNumFaces == 0;
 }
 
 float RenderChunk::distanceToSqr(const Entity* player) const {
@@ -615,10 +625,10 @@ void RenderChunk::reset() {
 	memset(mRenderLayerIndexRange, 0, sizeof(mRenderLayerIndexRange));
 	memset(mSortedRenderLayerIndexRange, 0, sizeof(mSortedRenderLayerIndexRange));
 
-	Util::freeVectorMemory(mData);
-	Util::freeVectorMemory(mData32bit);
+	mData.clear();
+	mData32bit.clear();
 	for (int i = 0; i < Facing::NUM_CULLING_IDS; ++i) {
-		Util::freeVectorMemory(mFaces[i]);
+		mFaces[i].clear();
 	}
 	mCutawayVisibilityBuffer.reset();
 	mCurrentBuilder.reset();

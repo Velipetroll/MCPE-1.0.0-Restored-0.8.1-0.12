@@ -13,7 +13,14 @@ BiomeSource::BiomeSource(RandomSeed seed) :
 }
 
 BiomeSource::BiomeSource(RandomSeed seed, GeneratorType type) :
-	seed(seed) {
+	seed(seed),
+	mGenType(type),
+	mHasDefaultLayers(true),
+	mThreadLayers([seed, type]() {
+		auto p = make_unique<LayerPair>();
+		Layer::getDefaultLayers(seed, p->biomeLayer, p->zoomedLayer, type);
+		return p;
+	}) {
 	Layer::getDefaultLayers(seed, biomeLayer, zoomedLayer, type);
 	playerValidSpawns = { {
 		Biome::forest->mId,
@@ -26,11 +33,20 @@ BiomeSource::BiomeSource(RandomSeed seed, GeneratorType type) :
 	} };
 }
 
+const BiomeSource::LayerPair& BiomeSource::_getLayers() const {
+	return mThreadLayers.getLocal();
+}
+
 void BiomeSource::fillBiomeData(LevelChunk* levelChunk, int x, int z) const {
 	ScopedProfile("fillBiomeData");
 	LayerData layerData;
 
-	zoomedLayer->fillArea(layerData, x, z, CHUNK_WIDTH, CHUNK_WIDTH);
+	if (mHasDefaultLayers) {
+		_getLayers().zoomedLayer->fillArea(layerData, x, z, CHUNK_WIDTH, CHUNK_WIDTH);
+	} else {
+		std::lock_guard<std::mutex> lock(mLayerMutex);
+		zoomedLayer->fillArea(layerData, x, z, CHUNK_WIDTH, CHUNK_WIDTH);
+	}
 
 	for(char zOff = 0; zOff < CHUNK_WIDTH; zOff++) {
 		for(char xOff = 0; xOff < CHUNK_WIDTH; xOff++) {
@@ -46,7 +62,12 @@ void BiomeSource::fillRawBiomeData(Biome** biomes, int x, int z) const {
 	ScopedProfile("fillRawBiomeData");
 	LayerData layerData;
 
-	biomeLayer->fillArea(layerData, x, z, 10, 10);
+	if (mHasDefaultLayers) {
+		_getLayers().biomeLayer->fillArea(layerData, x, z, 10, 10);
+	} else {
+		std::lock_guard<std::mutex> lock(mLayerMutex);
+		biomeLayer->fillArea(layerData, x, z, 10, 10);
+	}
 
 	for(auto i : range(10 * 10)) {
 		Biome* biome = Biome::getBiome(layerData.mParentArea[i], Biome::DEFAULT);
@@ -76,7 +97,12 @@ bool BiomeSource::isValidSpawn(int currentBiome) const {
 }
 
 bool BiomeSource::findValidSpawnPosition(LayerData& layerData, int x, int z, BlockPos& spawnPosition) const {
-	biomeLayer->fillArea(layerData, x / 4, z / 4, 10, 10);
+	if (mHasDefaultLayers) {
+		_getLayers().biomeLayer->fillArea(layerData, x / 4, z / 4, 10, 10);
+	} else {
+		std::lock_guard<std::mutex> lock(mLayerMutex);
+		biomeLayer->fillArea(layerData, x / 4, z / 4, 10, 10);
+	}
 
 	for(auto zo : range(10)) {
 		for(auto xo : range(10)) {
@@ -153,7 +179,12 @@ bool BiomeSource::containsOnly(int x, int z, int r, const std::vector<int>& allo
 	int h = z1 - z0 + 1;
 
 	LayerData layerData;
-	biomeLayer->fillArea(layerData, x0, z0, w, h);
+	if (mHasDefaultLayers) {
+		_getLayers().biomeLayer->fillArea(layerData, x0, z0, w, h);
+	} else {
+		std::lock_guard<std::mutex> lock(mLayerMutex);
+		biomeLayer->fillArea(layerData, x0, z0, w, h);
+	}
 
 	for (int i = 0; i < w * h; i++) {
 		bool found = false;
@@ -173,7 +204,12 @@ bool BiomeSource::containsOnly(int x, int z, int r, const std::vector<int>& allo
 
 Biome* BiomeSource::getBiome(int blockX, int blockZ){
 	LayerData layerData;
-	zoomedLayer->fillArea(layerData, blockX, blockZ, 1, 1);
+	if (mHasDefaultLayers) {
+		_getLayers().zoomedLayer->fillArea(layerData, blockX, blockZ, 1, 1);
+	} else {
+		std::lock_guard<std::mutex> lock(mLayerMutex);
+		zoomedLayer->fillArea(layerData, blockX, blockZ, 1, 1);
+	}
 
 	return Biome::getBiome(layerData.mParentArea[0], Biome::DEFAULT);
 }

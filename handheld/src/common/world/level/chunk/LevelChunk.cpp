@@ -41,6 +41,7 @@
 #include "world/level/Weather.h"
 // #include "world/entity/animal/Horse.h"
 #include "world/entity/EntityClassTree.h"
+#include "util/PerfTimer.h"
 
 
 // #include "world/redstone/circuit/CircuitSystem.h"
@@ -58,10 +59,12 @@ void* LevelChunk::operator new(size_t size) {
 	DEBUG_ASSERT_MAIN_THREAD;
 	DEBUG_ASSERT(size == levelChunkPool.BLOCK_SIZE, "Wrong allocation size!");
 	UNUSED_PARAMETER(size);
+	ChunkPerfMetrics::instance.chunkNewCalls.fetch_add(1, std::memory_order_relaxed);
 	return levelChunkPool.get();
 }
 
 void LevelChunk::operator delete(void* p) {
+	ChunkPerfMetrics::instance.chunkDeleteCalls.fetch_add(1, std::memory_order_relaxed);
 	levelChunkPool.release(p);
 }
 
@@ -72,10 +75,12 @@ bool LevelChunk::trimMemoryPool() {
 void* LevelChunk::SubChunk::operator new(size_t size) {
 	DEBUG_ASSERT(size == levelSubChunkPool.BLOCK_SIZE, "Wrong allocation size!");
 	UNUSED_PARAMETER(size);
+	ChunkPerfMetrics::instance.subChunkNewCalls.fetch_add(1, std::memory_order_relaxed);
 	return levelSubChunkPool.get();
 }
 
 void LevelChunk::SubChunk::operator delete(void* p) {
+	ChunkPerfMetrics::instance.subChunkDeleteCalls.fetch_add(1, std::memory_order_relaxed);
 	levelSubChunkPool.release(p);
 }
 
@@ -403,24 +408,49 @@ FullBlock LevelChunk::setBlockAndData(const ChunkBlockPos& pos, FullBlock block,
 /*public?*/
 void LevelChunk::recalcHeightmap() {
 	ChunkBlockPos p(0, 0, 0);
+	const auto& subs = getSubChunks();
+	uint16_t subHasBlkMask = 0;
+	int highestValidTop = -1;
+	for (int sy = static_cast<int>(subs.size()) - 1; sy >= 0 && sy < 16; --sy) {
+		if (subs[sy]->hasBlocks()) {
+			subHasBlkMask |= static_cast<uint16_t>(1u << sy);
+			if (highestValidTop < 0) {
+				highestValidTop = (sy << 4) + 15;
+			}
+		}
+	}
+	if (highestValidTop < 0) {
+		memset(mHeightmap, 0, sizeof(mHeightmap));
+		for (int i = 0; i < CHUNK_WIDTH * CHUNK_WIDTH; ++i) {
+			mRainHeights[i] = -999;
+		}
+		return;
+	}
 
 	for (p.x = 0; p.x < CHUNK_WIDTH; p.x++) {
 		for (p.z = 0; p.z < CHUNK_WIDTH; p.z++) {
-			p.y = getAllocatedHeight();
+			p.y = static_cast<Height>(highestValidTop);
 
 			mRainHeights[p.x + (p.z << 4)] = -999;
 
-			while (p.y > 0 && Block::mLightBlock[getBlock(p.below())] == 0) {
+			while (p.y > 0) {
+				const int belowY = p.y - 1;
+				const size_t sy = static_cast<size_t>(belowY >> 4);
+				if ((subHasBlkMask & static_cast<uint16_t>(1u << sy)) == 0 && (belowY & 15) == 15) {
+					p.y -= 16;
+					continue;
+				}
+				if (Block::mLightBlock[getBlock(p.below())] != 0) {
+					break;
+				}
 				p.y--;
 			}
 			mHeightmap[p.index2D()] = p.y;
 
-			//also recompute light
-			//TODO //LIGHT optimize
-			//TODO skip empty subchunks here
-			if (mDefaultSkyBrightness > Brightness::MIN) {
+			// SubChunks already initialize mSkyLight to MAX; only attenuate starting at mHeightmap
+			if (mDefaultSkyBrightness > Brightness::MIN && p.y > 0) {
 				auto br = Brightness::MAX;
-				ChunkBlockPos cur(p.x, getAllocatedHeight(), p.z);
+				ChunkBlockPos cur(p.x, std::min<Height>(p.y, getAllocatedHeight()), p.z);
 
 				do {
 					auto opaque = Block::mLightBlock[getBlock(cur)];
@@ -428,8 +458,7 @@ void LevelChunk::recalcHeightmap() {
 						break;
 					}
 					br -= opaque;
-					
-					//TODO //OPTIMIZE
+
 					_setLight(cur, br);
 					--cur.y;
 				} while (cur.y > 0);

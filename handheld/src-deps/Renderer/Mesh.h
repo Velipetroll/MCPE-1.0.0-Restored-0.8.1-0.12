@@ -84,5 +84,12 @@ namespace mce
 		void loadIndexBuffer(uint32_t _indexSize, void const* data, unsigned int count);
 
 		void reset();
+
+		static void shutdownPool();
+
+		static uint64_t sGlGenCalls;
+		static uint64_t sGlDeleteCalls;
+		static uint64_t sGlPoolHits;
+		static void resetStats() { sGlGenCalls = 0; sGlDeleteCalls = 0; sGlPoolHits = 0; }
 	};
 }

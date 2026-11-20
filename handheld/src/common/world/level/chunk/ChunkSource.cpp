@@ -57,7 +57,7 @@ int ChunkSource::_getChunkPriority(const LevelChunk& lc) {
 		return true;
 	});
 
-	return (int)sqrtf(mindist) + (int)duration_cast<seconds>(steady_clock::now().time_since_epoch()).count() * 16;
+	return std::min(100000, static_cast<int>(sqrtf(mindist)));
 }
 
 void ChunkSource::_fireChunkLoaded(LevelChunk& lc) {
@@ -233,9 +233,94 @@ void ChunkSource::_startPostProcessingArea(LevelChunk& center) {
 	for (auto& offset : offsets) {
 		LevelChunk* n = getGeneratedChunk(center.getPosition() + offset);
 		if (n && (n->getState() == ChunkState::Generated)) {
+#ifndef UNSTABLE_THREADING
+			if (mDeferPostProcess) {
+				const ChunkPos& npos = n->getPosition();
+				if (mPendingPostProcessSet.insert(npos).second) {
+					mPendingPostProcessQueue.push_back(npos);
+				}
+				continue;
+			}
+#endif
 			_startPostProcessing(*n);
 		}
 	}
+}
+
+bool ChunkSource::_canStartPostProcessing(LevelChunk& lc) {
+	const ChunkPos& cp = lc.getPosition();
+	for (int dx = -1; dx <= 1; ++dx) {
+		for (int dz = -1; dz <= 1; ++dz) {
+			LevelChunk* n = getGeneratedChunk(ChunkPos(cp.x + dx, cp.z + dz));
+			if (!n || n->getState() < ChunkState::Generated) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+int ChunkSource::processDeferredPostProcesses(const ChunkPos& focusPos, int maxChunks, double maxBudgetMs) {
+#ifdef UNSTABLE_THREADING
+	UNUSED_VARIABLE(focusPos, maxChunks, maxBudgetMs);
+	return 0;
+#else
+	if (maxChunks <= 0 || mPendingPostProcessQueue.empty()) {
+		return 0;
+	}
+	auto t0 = std::chrono::high_resolution_clock::now();
+	int processed = 0;
+
+	while (processed < maxChunks && !mPendingPostProcessQueue.empty()) {
+		if (processed > 0) {
+			double elapsedMs = std::chrono::duration<double, std::milli>(
+				std::chrono::high_resolution_clock::now() - t0).count();
+			if (elapsedMs >= maxBudgetMs) {
+				break;
+			}
+		}
+
+		size_t bestIdx = mPendingPostProcessQueue.size();
+		int bestDistSq = INT_MAX;
+		for (size_t i = 0; i < mPendingPostProcessQueue.size(); ) {
+			const ChunkPos& p = mPendingPostProcessQueue[i];
+			LevelChunk* lc = getGeneratedChunk(p);
+			if (!lc || lc->getState() != ChunkState::Generated) {
+				mPendingPostProcessSet.erase(p);
+				mPendingPostProcessQueue[i] = mPendingPostProcessQueue.back();
+				mPendingPostProcessQueue.pop_back();
+				continue;
+			}
+			if (_canStartPostProcessing(*lc)) {
+				const int dx = p.x - focusPos.x;
+				const int dz = p.z - focusPos.z;
+				const int d2 = dx * dx + dz * dz;
+				if (d2 < bestDistSq) {
+					bestDistSq = d2;
+					bestIdx = i;
+				}
+			}
+			++i;
+		}
+
+		if (bestIdx >= mPendingPostProcessQueue.size()) {
+			break;
+		}
+
+		const ChunkPos chosenPos = mPendingPostProcessQueue[bestIdx];
+		mPendingPostProcessQueue[bestIdx] = mPendingPostProcessQueue.back();
+		mPendingPostProcessQueue.pop_back();
+		mPendingPostProcessSet.erase(chosenPos);
+
+		if (LevelChunk* lc = getGeneratedChunk(chosenPos)) {
+			if (lc->getState() == ChunkState::Generated) {
+				_startPostProcessing(*lc);
+				++processed;
+			}
+		}
+	}
+	return processed;
+#endif
 }
 
 void ChunkSource::_startPostProcessing(LevelChunk& lc) {

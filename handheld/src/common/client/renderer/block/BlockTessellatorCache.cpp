@@ -11,17 +11,9 @@ void BlockTessellatorCache::reset(BlockSource& region, const BlockPos& startPost
 	// we can always read one outside the chunk on each side
 	pos = startPostion.west(2).north(2).below(2);
 
-	for(auto& lightColor : mLightColors) {
-		lightColor.block = lightColor.sky = Brightness::INVALID;
-	}
-
-	for(auto& t : mBlocks) {
-		t = &mUnsetBlockValue;
-	}
-
-	for(auto& d : mData) {
-		d = 255;// Unset value
-	}
+	std::fill(mLightColors.begin(), mLightColors.end(), BrightnessPair{Brightness::INVALID, Brightness::INVALID});
+	mBlocks.fill(&mUnsetBlockValue);
+	memset(mData.data(), 255, sizeof(mData));
 }
 
 BrightnessPair BlockTessellatorCache::getLightColor(const BlockPos& p) {
@@ -56,7 +48,7 @@ Brightness BlockTessellatorCache::_getLightEmission(const Block& block) {
 }
 
 const Block& BlockTessellatorCache::getBlock(const BlockPos& p) {
-	if(p.y >= mRegion->getMaxHeight() && p.y < 0) {
+	if(p.y >= mRegion->getMaxHeight() || p.y < 0) {
 		return *Block::mAir;
 	}
 

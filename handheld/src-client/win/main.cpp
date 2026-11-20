@@ -899,17 +899,21 @@ public:
 
 extern mce::TextureGroup texgroup;
 
+extern bool gBenchChunksMode;
+extern std::string gBenchWorldDir;
+extern int64_t gBenchWorldSeed;
+extern int gBenchWalkFrames;
+
 int main(int argc, char** argv)
 {
 #ifdef UNSTABLE_THREADING
 	WorkerPool::workers.resize((unsigned int)WorkerRole::NumWorkerRoles);
 
-	for (int i = 0; i < 8; i++)
+	// Parallelize terrain generation across 4 Streaming workers with thread-local BiomeSource layers
+	for (int i = 0; i < 4; i++)
 		WorkerPool::workers[0].push_back(new BackgroundWorker());
-	for (int i = 0; i < 1; i++)
-		WorkerPool::workers[1].push_back(new BackgroundWorker());
-	for (int i = 0; i < 1; i++)
-		WorkerPool::workers[2].push_back(new BackgroundWorker());
+	WorkerPool::workers[1].push_back(new BackgroundWorker());
+	WorkerPool::workers[2].push_back(new BackgroundWorker());
 #endif
 	DebugLog::createLog("./restore/");
 	LOGI("Minecraft restoration is running\n");
@@ -925,9 +929,17 @@ int main(int argc, char** argv)
 
 	bool useConsole = false;
 	for (int i = 1; i < argc; ++i) {
-		if (std::string(argv[i]) == "--console") {
+		std::string arg = argv[i];
+		if (arg == "--console") {
 			useConsole = true;
-			break;
+		} else if (arg == "--bench-chunks") {
+			gBenchChunksMode = true;
+		} else if (arg == "--bench-world" && i + 1 < argc) {
+			gBenchWorldDir = argv[++i];
+		} else if (arg == "--bench-seed" && i + 1 < argc) {
+			gBenchWorldSeed = std::stoll(argv[++i]);
+		} else if (arg == "--bench-frames" && i + 1 < argc) {
+			gBenchWalkFrames = std::max(10, std::stoi(argv[++i]));
 		}
 	}
 
@@ -940,6 +952,16 @@ int main(int argc, char** argv)
 		commandContext.running = true;
 		renderThreadStuff();
 	}
+
+#ifdef UNSTABLE_THREADING
+	for (auto& roleWorkers : WorkerPool::workers) {
+		for (BackgroundWorker* w : roleWorkers) {
+			delete w;
+		}
+		roleWorkers.clear();
+	}
+	WorkerPool::workers.clear();
+#endif
 
 
     //while (true)

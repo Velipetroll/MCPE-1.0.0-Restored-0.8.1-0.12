@@ -4,7 +4,7 @@ project(minecraftpe)
 
 option(ISPUB "Is public build?" 0)
 option(DEDICATED_SERVER "Is dedicated server?" 0)#Really all this means now is whether to compile client/renderer lol
-option(TEST_THREADING "Thread test build" 0)#Really all this means now is whether to compile client/renderer lol
+option(TEST_THREADING "Thread test build" 1)#Really all this means now is whether to compile client/renderer lol
 if(WIN32)
     set(COMPILE_PLATFORM "WINDOWS" CACHE STRING "Target PLATFORM (WINDOWS/ANDROID/IOS/LINUX)")
 else()
@@ -51,11 +51,9 @@ target_compile_definitions(minecraftpe
 )
 endif()
 
-if(TEST_THREADING)
 target_compile_definitions(minecraftpe
 PRIVATE UNSTABLE_THREADING=1
 )
-endif()
 
 
 if(DEDICATED_SERVER)

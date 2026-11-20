@@ -55,11 +55,20 @@
 #include "nbt/ListTag.h"
 #include "util/StringByteInput.h"
 #include "util/StringByteOutput.h"
+#include "client/gui/ProgressScreen.h"
+#include "util/PerfTimer.h"
+#include "Renderer/Mesh.h"
 #include "stb_image.h"
 #include <chrono>
 #include <cstdio>
+#include <numeric>
 #include <unordered_map>
 #include <unordered_set>
+
+bool gBenchChunksMode = false;
+std::string gBenchWorldDir = "./worlds/__bench_tmp";
+int64_t gBenchWorldSeed = 12345;
+int gBenchWalkFrames = 180;
 
 
 int screenx = 1600;
@@ -1243,6 +1252,71 @@ void /*MinecraftClient::*/updateFoliageColors()
 
 namespace {
 
+struct SpiralOffset {
+	int dx, dz, d2;
+};
+
+const std::vector<SpiralOffset>& getCachedSpiralOffsets(int radius) {
+	static std::unordered_map<int, std::vector<SpiralOffset>> sCache;
+	auto it = sCache.find(radius);
+	if (it != sCache.end()) {
+		return it->second;
+	}
+	std::vector<SpiralOffset> out;
+	out.reserve(static_cast<size_t>((2 * radius + 1) * (2 * radius + 1)));
+	for (int x = -radius; x <= radius; ++x) {
+		for (int z = -radius; z <= radius; ++z) {
+			out.push_back({x, z, x * x + z * z});
+		}
+	}
+	std::sort(out.begin(), out.end(), [](const SpiralOffset& a, const SpiralOffset& b) {
+		return a.d2 < b.d2;
+	});
+	return sCache.emplace(radius, std::move(out)).first->second;
+}
+
+struct FrustumPlanes {
+	glm::vec4 planes[6]{};
+
+	void extract(const glm::mat4& clip) {
+		const glm::vec4 row0(clip[0][0], clip[1][0], clip[2][0], clip[3][0]);
+		const glm::vec4 row1(clip[0][1], clip[1][1], clip[2][1], clip[3][1]);
+		const glm::vec4 row2(clip[0][2], clip[1][2], clip[2][2], clip[3][2]);
+		const glm::vec4 row3(clip[0][3], clip[1][3], clip[2][3], clip[3][3]);
+		planes[0] = row3 + row0; // Left
+		planes[1] = row3 - row0; // Right
+		planes[2] = row3 + row1; // Bottom
+		planes[3] = row3 - row1; // Top
+		planes[4] = row3 + row2; // Near
+		planes[5] = row3 - row2; // Far
+		for (int i = 0; i < 6; ++i) {
+			const float len = glm::length(glm::vec3(planes[i]));
+			if (len > 1e-6f) {
+				planes[i] /= len;
+			}
+		}
+	}
+
+	bool isBoxVisible(const BlockPos& minPos, float pad, const glm::vec3& camPos) const {
+		const float minX = static_cast<float>(minPos.x) - pad - camPos.x;
+		const float minY = static_cast<float>(minPos.y) - pad - camPos.y;
+		const float minZ = static_cast<float>(minPos.z) - pad - camPos.z;
+		const float maxX = static_cast<float>(minPos.x + 16) + pad - camPos.x;
+		const float maxY = static_cast<float>(minPos.y + 16) + pad - camPos.y;
+		const float maxZ = static_cast<float>(minPos.z + 16) + pad - camPos.z;
+		for (int i = 0; i < 6; ++i) {
+			const glm::vec4& p = planes[i];
+			const float px = (p.x >= 0.0f) ? maxX : minX;
+			const float py = (p.y >= 0.0f) ? maxY : minY;
+			const float pz = (p.z >= 0.0f) ? maxZ : minZ;
+			if (p.x * px + p.y * py + p.z * pz + p.w < 0.0f) {
+				return false;
+			}
+		}
+		return true;
+	}
+};
+
 void rebuildSubChunkAt(const ChunkPos& cp, int subY,
                        std::unordered_map<ChunkPos, RenderChunk*[8]>& rc,
                        std::unique_ptr<RenderChunkBuilder>& chunkBuilder,
@@ -1255,6 +1329,7 @@ void rebuildSubChunkAt(const ChunkPos& cp, int subY,
 	chunkPart->startRebuild(std::move(chunkBuilder));
 	chunkPart->rebuild(gGuiOptions.fancyGraphics, true);
 	chunkBuilder = chunkPart->endRebuild(camPos);
+	ChunkPerfMetrics::instance.meshRebuilds.fetch_add(1, std::memory_order_relaxed);
 }
 
 void rebuildChunksForBlock(const BlockPos& pos,
@@ -1281,20 +1356,33 @@ void updateLightingAndRebuildChunks(BlockSource& region,
                                     std::unordered_map<ChunkPos, RenderChunk*[8]>& rc,
                                     std::unique_ptr<RenderChunkBuilder>& chunkBuilder,
                                     const Vec3& camPos) {
-	std::unordered_set<ChunkPos> touchedChunks;
-	WorldLighting::updateLocalLighting(region, pos, 15, &touchedChunks);
+	WorldLighting::TouchedSubChunkMap touchedSubChunks;
+	WorldLighting::updateLocalLighting(region, pos, 15, nullptr, &touchedSubChunks);
 
-	// Always rebuild the block's own subchunk & immediate touching subchunks
+	// Rebuild the edited block's subchunk & immediate touching seams immediately;
+	// wider lighting spill updates are queued into DirtyChunkSorter via setDirty().
 	rebuildChunksForBlock(pos, rc, chunkBuilder, camPos);
 
 	ChunkPos baseCp(pos);
 	int baseSubY = pos.y >> 4;
-	int minSubY = std::max(0, (pos.y - 15) >> 4);
-	int maxSubY = std::min(7, (pos.y + 15) >> 4);
-	for (const ChunkPos& cp : touchedChunks) {
-		for (int sy = minSubY; sy <= maxSubY; ++sy) {
-			if (cp == baseCp && sy == baseSubY) continue;
-			rebuildSubChunkAt(cp, sy, rc, chunkBuilder, camPos);
+	int lx = pos.x & 15;
+	int ly = pos.y & 15;
+	int lz = pos.z & 15;
+	for (const auto& kv : touchedSubChunks) {
+		auto it = rc.find(kv.first);
+		if (it == rc.end()) continue;
+		for (int sy = 0; sy < 8; ++sy) {
+			if ((kv.second & (1u << sy)) == 0) continue;
+			const bool alreadyRebuilt =
+				(kv.first == baseCp && (sy == baseSubY || (ly == 0 && sy == baseSubY - 1) || (ly == 15 && sy == baseSubY + 1))) ||
+				(sy == baseSubY && ((lx == 0 && kv.first == ChunkPos(baseCp.x - 1, baseCp.z)) ||
+				                    (lx == 15 && kv.first == ChunkPos(baseCp.x + 1, baseCp.z)) ||
+				                    (lz == 0 && kv.first == ChunkPos(baseCp.x, baseCp.z - 1)) ||
+				                    (lz == 15 && kv.first == ChunkPos(baseCp.x, baseCp.z + 1))));
+			if (alreadyRebuilt) continue;
+			if (it->second[sy]) {
+				it->second[sy]->setDirty(Tick(0), false);
+			}
 		}
 	}
 }
@@ -3495,6 +3583,8 @@ void renderThreadStuff()
 	std::unordered_set<ChunkPos> needsReRendering2;
 	std::unordered_set<ChunkPos> loadedChunkSet;
 	std::unordered_set<ChunkPos> litChunks;
+	ChunkPos lastUnloadCamChunkPos(INT_MAX, INT_MAX);
+	int lastUnloadRenderDist = -1;
 
 	auto acquireRenderChunk = [&](const BlockPos& pos) -> RenderChunk* {
 		if (!renderChunkPool.empty()) {
@@ -3530,6 +3620,7 @@ void renderThreadStuff()
 	};
 
 	std::unique_ptr<RenderChunkBuilder> chunkBuilder;
+	Unique<RenderChunkSorter> chunkSorter;
 
 	WorkerPool::setMainThreadPumpActive(true);
 
@@ -3622,6 +3713,8 @@ void renderThreadStuff()
 		needsReRendering2.clear();
 		loadedChunkSet.clear();
 		litChunks.clear();
+		lastUnloadCamChunkPos = ChunkPos(INT_MAX, INT_MAX);
+		lastUnloadRenderDist = -1;
 		worldItems.clear();
 		worldItemTickAccum = 0.0f;
 		mobManager.clear();
@@ -3631,6 +3724,7 @@ void renderThreadStuff()
 		hazardDamageCooldown = 0.0f;
 		eatCooldown = 0.0f;
 		chunkBuilder.reset();
+		chunkSorter.reset();
 		c.setWorld(nullptr, nullptr);
 		commandContext.dim = nullptr;
 		delete commandContext.level;
@@ -3687,8 +3781,88 @@ void renderThreadStuff()
 
 
 	std::string lastSavedOptions = gGuiOptions.serialize();
+
+	// Benchmark state (--bench-chunks)
+	bool benchStarted = false;
+	int benchPhase = 0; // 0 = waiting init load, 1 = streaming walk + thrash + block edit, 2 = done
+	int benchInitFrames = 0;
+	int benchWalkStep = 0;
+	double benchInitWallMs = 0.0;
+	std::chrono::high_resolution_clock::time_point benchInitStart{};
+	double benchWalkWallMs = 0.0;
+	std::chrono::high_resolution_clock::time_point benchWalkStart{};
+	float benchStartX = 0.0f, benchStartY = 85.0f, benchStartZ = 0.0f;
+	std::vector<double> benchCpuFrameMs;
+	std::vector<double> benchWallFrameMs;
+	std::vector<double> benchEditFrameMs;
+	auto printBenchMetrics = [&](const char* tag, int frames, double wallTotalMs, const std::vector<double>& cpuMs, const std::vector<double>& wallMs) {
+		auto& m = ChunkPerfMetrics::instance;
+		double avgCpu = cpuMs.empty() ? 0.0 : std::accumulate(cpuMs.begin(), cpuMs.end(), 0.0) / cpuMs.size();
+		double avgWall = wallMs.empty() ? 0.0 : std::accumulate(wallMs.begin(), wallMs.end(), 0.0) / wallMs.size();
+		double maxCpu = 0.0, p95Cpu = 0.0;
+		if (!cpuMs.empty()) {
+			std::vector<double> sorted = cpuMs;
+			std::sort(sorted.begin(), sorted.end());
+			maxCpu = sorted.back();
+			p95Cpu = sorted[std::min(sorted.size() - 1, (sorted.size() * 95) / 100)];
+		}
+		double maxWall = 0.0, p95Wall = 0.0;
+		if (!wallMs.empty()) {
+			std::vector<double> sorted = wallMs;
+			std::sort(sorted.begin(), sorted.end());
+			maxWall = sorted.back();
+			p95Wall = sorted[std::min(sorted.size() - 1, (sorted.size() * 95) / 100)];
+		}
+		double avgFpsCpu = (avgCpu > 0.0001) ? (1000.0 / avgCpu) : 0.0;
+		double avgFpsWall = (avgWall > 0.0001) ? (1000.0 / avgWall) : 0.0;
+		printf("[BENCH_%s] frames=%d wallTotalMs=%.2f cpuAvgMs=%.2f cpuP95Ms=%.2f cpuMaxMs=%.2f cpuFps=%.1f wallAvgMs=%.2f wallP95Ms=%.2f wallMaxMs=%.2f wallFps=%.1f\n",
+		       tag, frames, wallTotalMs, avgCpu, p95Cpu, maxCpu, avgFpsCpu, avgWall, p95Wall, maxWall, avgFpsWall);
+		printf("[BENCH_%s_PHASES] unloadMs=%.2f loadPhaseMs=%.2f dbIoMs=%.2f lightMs=%.2f meshMs=%.2f faceSortMs=%.2f renderMs=%.2f\n",
+		       tag,
+		       m.unloadUs.load() / 1000.0,
+		       m.loadPhaseUs.load() / 1000.0,
+		       m.dbUs.load() / 1000.0,
+		       m.lightUs.load() / 1000.0,
+		       m.meshUs.load() / 1000.0,
+		       m.faceSortUs.load() / 1000.0,
+		       m.renderUs.load() / 1000.0);
+		printf("[BENCH_%s_COUNTS] dbHasKey=%llu dbRead=%llu dbHits=%llu lightCalls=%llu meshRebuilds=%llu emptySkipped=%llu faceSorts=%llu chunkNew=%llu chunkDel=%llu subNew=%llu subDel=%llu poolMalloc=%llu poolFree=%llu glGen=%llu glDel=%llu glPoolHits=%llu\n",
+		       tag,
+		       (unsigned long long)m.dbHasKeyCalls.load(),
+		       (unsigned long long)m.dbReadCalls.load(),
+		       (unsigned long long)m.dbChunkReadHits.load(),
+		       (unsigned long long)m.lightPropagateCalls.load(),
+		       (unsigned long long)m.meshRebuilds.load(),
+		       (unsigned long long)m.emptySubChunksSkipped.load(),
+		       (unsigned long long)m.faceSorts.load(),
+		       (unsigned long long)m.chunkNewCalls.load(),
+		       (unsigned long long)m.chunkDeleteCalls.load(),
+		       (unsigned long long)m.subChunkNewCalls.load(),
+		       (unsigned long long)m.subChunkDeleteCalls.load(),
+		       (unsigned long long)m.poolMallocCalls.load(),
+		       (unsigned long long)m.poolFreeCalls.load(),
+		       (unsigned long long)mce::Mesh::sGlGenCalls,
+		       (unsigned long long)mce::Mesh::sGlDeleteCalls,
+		       (unsigned long long)mce::Mesh::sGlPoolHits);
+		fflush(stdout);
+	};
+
+	if (gBenchChunksMode && !benchStarted) {
+		benchStarted = true;
+		gGuiContext.activeWorldDir = gBenchWorldDir;
+		gGuiContext.activeWorldName = "BenchWorld";
+		gGuiContext.activeWorldSeed = gBenchWorldSeed;
+		gGuiContext.isCreative = true;
+		gGuiContext.worldOpenRequested = true;
+		gGuiContext.setScreen(new ProgressScreen("Benchmarking chunks"));
+		ChunkPerfMetrics::instance.reset();
+		mce::Mesh::resetStats();
+		benchInitStart = std::chrono::high_resolution_clock::now();
+	}
+
 	while (!glfwWindowShouldClose(window)) 
 	{
+		auto frameStartTP = std::chrono::high_resolution_clock::now();
 		WorkerPool::pumpMainThreadCallbacks();
 		lastFrame = currentFrame;
 		currentFrame = glfwGetTime();
@@ -5064,6 +5238,8 @@ void renderThreadStuff()
 
 			glm::mat4 view = glm::lookAt(renderCamPos, lookTarget, c.cameraUp);
 			glm::mat4 camRelView = glm::lookAt(glm::vec3(0.0f), lookTarget - renderCamPos, c.cameraUp);
+			FrustumPlanes frustum;
+			frustum.extract(projection * camRelView);
 
 			for (auto sl : mptrs) {
 				if (!sl || !(*sl).operator->() || !(*sl)->myShader) continue;
@@ -5074,82 +5250,81 @@ void renderThreadStuff()
 			int renderDistance = std::max(1, std::min(3, 1 + gGuiOptions.renderDistance));
 			int activeRenderDist = gGuiContext.loadingChunks ? std::min(renderDistance, 2) : renderDistance;
 			int lightDistance = activeRenderDist + 1;
-			int loadDistance = lightDistance + 2;
-			int renderUnloadDist = activeRenderDist + 1;
-			int chunkUnloadDist = loadDistance + 1;
+			int loadDistance = lightDistance + 2;           // +2 beyond lightDistance ensures lightDistance's 3x3 neighbors finish postProcess (Loaded)
+			int renderUnloadDist = activeRenderDist + 2;    // +2 hysteresis buffer prevents RenderChunk/VBO thrashing on chunk borders
+			int chunkUnloadDist = loadDistance + 2;         // +2 hysteresis buffer prevents LevelChunk unload/reload thrashing on borders
 			size_t maxRenderPool = static_cast<size_t>((2 * renderUnloadDist + 1) * (2 * renderUnloadDist + 1) * 8);
 			ChunkSource& chunkSrc = commandContext.dim->getChunkSource();
 
-			// Recycle / unload RenderChunks outside the active render window (MCPE 0.8.1 LevelRenderer::resortChunks)
-			for (auto it = rc.begin(); it != rc.end(); ) {
-				const ChunkPos& pos = it->first;
-				if (std::abs(pos.x - camChunkPos.x) > renderUnloadDist ||
-				    std::abs(pos.z - camChunkPos.z) > renderUnloadDist) {
-					for (int i = 0; i < 8; ++i) {
-						releaseRenderChunk(it->second[i], maxRenderPool);
-					}
-					needsReRendering2.erase(pos);
-					it = rc.erase(it);
-				} else {
-					++it;
-				}
-			}
-			while (renderChunkPool.size() > maxRenderPool) {
-				delete renderChunkPool.back();
-				renderChunkPool.pop_back();
-			}
+			auto tUnload0 = std::chrono::high_resolution_clock::now();
+			// Only scan unload maps when the camera enters a different chunk or render distance changes
+			if (camChunkPos != lastUnloadCamChunkPos || activeRenderDist != lastUnloadRenderDist) {
+				lastUnloadCamChunkPos = camChunkPos;
+				lastUnloadRenderDist = activeRenderDist;
 
-			// Unload chunks beyond chunkUnloadDist cleanly (save entities + dirty chunk data -> unload -> releaseChunk -> trim pools)
-			bool anyChunkUnloaded = false;
-			chunkSrc.hintDiscardBatchBegin();
-			for (auto it = heldChunks.begin(); it != heldChunks.end(); ) {
-				const ChunkPos& cp = it->first;
-				if (std::abs(cp.x - camChunkPos.x) > chunkUnloadDist ||
-				    std::abs(cp.z - camChunkPos.z) > chunkUnloadDist) {
-					LevelChunk* lc = it->second;
-					if (lc) {
-						if (lc->isLoaded() || lc->getState() == ChunkState::Loaded) {
-							serializeChunkWorldItems(cp, worldItems, *lc, true);
-						}
-						chunkSrc.releaseChunk(*lc);
-					}
-					loadedChunkSet.erase(cp);
-					litChunks.erase(cp);
-					needsReRendering.erase(cp);
-					needsReRendering2.erase(cp);
-					auto rcIt = rc.find(cp);
-					if (rcIt != rc.end()) {
+				for (auto it = rc.begin(); it != rc.end(); ) {
+					const ChunkPos& pos = it->first;
+					if (std::abs(pos.x - camChunkPos.x) > renderUnloadDist ||
+					    std::abs(pos.z - camChunkPos.z) > renderUnloadDist) {
 						for (int i = 0; i < 8; ++i) {
-							releaseRenderChunk(rcIt->second[i], maxRenderPool);
+							releaseRenderChunk(it->second[i], maxRenderPool);
 						}
-						rc.erase(rcIt);
+						needsReRendering2.erase(pos);
+						it = rc.erase(it);
+					} else {
+						++it;
 					}
-					it = heldChunks.erase(it);
-					anyChunkUnloaded = true;
-				} else {
-					++it;
 				}
-			}
-			chunkSrc.hintDiscardBatchEnd();
-			if (anyChunkUnloaded) {
-				LevelChunk::trimMemoryPool();
-				LevelChunk::SubChunk::trimMemoryPool();
-			}
+				while (renderChunkPool.size() > maxRenderPool) {
+					delete renderChunkPool.back();
+					renderChunkPool.pop_back();
+				}
 
-			for (auto it = needsReRendering.begin(); it != needsReRendering.end(); ) {
-				if (std::abs(it->x - camChunkPos.x) > chunkUnloadDist ||
-				    std::abs(it->z - camChunkPos.z) > chunkUnloadDist) {
-					it = needsReRendering.erase(it);
-				} else {
-					++it;
+				chunkSrc.hintDiscardBatchBegin();
+				for (auto it = heldChunks.begin(); it != heldChunks.end(); ) {
+					const ChunkPos& cp = it->first;
+					if (std::abs(cp.x - camChunkPos.x) > chunkUnloadDist ||
+					    std::abs(cp.z - camChunkPos.z) > chunkUnloadDist) {
+						LevelChunk* lc = it->second;
+						if (lc) {
+							if (lc->isLoaded() || lc->getState() == ChunkState::Loaded) {
+								serializeChunkWorldItems(cp, worldItems, *lc, true);
+							}
+							chunkSrc.releaseChunk(*lc);
+						}
+						loadedChunkSet.erase(cp);
+						litChunks.erase(cp);
+						needsReRendering.erase(cp);
+						needsReRendering2.erase(cp);
+						auto rcIt = rc.find(cp);
+						if (rcIt != rc.end()) {
+							for (int i = 0; i < 8; ++i) {
+								releaseRenderChunk(rcIt->second[i], maxRenderPool);
+							}
+							rc.erase(rcIt);
+						}
+						it = heldChunks.erase(it);
+					} else {
+						++it;
+					}
 				}
-			}
-			for (auto it = needsReRendering2.begin(); it != needsReRendering2.end(); ) {
-				if (std::abs(it->x - camChunkPos.x) > activeRenderDist ||
-				    std::abs(it->z - camChunkPos.z) > activeRenderDist) {
-					it = needsReRendering2.erase(it);
-				} else {
-					++it;
+				chunkSrc.hintDiscardBatchEnd();
+
+				for (auto it = needsReRendering.begin(); it != needsReRendering.end(); ) {
+					if (std::abs(it->x - camChunkPos.x) > chunkUnloadDist ||
+					    std::abs(it->z - camChunkPos.z) > chunkUnloadDist) {
+						it = needsReRendering.erase(it);
+					} else {
+						++it;
+					}
+				}
+				for (auto it = needsReRendering2.begin(); it != needsReRendering2.end(); ) {
+					if (std::abs(it->x - camChunkPos.x) > activeRenderDist ||
+					    std::abs(it->z - camChunkPos.z) > activeRenderDist) {
+						it = needsReRendering2.erase(it);
+					} else {
+						++it;
+					}
 				}
 			}
 
@@ -5168,35 +5343,35 @@ void renderThreadStuff()
 				}
 			};
 
-			auto buildSpiralOffsets = [](int radius) {
-				struct OffsetEntry { int dx, dz, d2; };
-				std::vector<OffsetEntry> out;
-				out.reserve((2 * radius + 1) * (2 * radius + 1));
-				for (int x = -radius; x <= radius; ++x) {
-					for (int z = -radius; z <= radius; ++z) {
-						out.push_back({x, z, x * x + z * z});
-					}
-				}
-				std::sort(out.begin(), out.end(), [](const OffsetEntry& a, const OffsetEntry& b) {
-					return a.d2 < b.d2;
-				});
-				return out;
-			};
-
-			const double frameBudgetMs = gGuiContext.loadingChunks ? 20.0 : 10.0;
 			auto tChunkPhase0 = std::chrono::high_resolution_clock::now();
-			auto chunkElapsedMs = [&]() {
-				return std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - tChunkPhase0).count();
+			ChunkPerfMetrics::instance.unloadUs.fetch_add(
+				static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(tChunkPhase0 - tUnload0).count()),
+				std::memory_order_relaxed);
+			auto phaseElapsedMs = [](const std::chrono::high_resolution_clock::time_point& startTP) {
+				return std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - startTP).count();
 			};
 
-			int loadedThisFrame = 0;
-			auto loadOffsets = buildSpiralOffsets(loadDistance);
+			// Phase 1: Chunk Loading (_ChunkSorter cached nearest-first spiral order + async Streaming / bounded fallback)
+#ifdef UNSTABLE_THREADING
+			const double loadBudgetMs = gGuiContext.loadingChunks ? 8.0 : 2.0;
+			const int maxLoadsPerFrame = gGuiContext.loadingChunks ? 24 : 8;
+#else
+			const double loadBudgetMs = gGuiContext.loadingChunks ? 20.0 : 6.0;
+			const int maxLoadsPerFrame = gGuiContext.loadingChunks ? 16 : 3;
+#endif
+			chunkSrc.setDeferPostProcessing(!gGuiContext.loadingChunks);
+			int loadedThisFrame = chunkSrc.processDeferredPostProcesses(
+				camChunkPos,
+				gGuiContext.loadingChunks ? 16 : 1,
+				loadBudgetMs);
+			const auto& loadOffsets = getCachedSpiralOffsets(loadDistance);
 			for (const auto& off : loadOffsets) {
 				ChunkPos cp(camChunkPos.x + off.dx, camChunkPos.z + off.dz);
 				LevelChunk* lc = nullptr;
 				auto heldIt = heldChunks.find(cp);
 				if (heldIt == heldChunks.end()) {
-					if (loadedThisFrame > 0 && chunkElapsedMs() >= frameBudgetMs) {
+					if (loadedThisFrame >= maxLoadsPerFrame ||
+					    (loadedThisFrame > 0 && phaseElapsedMs(tChunkPhase0) >= loadBudgetMs)) {
 						break;
 					}
 					lc = acquireHeldChunk(chunkSrc, cp);
@@ -5204,24 +5379,18 @@ void renderThreadStuff()
 				} else {
 					lc = heldIt->second;
 				}
-				bool inRenderRange = (std::abs(off.dx) <= activeRenderDist && std::abs(off.dz) <= activeRenderDist);
 
 				if (lc && lc->getState() == ChunkState::Loaded) {
 					if (loadedChunkSet.insert(cp).second) {
 						deserializeChunkWorldItems(*lc, worldItems);
 						queueChunkAndNeighbors(cp);
-					} else if (inRenderRange) {
-						auto rcIt = rc.find(cp);
-						if (rcIt == rc.end() || litChunks.find(cp) == litChunks.end() ||
-						    (rcIt->second[0] && rcIt->second[0]->isDirty(Tick(0)))) {
-							needsReRendering2.insert(cp);
-						}
 					}
 				} else if (std::abs(off.dx) <= lightDistance + 1 && std::abs(off.dz) <= lightDistance + 1) {
 					needsReRendering.insert(cp);
 				}
 			}
 
+			WorkerPool::pumpMainThreadCallbacks();
 			for (auto it = needsReRendering.begin(); it != needsReRendering.end(); ) {
 				ChunkPos pos = *it;
 				auto* lc = chunkSrc.getExistingChunk(pos);
@@ -5235,11 +5404,19 @@ void renderThreadStuff()
 					++it;
 				}
 			}
-			// Decoupled Lighting Pass over [-lightDistance..lightDistance]^2 (nearest-first, budgeted)
+			auto tLightPhase0 = std::chrono::high_resolution_clock::now();
+			ChunkPerfMetrics::instance.loadPhaseUs.fetch_add(
+				static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(tLightPhase0 - tChunkPhase0).count()),
+				std::memory_order_relaxed);
+
+			// Phase 2: Decoupled Local/Border Lighting (budgeted, ~3.5ms in gameplay so Light + Mesh stay within 60fps frame budget)
+			const double lightBudgetMs = gGuiContext.loadingChunks ? 20.0 : 3.5;
+			const int maxLitPerFrame = gGuiContext.loadingChunks ? 16 : 4;
 			int litThisFrame = 0;
-			auto lightOffsets = buildSpiralOffsets(lightDistance);
+			const auto& lightOffsets = getCachedSpiralOffsets(lightDistance);
 			for (const auto& off : lightOffsets) {
-				if ((loadedThisFrame > 0 || litThisFrame > 0) && chunkElapsedMs() >= frameBudgetMs) {
+				if (litThisFrame >= maxLitPerFrame ||
+				    (litThisFrame > 0 && phaseElapsedMs(tLightPhase0) >= lightBudgetMs)) {
 					break;
 				}
 				ChunkPos pos(camChunkPos.x + off.dx, camChunkPos.z + off.dz);
@@ -5247,92 +5424,137 @@ void renderThreadStuff()
 				if (!areChunkNeighborsLoaded(chunkSrc, pos)) continue;
 
 				litChunks.insert(pos);
-				std::unordered_set<ChunkPos> touchedChunks;
-				WorldLighting::propagateChunkLighting(c.getRegion(), pos, &touchedChunks);
+				WorldLighting::TouchedSubChunkMap touchedSubChunks;
+				WorldLighting::propagateChunkLighting(c.getRegion(), pos, nullptr, &touchedSubChunks);
 				++litThisFrame;
 
-				touchedChunks.insert(pos);
-				touchedChunks.insert(ChunkPos(pos.x + 1, pos.z));
-				touchedChunks.insert(ChunkPos(pos.x - 1, pos.z));
-				touchedChunks.insert(ChunkPos(pos.x, pos.z + 1));
-				touchedChunks.insert(ChunkPos(pos.x, pos.z - 1));
-
-				for (const ChunkPos& np : touchedChunks) {
-					bool npInRender = (std::abs(np.x - camChunkPos.x) <= activeRenderDist &&
-					                   std::abs(np.z - camChunkPos.z) <= activeRenderDist);
+				// Only dirty already-built neighbor subchunks whose lighting actually changed
+				for (const auto& kv : touchedSubChunks) {
+					const ChunkPos& np = kv.first;
+					if (np == pos) continue;
 					auto rcIt = rc.find(np);
 					if (rcIt != rc.end()) {
 						for (int s = 0; s < 8; ++s) {
-							if (rcIt->second[s]) {
-								rcIt->second[s]->setDirty(Tick(0), true);
+							if ((kv.second & (1u << s)) != 0 && rcIt->second[s]) {
+								rcIt->second[s]->setDirty(Tick(0), false);
 							}
 						}
-						if (npInRender) {
-							needsReRendering2.insert(np);
-						}
-					} else if (npInRender) {
-						needsReRendering2.insert(np);
 					}
 				}
 			}
-			// Meshing Pass (nearest-first, budgeted like MCPE 0.8.1 LevelRenderer::updateDirtyChunks)
-			std::vector<std::pair<int, ChunkPos>> meshCandidates;
-			meshCandidates.reserve(needsReRendering2.size());
-			for (auto it = needsReRendering2.begin(); it != needsReRendering2.end(); ) {
-				ChunkPos pos = *it;
+
+			// Phase 3: Budgeted SubChunk Meshing with MCPE 0.8.1 DirtyChunkSorter (Frustum first + 3D distance, max 1-2 rebuilds/frame)
+			auto tMesh0 = std::chrono::high_resolution_clock::now();
+			struct DirtySubChunkCandidate {
+				RenderChunk* part;
+				bool immediate;
+				bool inFrustum;
+				float distSq;
+			};
+			std::vector<DirtySubChunkCandidate> dirtySubChunks;
+			dirtySubChunks.reserve(32);
+
+			const auto& renderOffsets = getCachedSpiralOffsets(activeRenderDist);
+			for (const auto& off : renderOffsets) {
+				ChunkPos pos(camChunkPos.x + off.dx, camChunkPos.z + off.dz);
 				if (!areChunkNeighborsLoaded(chunkSrc, pos)) {
 					needsReRendering.insert(pos);
-					it = needsReRendering2.erase(it);
 					continue;
 				}
 				bool readyToMesh = (litChunks.find(pos) != litChunks.end());
-				if (readyToMesh) {
-					for (int dx = -1; dx <= 1 && readyToMesh; ++dx) {
-						for (int dz = -1; dz <= 1 && readyToMesh; ++dz) {
-							ChunkPos ncp(pos.x + dx, pos.z + dz);
-							if (std::abs(ncp.x - camChunkPos.x) <= lightDistance &&
-							    std::abs(ncp.z - camChunkPos.z) <= lightDistance &&
-							    litChunks.find(ncp) == litChunks.end()) {
-								readyToMesh = false;
-							}
+				for (int dx = -1; dx <= 1 && readyToMesh; ++dx) {
+					for (int dz = -1; dz <= 1 && readyToMesh; ++dz) {
+						ChunkPos ncp(pos.x + dx, pos.z + dz);
+						if (std::abs(ncp.x - camChunkPos.x) <= lightDistance &&
+						    std::abs(ncp.z - camChunkPos.z) <= lightDistance &&
+						    litChunks.find(ncp) == litChunks.end()) {
+							readyToMesh = false;
 						}
 					}
 				}
-				if (readyToMesh) {
-					int dx = pos.x - camChunkPos.x;
-					int dz = pos.z - camChunkPos.z;
-					meshCandidates.push_back({dx * dx + dz * dz, pos});
-				}
-				++it;
-			}
-			std::sort(meshCandidates.begin(), meshCandidates.end(),
-			          [](const std::pair<int, ChunkPos>& a, const std::pair<int, ChunkPos>& b) {
-				          return a.first < b.first;
-			          });
+				if (!readyToMesh) continue;
 
-			int meshedChunksThisFrame = 0;
-			for (const auto& cand : meshCandidates) {
-				if ((loadedThisFrame + litThisFrame + meshedChunksThisFrame) > 0 && chunkElapsedMs() >= frameBudgetMs) {
-					break;
-				}
-				const ChunkPos& pos = cand.second;
+				LevelChunk* centerLc = chunkSrc.getExistingChunk(pos);
+				if (!centerLc) continue;
+				const auto subs = centerLc->getSubChunks();
 				auto& subChunks = rc[pos];
-				for (int i = 0; i < 8; i++) {
-					BlockPos cp(pos.x * 16, i * 16, pos.z * 16);
-					if (subChunks[i] == nullptr)
-						subChunks[i] = acquireRenderChunk(cp);
-					else
-						subChunks[i]->setDirty(Tick(0), true);
+				for (int sy = 0; sy < 8; ++sy) {
+					const bool hasBlocks = (static_cast<size_t>(sy) < subs.size() && subs[sy]->hasBlocks());
+					if (subChunks[sy] == nullptr) {
+						subChunks[sy] = acquireRenderChunk(BlockPos(pos.x * 16, sy * 16, pos.z * 16));
+						if (!hasBlocks) {
+							subChunks[sy]->makeReadyAsEmpty(false);
+							ChunkPerfMetrics::instance.emptySubChunksSkipped.fetch_add(1, std::memory_order_relaxed);
+							continue;
+						}
+					} else if (subChunks[sy]->isBuildState(RenderChunk::BuildState::Dirty)) {
+						if (!hasBlocks) {
+							subChunks[sy]->makeReadyAsEmpty(false);
+							ChunkPerfMetrics::instance.emptySubChunksSkipped.fetch_add(1, std::memory_order_relaxed);
+							continue;
+						}
+					} else {
+						continue;
+					}
 
-					RenderChunk* chunkPart = subChunks[i];
-					chunkPart->setDirty(Tick(0), true);
-					chunkPart->startRebuild(std::move(chunkBuilder));
-					chunkPart->rebuild(gGuiOptions.fancyGraphics, true);
-					chunkBuilder = chunkPart->endRebuild(Vec3(renderCamPos.x, renderCamPos.y, renderCamPos.z));
+					RenderChunk* part = subChunks[sy];
+					const BlockPos& center = part->getCenter();
+					const float dx = static_cast<float>(center.x) - renderCamPos.x;
+					const float dy = static_cast<float>(center.y) - renderCamPos.y;
+					const float dz = static_cast<float>(center.z) - renderCamPos.z;
+					dirtySubChunks.push_back({
+						part,
+						part->hasImmediateChange(),
+						frustum.isBoxVisible(part->getPosition(), 2.0f, renderCamPos),
+						dx * dx + dy * dy + dz * dz
+					});
 				}
-				++meshedChunksThisFrame;
 				needsReRendering2.erase(pos);
 			}
+
+			// MCPE 0.8.1 DirtyChunkSorter: immediate edits > in-frustum subchunks > closest 3D distance
+			std::sort(dirtySubChunks.begin(), dirtySubChunks.end(),
+			          [](const DirtySubChunkCandidate& a, const DirtySubChunkCandidate& b) {
+				          if (a.immediate != b.immediate) return a.immediate > b.immediate;
+				          if (a.inFrustum != b.inFrustum) return a.inFrustum > b.inFrustum;
+				          return a.distSq < b.distSq;
+			          });
+
+			const int maxSubRebuildsPerFrame = gGuiContext.loadingChunks ? 32 : 2;
+			const double meshBudgetMs = gGuiContext.loadingChunks ? 30.0 : 6.0;
+			const double combinedFrameBudgetMs = 10.0; // MCPE 0.8.1 ~0.01s cap across Light + Mesh in gameplay
+			int rebuiltThisFrame = 0;
+			int solidEmptyBuiltThisFrame = 0;
+			for (const auto& cand : dirtySubChunks) {
+				if (rebuiltThisFrame >= maxSubRebuildsPerFrame) break;
+				if (!gGuiContext.loadingChunks) {
+					const int totalTouched = rebuiltThisFrame + solidEmptyBuiltThisFrame;
+					if (rebuiltThisFrame >= 1 &&
+					    (phaseElapsedMs(tMesh0) >= meshBudgetMs || phaseElapsedMs(tLightPhase0) >= combinedFrameBudgetMs)) {
+						break;
+					}
+					if (totalTouched >= 1 && phaseElapsedMs(tLightPhase0) >= combinedFrameBudgetMs + 2.0) {
+						break;
+					}
+				} else {
+					if (rebuiltThisFrame >= 4 && phaseElapsedMs(tMesh0) >= meshBudgetMs) break;
+				}
+
+				RenderChunk* chunkPart = cand.part;
+				chunkPart->startRebuild(std::move(chunkBuilder));
+				chunkPart->rebuild(gGuiOptions.fancyGraphics, true);
+				chunkBuilder = chunkPart->endRebuild(Vec3(renderCamPos.x, renderCamPos.y, renderCamPos.z));
+				ChunkPerfMetrics::instance.meshRebuilds.fetch_add(1, std::memory_order_relaxed);
+				// Only charge the strict rebuild budget slot if geometry was actually emitted
+				if (!chunkPart->isEmpty()) {
+					++rebuiltThisFrame;
+				} else {
+					++solidEmptyBuiltThisFrame;
+				}
+			}
+			ChunkPerfMetrics::instance.meshUs.fetch_add(
+				static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - tMesh0).count()),
+				std::memory_order_relaxed);
 
 			// Bind lightmap (TEXTURE_1) & neutral foliage fallback (TEXTURE_2)
 			glActiveTexture(GL_TEXTURE1);
@@ -5387,6 +5609,7 @@ void renderThreadStuff()
 			};
 
 			// Ensure every RenderChunk has a sorted index buffer before Pass 1 so Pass 1 never falls back to unindexed glDrawArrays
+			auto tFaceSort0 = std::chrono::high_resolution_clock::now();
 			for (auto& lc : rc) {
 				if (std::abs(lc.first.x - camChunkPos.x) > activeRenderDist ||
 				    std::abs(lc.first.z - camChunkPos.z) > activeRenderDist) {
@@ -5397,12 +5620,20 @@ void renderThreadStuff()
 					if (!chunkPart) continue;
 					chunkPart->updateFaceSortState(Vec3(renderCamPos.x, renderCamPos.y, renderCamPos.z));
 					if (chunkPart->isFaceSortDirty()) {
-						chunkPart->startFaceSort(make_unique<RenderChunkSorter>());
+						if (!chunkSorter) {
+							chunkSorter = make_unique<RenderChunkSorter>();
+						}
+						chunkPart->startFaceSort(std::move(chunkSorter));
 						chunkPart->faceSort();
-						chunkPart->endFaceSort();
+						chunkSorter = chunkPart->endFaceSort();
+						ChunkPerfMetrics::instance.faceSorts.fetch_add(1, std::memory_order_relaxed);
 					}
 				}
 			}
+			auto tRender0 = std::chrono::high_resolution_clock::now();
+			ChunkPerfMetrics::instance.faceSortUs.fetch_add(
+				static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(tRender0 - tFaceSort0).count()),
+				std::memory_order_relaxed);
 
 			// Pass 1: Opaque, double-sided, and alpha-tested layers
 			static const TerrainLayer opaqueLayers[] = {
@@ -5426,8 +5657,9 @@ void renderThreadStuff()
 				}
 				for (int i = 0; i < 8; i++) {
 					RenderChunk* chunkPart = lc.second[i];
-					if (!chunkPart) continue;
+					if (!chunkPart || chunkPart->isEmpty() || !chunkPart->isReady()) continue;
 					BlockPos position = chunkPart->getPosition();
+					if (!frustum.isBoxVisible(position, 2.0f, renderCamPos)) continue;
 
 					bool hasTransp = chunkPart->hasLayer(TerrainLayer::Blend) || chunkPart->hasLayer(TerrainLayer::Water);
 					if (hasTransp) {
@@ -5487,6 +5719,10 @@ void renderThreadStuff()
 			}
 			glDepthMask(GL_TRUE);
 			glDisable(GL_BLEND);
+
+			ChunkPerfMetrics::instance.renderUs.fetch_add(
+				static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - tRender0).count()),
+				std::memory_order_relaxed);
 
 			glActiveTexture(GL_TEXTURE0);
 
@@ -5571,10 +5807,21 @@ void renderThreadStuff()
 							++litCount;
 						}
 						if (std::abs(dx) <= rDist && std::abs(dz) <= rDist) {
-							if (rc.find(cp) != rc.end()) {
-								++meshedCount;
-							}
-							if (needsReRendering2.find(cp) != needsReRendering2.end()) {
+							auto rcIt = rc.find(cp);
+							if (rcIt != rc.end()) {
+								bool colReady = true;
+								for (int s = 0; s < 8; ++s) {
+									if (!rcIt->second[s] || rcIt->second[s]->isBuildState(RenderChunk::BuildState::Dirty)) {
+										colReady = false;
+										break;
+									}
+								}
+								if (colReady) {
+									++meshedCount;
+								} else {
+									++innerPending;
+								}
+							} else {
 								++innerPending;
 							}
 						}
@@ -5639,8 +5886,71 @@ void renderThreadStuff()
 		syncCursorLock();
 		glinput.Clear();
 
+		auto frameCpuEndTP = std::chrono::high_resolution_clock::now();
+		double frameCpuMs = std::chrono::duration<double, std::milli>(frameCpuEndTP - frameStartTP).count();
+
 		glfwSwapBuffers(window);
 		glfwPollEvents();
+		auto frameWallEndTP = std::chrono::high_resolution_clock::now();
+		double frameWallMs = std::chrono::duration<double, std::milli>(frameWallEndTP - frameStartTP).count();
+
+		if (gBenchChunksMode) {
+			if (benchPhase == 0) {
+				++benchInitFrames;
+				benchCpuFrameMs.push_back(frameCpuMs);
+				benchWallFrameMs.push_back(frameWallMs);
+				if (!gGuiContext.loadingChunks && gGuiContext.state == GameState::InGame && hasInitialSpawn) {
+					benchInitWallMs = std::chrono::duration<double, std::milli>(frameWallEndTP - benchInitStart).count();
+					printBenchMetrics("INIT", benchInitFrames, benchInitWallMs, benchCpuFrameMs, benchWallFrameMs);
+					benchCpuFrameMs.clear();
+					benchWallFrameMs.clear();
+					ChunkPerfMetrics::instance.reset();
+					mce::Mesh::resetStats();
+					c.mIsFlying = true;
+					c.mNoGravity = true;
+					c.setPositionAndLook(c.mPos.x, 90.0f, c.mPos.z, 0.0, -15.0);
+					benchStartX = c.mPos.x;
+					benchStartY = c.mPos.y;
+					benchStartZ = c.mPos.z;
+					benchWalkStart = std::chrono::high_resolution_clock::now();
+					benchPhase = 1;
+					benchWalkStep = 0;
+				}
+			} else if (benchPhase == 1) {
+				benchCpuFrameMs.push_back(frameCpuMs);
+				benchWallFrameMs.push_back(frameWallMs);
+				++benchWalkStep;
+				if (benchWalkStep <= 120) {
+					float nx = benchStartX + static_cast<float>(benchWalkStep) * 1.4f;
+					c.teleportTo(nx, benchStartY, benchStartZ);
+				} else if (benchWalkStep <= 160) {
+					// Oscillate back and forth across a chunk border to test hysteresis & edge thrashing
+					int cx = Math::floor((benchStartX + 120.0f * 1.4f) / 16.0f);
+					float borderX = static_cast<float>(cx * 16);
+					float offset = ((benchWalkStep % 4) < 2) ? -1.5f : 1.5f;
+					c.teleportTo(borderX + offset, benchStartY, benchStartZ);
+				} else if (benchWalkStep == 165 && commandContext.dim) {
+					// Break and place a block to measure local update/lighting/rebuild cost
+					auto tEdit0 = std::chrono::high_resolution_clock::now();
+					BlockPos editPos(Math::floor(c.mPos.x) + 2, std::max(4, Math::floor(c.mPos.y) - 20), Math::floor(c.mPos.z));
+					BlockSource& reg = c.getRegion();
+					if (reg.hasBlock(editPos)) {
+						reg.setBlockAndData(editPos, FullBlock(Block::mStone->mID, 0), Block::UPDATE_ALL);
+						updateLightingAndRebuildChunks(reg, editPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+						reg.removeBlock(editPos);
+						updateLightingAndRebuildChunks(reg, editPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+					}
+					double editMs = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - tEdit0).count();
+					printf("[BENCH_EDIT] blockPlaceAndBreakMs=%.2f\n", editMs);
+					fflush(stdout);
+				} else if (benchWalkStep >= gBenchWalkFrames) {
+					benchWalkWallMs = std::chrono::duration<double, std::milli>(frameWallEndTP - benchWalkStart).count();
+					printBenchMetrics("WALK", benchWalkStep, benchWalkWallMs, benchCpuFrameMs, benchWallFrameMs);
+					benchPhase = 2;
+					gGuiContext.shouldQuit = true;
+				}
+			}
+		}
 		{
 			std::string cur = gGuiOptions.serialize();
 			if (cur != lastSavedOptions) { gGuiOptions.save("options.txt"); lastSavedOptions = cur; }
@@ -5652,5 +5962,6 @@ void renderThreadStuff()
 	WorkerPool::setMainThreadPumpActive(false);
 	SoundEngine::shutdown();
 	commandContext.running = false;
+	mce::Mesh::shutdownPool();
 	glfwTerminate();
 }

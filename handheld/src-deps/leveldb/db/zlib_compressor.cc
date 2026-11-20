@@ -72,6 +72,8 @@ namespace leveldb {
 		if (ret != Z_OK)
 			return ret;
 
+		output.reserve(output.size() + ::std::max<size_t>(length * 4, static_cast<size_t>(CHUNK)));
+
 		/* decompress until deflate stream ends or end of file */
 		do {
 			/* run inflate() on input until output buffer not full */

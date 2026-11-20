@@ -216,6 +216,10 @@ bool DBStorage::_read(string_span prefix, KeyValueInput& input) const {
 		return false;
 	}
 
+	auto t0 = std::chrono::high_resolution_clock::now();
+	ChunkPerfMetrics::instance.dbReadCalls.fetch_add(1, std::memory_order_relaxed);
+	input.reserve(65536, 16);
+
 	leveldb::Iterator* it = mDb->NewIterator(mOptions->read);
 	auto dbPrefix = to_slice(prefix);
 
@@ -227,11 +231,17 @@ bool DBStorage::_read(string_span prefix, KeyValueInput& input) const {
 
 		auto key = to_span(it->key()).subspan(prefix.size());
 
-		input.add(gsl::to_string(key), it->value().data(), it->value().size());
+		input.add(std::string(key.data(), key.size()), it->value().data(), it->value().size());
 	}
 	delete it;
 
-	return !input.empty();
+	bool ok = !input.empty();
+	if (ok) {
+		ChunkPerfMetrics::instance.dbChunkReadHits.fetch_add(1, std::memory_order_relaxed);
+	}
+	auto us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - t0).count();
+	ChunkPerfMetrics::instance.dbUs.fetch_add(static_cast<uint64_t>(us), std::memory_order_relaxed);
+	return ok;
 }
 
 bool DBStorage::_read(string_span key, std::string& buffer) const {
@@ -258,12 +268,19 @@ bool DBStorage::isCorrupted() const {
 }
 
 bool DBStorage::hasKey(string_span key) {
+	if (mDb.get() == nullptr) {
+		return false;
+	}
+	auto t0 = std::chrono::high_resolution_clock::now();
+	ChunkPerfMetrics::instance.dbHasKeyCalls.fetch_add(1, std::memory_order_relaxed);
 	auto dbKey = to_slice(key);
 
-	auto itr = Unique<leveldb::Iterator>(mDb->NewIterator(mOptions->read));
-	itr->Seek(dbKey);
-
-	return itr->Valid() && itr->key() == dbKey;
+	// Use Get() instead of NewIterator()->Seek() so LevelDB checks the SSTable Bloom filter first
+	std::string ignoredValue;
+	bool found = mDb->Get(mOptions->read, dbKey, &ignoredValue).ok();
+	auto us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - t0).count();
+	ChunkPerfMetrics::instance.dbUs.fetch_add(static_cast<uint64_t>(us), std::memory_order_relaxed);
+	return found;
 }
 
 bool DBStorage::_checkStatusValid(const leveldb::Status& status) const {
