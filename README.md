@@ -1,71 +1,57 @@
-![Minecraft rendered in the restoration](images/theworld.png)
 # Minecraft Pocket Edition 1.0.2.0 Code Restoration
 
-This project aims to restore leaked MCPE 1.0.2.0 code from Minecraft Dungeons to working condition and to hopefully be playable.
+![In-game gameplay](images/ingame.png)
 
-![Restored MCPE menu](images/menu.png)
+This project aims to restore leaked MCPE 1.0.2.0 code from Minecraft Dungeons to working condition and make it playable on desktop platforms (Linux and Windows).
 
-## About the code
-On March 1, 2026, a major Minecraft source code leak which included Minecraft Legacy Console edition code, Minecraft Pocket Edition 0.6.1 code and the full Minecraft Dungeons development repo occurred. The Minecraft Dungeons codebase also included part of a newer version of Pocket Edition's codebase 1.0.2.0, dating to around 2016-2017. This code is only partially complete as several necessary parts to run it have been stripped out and replaced with Unreal Engine 4 code.
+---
 
-## What works
-- Native Linux port (CMake + GLFW + GLAD) launching directly into the GUI/renderer (`--console` for CLI mode)
-- The full chunk generation code
-- Exporting areas of the world as pictures
-- Basic textured rendering of chunks (can be seen above)
-- Transparent water (buggy still)
-- Loading real Minecraft PE shaders+materials (incomplete but works)
-- Dual GUI/UI system with live hot-switching (`useTouchUI`): 1:1 MCPE 0.8.1 Touch layout and Classic PC layout (menus, world management, options, pause, chat, HUD/hotbar)
-- Functional Crafting & Inventory system for both PC (2x2 / 3x3 grids) and Touch MATTIS 0.8.1 (`PaneCraftingScreen`, `StonecutterScreen`, `ArmorScreen` with 3D Steve, `FurnaceScreen`, `ChestScreen`), including 3D isometric block rendering and 2D item rendering in all UI slots
-- World block interaction (raycast block selection, breaking/placing blocks, opening Crafting Table / Stonecutter / Furnace / Chest in-world)
-- Player physics & AABB block collisions (gravity, jumping, fall damage, Creative flight toggle) and dropped `ItemEntity` physics/pickup
-- World, player, container, and modified chunk persistence (`WorldPersistence` under `./worlds/<name>`)
-- Unstable multithreading (define TEST_THREADING when building a vs solution with cmake)
+## 📸 Screenshots & Gallery
 
-## Missing/Recreated code
-- **lib-deps/Renderer**
- Was removed because it conflicted with Unreal's renderer? Model, Shader, material and texture code has been decompiled/recreated to work, but it remains very incomplete.
-- **src/platform** 
- Was removed because Unreal had its own platform abstraction? Some parts of this have been restored, though thread pools need work to actually restore them to a state where they can be multi-threaded.
-- **src-client** 
- Was removed because Unreal was the launcher now? It is where the new recreated launcher is.
-- **network** 
- Was removed because Unreal has its own networking? Not restored at all
-- **world/entity** 
- Was mostly removed because they wanted to use Unreal Actors? Not restored at all yet, a lot of this code will be hard to restore too.
-- **world/item**
- Unknown
-- **world/level/block/entity**
- Was removed because entity code is heavily removed? Not restored
-- **Most redstone related code**
- Was removed because redstone was not needed anymore? Not restored
-- **A lot more**
+| In-Game View | UI & Touch Interface |
+| :---: | :---: |
+| ![In-game gameplay](images/ingame.png) | ![UI and Touch interface](images/Captura%20de%20pantalla_20261119_205146.png) |
 
-## Interesting code
-- **src/common/world/level/levelgen/v1/FarlandsFeature.cpp**
-Yes, intentional farlands, though this kind is quite different to the Java Farlands. RandomLevelSource mentions it next to something called the 'underworlds', and both are chunk post processing steps.
-- **world/level/GameType.h, world/entity/player/Player.h, world/entity/player/Abilities.h and world/entity/player/Player.cpp**
-Code from the HoloLens E3 minecraft demo can be found here. There is not much left that has not been removed in this code but the lightning effect appears to be an actual ability, and there were different 'viewer' gamemodes which were used for the HoloLens viewer.
+| First Person View | Top-Down Renderer |
+| :---: | :---: |
+| ![First person view](images/theworld.png) | ![Seen from above](images/screenshot-renderer.png) |
 
+| Chunk Side Layer | The End |
+| :---: | :---: |
+| ![Side view of a chunk](images/SideLayer0.bmp) | ![The end](images/screenshot-end.png) |
 
-## Contributing
-Contributions are welcome. Create a pull request fixing an issue or restoring a feature to the repo. If you are decompiling code try and find an android build near 1.0.2.0 with debug information.
+---
 
-## TODO
-- First-person hand/held-item rendering, third-person Steve rendering, and view bobbing
-- Fix water
-- Restore more of Renderer
-- Port code from the 0.6.1 leak
-- Add a debug menu (ImGui?)
-- Reload neighbouring chunks when a new one is generated
-- Load structure files
-- Tidy up codebase (especially renderer.cpp and main.cpp)
-- Fix BlockTextureTessellator (need to call generateUV()?)
-- Move some stuff from the client renderer folder back to the renderer library
-- Find where the weird banding in the grass colour is coming from
-- Check memory is being freed correctly
+## 🛠️ What Works (Current Progress)
 
-## How to compile.
+- **Native Desktop Ports:** CMake + GLFW + GLAD support for Linux and Windows (`--console` mode for CLI).
+- **Chunk Pipeline & Optimization:** Optimized chunk loading/unloading, meshing, lighting calculation (`WorldLighting`), database storage, and chunk pooling pipeline.
+- **Rendering & Shaders:** Textured chunk rendering, transparent water, and loading real MCPE shaders + materials.
+- **Dual GUI / UI System:** Live hot-switching (`useTouchUI`) supporting 1:1 MCPE 0.8.1 Touch layout and Classic PC layout (menus, world management, options, pause, chat, HUD/hotbar).
+- **Crafting & Inventory:** Fully functional crafting & inventory systems for both PC (2x2 / 3x3 grids) and Touch MATTIS 0.8.1 (`PaneCraftingScreen`, `StonecutterScreen`, `ArmorScreen` with 3D Steve, `FurnaceScreen`, `ChestScreen`), including 3D isometric block rendering and 2D item rendering.
+- **Gameplay & Physics:** Raycast block selection, breaking/placing blocks, player physics, AABB collisions, gravity, jump, fall damage, Creative flight toggle, and dropped `ItemEntity` physics/pickup.
+- **Persistence & Options:** World, player, container, and modified chunk persistence (`WorldPersistence`), with full options persistence (`options.txt`, mouse sensitivity, render distance, difficulty, fancy skies/clouds).
+
+---
+
+## 🔍 About the Code & Leak Origin
+On March 1, 2026, a major Minecraft source code leak occurred, including Legacy Console edition code, PE 0.6.1 code, and the full Minecraft Dungeons development repository. 
+
+The Dungeons codebase contained part of Pocket Edition 1.0.2.0 (dating to 2016-2017). However, the code was partially incomplete because key subsystems had been stripped out and replaced with Unreal Engine 4 code:
+- **`lib-deps/Renderer`**: Removed due to Unreal renderer conflicts; shaders, models, and textures have been decompiled/recreated.
+- **`src/platform`**: Platform abstraction removed for UE4; partially restored.
+- **`network` / `world/entity` / `world/level/block/entity` / `redstone`**: Heavily removed or not yet restored.
+
+---
+
+## 🔮 Interesting Code Artifacts
+- **Farlands (`FarlandsFeature.cpp`):** Intentional farlands implementation (different from Java Edition), mentioned alongside 'underworlds' as chunk post-processing steps.
+- **HoloLens Demo Code (`GameType.h`, `Player.h/cpp`):** Leftover code from the HoloLens E3 Minecraft demo, including lighting abilities and special 'viewer' gamemodes.
+
+---
+
+## 💻 How to Compile & Run
+
 ### Linux
 1. Place the `resource_packs` (and assets) from Minecraft Pocket Edition 1.0.0 inside `assets/`.
 2. Configure and build from the repository root:
@@ -80,14 +66,20 @@ Contributions are welcome. Create a pull request fixing an issue or restoring a 
    ```
 
 ### Windows
-1. Place the contents of the assets folder from a Minecraft Pocket Edition 1.0.0 build (from an APK/IPA/APPX etc) inside the data folder, do not overwrite. Please don't use pirated assets, pay for the game. Inside the data folder there should now be a few more folders and files including one called 'resource_packs'.
-2. Use build_win32.bat in handheld/src to generate a Visual Studio solution.
-3. Compile that generated solution and launch it, then type 'render' if you want to go straight into the renderer or use the console for running other commands.
+1. Place the assets folder from MCPE 1.0.0 inside the data folder (do not overwrite; include `resource_packs`).
+2. Use `build_win32.bat` in `handheld/src` to generate a Visual Studio solution.
+3. Compile and launch, then type `render` to go straight to the renderer or use the console.
 
-## Images
-![In-game gameplay](images/ingame.png)
-![UI and Touch interface](images/Captura%20de%20pantalla_20261119_205146.png)
-![Minecraft rendered in the restoration first person view](images/theworld.png)
-![Minecraft rendered in the restoration seen from above](images/screenshot-renderer.png)
-![Side view of a chunk](images/SideLayer0.bmp)
-![The end](images/screenshot-end.png)
+---
+
+## 📌 TODO & Roadmap
+- [ ] First-person hand/held-item rendering, third-person Steve rendering, and view bobbing.
+- [ ] Fix water rendering and grass color banding.
+- [ ] Restore more of the Renderer library and port 0.6.1 leak code.
+- [ ] Add a debug menu (ImGui).
+- [ ] Reload neighboring chunks upon generation and load structure files.
+
+---
+
+## 🤝 Contributing
+Contributions are welcome! Create a pull request fixing an issue or restoring a feature. Try to reference Android builds near 1.0.2.0 with debug information when decompiling.
