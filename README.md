@@ -8,7 +8,7 @@ This project aims to restore leaked MCPE 1.0.2.0 code from Minecraft Dungeons to
 
 ## Screenshots & Gallery
 
-| In-Game View | Main Menu / UI |
+| In-Game View (Post-implementation of 0.8.1-0.12 code) | Main Menu / UI (Post-implementation of 0.8.1-0.12 code) |
 | :---: | :---: |
 | ![In-game gameplay](images/ingame.png) | ![Main Menu UI](images/menu.png) |
 
