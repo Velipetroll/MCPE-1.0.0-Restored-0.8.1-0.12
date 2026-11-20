@@ -77,7 +77,6 @@ The Dungeons codebase contained part of Pocket Edition 1.0.2.0 (dating to 2016-2
 - Some items are not yet fully implemented.
 - Certain block functionalities need completion.
 - Ongoing rendering fixes and edge-case refinements.
-- Reloading neighboring chunks upon generation and loading structure files.
 
 ---
 
