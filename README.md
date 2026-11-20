@@ -6,7 +6,7 @@ This project aims to restore leaked MCPE 1.0.2.0 code from Minecraft Dungeons to
 
 ---
 
-## 📸 Screenshots & Gallery
+## Screenshots & Gallery
 
 | In-Game View | UI & Touch Interface |
 | :---: | :---: |
@@ -22,7 +22,7 @@ This project aims to restore leaked MCPE 1.0.2.0 code from Minecraft Dungeons to
 
 ---
 
-## 🛠️ What Works (Current Progress)
+## What Works (Current Progress)
 
 - **Native Desktop Ports:** CMake + GLFW + GLAD support for Linux and Windows (`--console` mode for CLI).
 - **Chunk Pipeline & Optimization:** Optimized chunk loading/unloading, meshing, lighting calculation (`WorldLighting`), database storage, and chunk pooling pipeline.
@@ -34,7 +34,7 @@ This project aims to restore leaked MCPE 1.0.2.0 code from Minecraft Dungeons to
 
 ---
 
-## 🔍 About the Code & Leak Origin
+## About the Code & Leak Origin
 On March 1, 2026, a major Minecraft source code leak occurred, including Legacy Console edition code, PE 0.6.1 code, and the full Minecraft Dungeons development repository. 
 
 The Dungeons codebase contained part of Pocket Edition 1.0.2.0 (dating to 2016-2017). However, the code was partially incomplete because key subsystems had been stripped out and replaced with Unreal Engine 4 code:
@@ -44,13 +44,13 @@ The Dungeons codebase contained part of Pocket Edition 1.0.2.0 (dating to 2016-2
 
 ---
 
-## 🔮 Interesting Code Artifacts
+## Interesting Code Artifacts
 - **Farlands (`FarlandsFeature.cpp`):** Intentional farlands implementation (different from Java Edition), mentioned alongside 'underworlds' as chunk post-processing steps.
 - **HoloLens Demo Code (`GameType.h`, `Player.h/cpp`):** Leftover code from the HoloLens E3 Minecraft demo, including lighting abilities and special 'viewer' gamemodes.
 
 ---
 
-## 💻 How to Compile & Run
+## How to Compile & Run
 
 ### Linux
 1. Place the `resource_packs` (and assets) from Minecraft Pocket Edition 1.0.0 inside `assets/`.
@@ -72,7 +72,7 @@ The Dungeons codebase contained part of Pocket Edition 1.0.2.0 (dating to 2016-2
 
 ---
 
-## 📌 TODO & Roadmap
+## TODO & Roadmap
 - [ ] First-person hand/held-item rendering, third-person Steve rendering, and view bobbing.
 - [ ] Fix water rendering and grass color banding.
 - [ ] Restore more of the Renderer library and port 0.6.1 leak code.
@@ -81,5 +81,5 @@ The Dungeons codebase contained part of Pocket Edition 1.0.2.0 (dating to 2016-2
 
 ---
 
-## 🤝 Contributing
+## Contributing
 Contributions are welcome! Create a pull request fixing an issue or restoring a feature. Try to reference Android builds near 1.0.2.0 with debug information when decompiling.
