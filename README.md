@@ -72,6 +72,14 @@ The Dungeons codebase contained part of Pocket Edition 1.0.2.0 (dating to 2016-2
 
 ---
 
+## Optimizations & Performance
+- **Chunk Builder Pipeline:** Re-engineered `RenderChunkBuilder` and `RenderChunk` to optimize vertex generation, meshing, and prioritize chunk updates around the player.
+- **World Lighting:** Refactored light propagation (`WorldLighting`) to eliminate redundant calculations and reduce lag spikes during world generation and block updates.
+- **Block Tessellator Cache:** Expanded `BlockTessellatorCache` to reuse geometry data and avoid recalculating identical block faces.
+- **Rendering & Batching:** Improved mesh buffering and shader batching via `Mesh` and `renderer.cpp`, backed by `PerfTimer` telemetry.
+
+---
+
 ## Current Limitations & Missing Features
 - Online multiplayer / networking support is missing.
 - Some items are not yet fully implemented.
