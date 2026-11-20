@@ -76,6 +76,9 @@ namespace mce
 
 		void render(const mce::MaterialPtr& mat, const mce::TexturePtr&, const mce::TexturePtr&, const mce::TexturePtr&, int, int);
 
+		// Fast path for terrain pass when textures, material, and shader uniforms are already bound.
+		void renderRangeNoUnbind(int start, int count);
+
 		void setIndexBufferUsageMode(IndexBufferUsageMode _useMode)
 		{
 			useMode = _useMode;

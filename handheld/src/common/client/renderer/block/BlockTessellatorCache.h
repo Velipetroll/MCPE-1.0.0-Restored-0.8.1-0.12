@@ -27,10 +27,10 @@ public:
 
 private:
 	Brightness _getLightEmission(const Block& block);
-	BlockPos _getPosInArray(const BlockPos& p);
-	int _getIndexFromPositionInArray(const BlockPos& p);
+	inline int _getIndexFromPositionInArray(const BlockPos& p) const {
+		return ((p.x - pos.x) * CACHE_SIDE_Y * CACHE_SIDE_Z) + ((p.y - pos.y) * CACHE_SIDE_Z) + (p.z - pos.z);
+	}
 
-	static const Block& mUnsetBlockValue;
 	BlockPos pos = BlockPos::ZERO;
 	BlockSource* mRegion = nullptr;
 	std::array<BrightnessPair, CACHE_SIDE_X * CACHE_SIDE_Y * CACHE_SIDE_Z> mLightColors;

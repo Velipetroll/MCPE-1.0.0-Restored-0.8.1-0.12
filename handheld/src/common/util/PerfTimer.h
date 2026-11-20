@@ -34,8 +34,12 @@ struct ChunkPerfMetrics {
     std::atomic<uint64_t> loadPhaseUs{0};
     std::atomic<uint64_t> renderUs{0};
     std::atomic<uint64_t> frameUs{0};
+    std::atomic<uint64_t> meshBuildUs{0};   // RenderChunk::rebuild (block sorting + tessellation)
+    std::atomic<uint64_t> meshUploadUs{0};  // RenderChunk::endRebuild (face lists + GL upload)
 
     void reset() {
+        meshBuildUs.store(0, std::memory_order_relaxed);
+        meshUploadUs.store(0, std::memory_order_relaxed);
         dbHasKeyCalls.store(0, std::memory_order_relaxed);
         dbReadCalls.store(0, std::memory_order_relaxed);
         dbChunkReadHits.store(0, std::memory_order_relaxed);

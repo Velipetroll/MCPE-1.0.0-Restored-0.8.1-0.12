@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.25)
 
+# Default to an optimized build. Without this, single-config generators use an
+# empty CMAKE_BUILD_TYPE, which means no -O flags at all (-O0): chunk meshing,
+# lighting and world generation then run several times slower.
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type (Debug/Release/RelWithDebInfo/MinSizeRel)" FORCE)
+endif()
+
 project(minecraftpe)
 
 option(ISPUB "Is public build?" 0)

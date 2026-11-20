@@ -127,6 +127,8 @@ void OptionsScreen::init() {
 		grpGraphics->addOptionItem("Fancy Graphics", new TouchSwitch(opts, Options::Option::FANCY_GRAPHICS));
 		grpGraphics->addOptionItem("Beautiful Skies", new TouchSwitch(opts, Options::Option::FANCY_SKIES));
 		grpGraphics->addOptionItem("Animated Water", new TouchSwitch(opts, Options::Option::ANIMATE_TEXTURES));
+		grpGraphics->addOptionItem("Show FPS", new TouchSwitch(opts, Options::Option::SHOW_FPS));
+		grpGraphics->addOptionItem("Max FPS", makeTouchStepSlider(opts, Options::Option::FPS_LIMIT, { 0, 1, 2, 3, 4, 5 }));
 		auto* grpExp = paneGraphics->createOptionsGroup("Experimental");
 		grpExp->addOptionItem("Hide GUI", new TouchSwitch(opts, Options::Option::HIDE_GUI));
 
@@ -150,6 +152,7 @@ void OptionsScreen::init() {
 	mRenderDistanceSlider = new Slider(opts, Options::Option::RENDER_DISTANCE, { 0, 1, 2, 3 });
 	mGuiScaleSlider = new Slider(opts, Options::Option::GUI_SCALE, { 1, 2, 3, 4 });
 	mDifficultySlider = new Slider(opts, Options::Option::DIFFICULTY, { 0, 1, 2, 3 });
+	mFpsLimitSlider = new Slider(opts, Options::Option::FPS_LIMIT, { 0, 1, 2, 3, 4, 5 });
 
 	elements.push_back(mMusicSlider);
 	elements.push_back(mSoundSlider);
@@ -157,6 +160,7 @@ void OptionsScreen::init() {
 	elements.push_back(mRenderDistanceSlider);
 	elements.push_back(mGuiScaleSlider);
 	elements.push_back(mDifficultySlider);
+	elements.push_back(mFpsLimitSlider);
 
 	mInvertMouseButton = new Button(10, "Invert Mouse");
 	mViewBobbingButton = new Button(11, "View Bobbing");
@@ -168,6 +172,7 @@ void OptionsScreen::init() {
 	mFancySkiesButton = new Button(17, "Beautiful Skies");
 	mAnimateTexturesButton = new Button(18, "Animated Water");
 	mHideGuiButton = new Button(19, "Hide GUI");
+	mShowFpsButton = new Button(20, "Show FPS");
 	mBackButton = new Button(1, "Done");
 
 	buttons.push_back(mInvertMouseButton);
@@ -180,6 +185,7 @@ void OptionsScreen::init() {
 	buttons.push_back(mFancySkiesButton);
 	buttons.push_back(mAnimateTexturesButton);
 	buttons.push_back(mHideGuiButton);
+	buttons.push_back(mShowFpsButton);
 	buttons.push_back(mBackButton);
 
 	updateButtonLabels();
@@ -198,6 +204,7 @@ void OptionsScreen::updateButtonLabels() {
 	if (mFancySkiesButton) mFancySkiesButton->msg = opts->getMessage(Options::Option::FANCY_SKIES);
 	if (mAnimateTexturesButton) mAnimateTexturesButton->msg = opts->getMessage(Options::Option::ANIMATE_TEXTURES);
 	if (mHideGuiButton) mHideGuiButton->msg = opts->getMessage(Options::Option::HIDE_GUI);
+	if (mShowFpsButton) mShowFpsButton->msg = opts->getMessage(Options::Option::SHOW_FPS);
 }
 
 void OptionsScreen::setupPositions() {
@@ -267,6 +274,8 @@ void OptionsScreen::setupPositions() {
 	if (mLeftHandedButton) { mLeftHandedButton->posX = rightX; mLeftHandedButton->posY = startY + rowH * 6; mLeftHandedButton->width = colW; mLeftHandedButton->height = 20; }
 	if (mHideGuiButton) { mHideGuiButton->posX = leftX; mHideGuiButton->posY = startY + rowH * 7; mHideGuiButton->width = colW; mHideGuiButton->height = 20; }
 	if (mUiStyleButton) { mUiStyleButton->posX = rightX; mUiStyleButton->posY = startY + rowH * 7; mUiStyleButton->width = colW; mUiStyleButton->height = 20; }
+	if (mShowFpsButton) { mShowFpsButton->posX = leftX; mShowFpsButton->posY = startY + rowH * 8; mShowFpsButton->width = colW; mShowFpsButton->height = 20; }
+	if (mFpsLimitSlider) { mFpsLimitSlider->posX = rightX; mFpsLimitSlider->posY = startY + rowH * 8; mFpsLimitSlider->width = colW; mFpsLimitSlider->height = 20; }
 
 	if (mBackButton) {
 		mBackButton->posX = width / 2 - 100;
@@ -329,6 +338,7 @@ void OptionsScreen::buttonClicked(Button* button) {
 		if (button->id == 17) opts->toggle(Options::Option::FANCY_SKIES);
 		if (button->id == 18) opts->toggle(Options::Option::ANIMATE_TEXTURES);
 		if (button->id == 19) opts->toggle(Options::Option::HIDE_GUI);
+		if (button->id == 20) opts->toggle(Options::Option::SHOW_FPS);
 		if (button->id == 13) {
 			opts->toggle(Options::Option::USE_TOUCH_UI);
 			context->setScreen(new OptionsScreen(mFromPause));

@@ -30,6 +30,7 @@ private:
 	Button* mFancySkiesButton = nullptr;
 	Button* mAnimateTexturesButton = nullptr;
 	Button* mHideGuiButton = nullptr;
+	Button* mShowFpsButton = nullptr;
 
 	Slider* mMusicSlider = nullptr;
 	Slider* mSoundSlider = nullptr;
@@ -37,6 +38,7 @@ private:
 	Slider* mRenderDistanceSlider = nullptr;
 	Slider* mGuiScaleSlider = nullptr;
 	Slider* mDifficultySlider = nullptr;
+	Slider* mFpsLimitSlider = nullptr;
 
 	int mSelectedCategory = 0;
 	std::vector<Button*> mCategoryButtons;

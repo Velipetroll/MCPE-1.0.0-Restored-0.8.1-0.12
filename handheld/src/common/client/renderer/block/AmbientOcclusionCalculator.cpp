@@ -50,7 +50,7 @@ void AmbientOcclusionCalculator::setTouchEdge(bool touch) {
 }
 
 Color AmbientOcclusionCalculator::_computeAOColor(float baseAO, bool translucent, float gamma) const {
-	auto ao = std::pow(baseAO, gamma);
+	const float ao = (gamma == 1.0f) ? baseAO : std::pow(baseAO, gamma);
 	if (!mDoSeasons) {
 		if (mTintSides) {
 			return mBaseColor * ao;

@@ -71,8 +71,11 @@ public:
 	void startRebuild(Unique<RenderChunkBuilder> set);
 	void startFaceSort(Unique<RenderChunkSorter> set);
 
-	void rebuild(bool transparentLeaves, bool smoothLighting);
+	void rebuild(bool transparentLeaves, bool smoothLighting, uint8_t lodLevel = 0);
 	void faceSort();
+
+	uint8_t getLodLevel() const { return mLodLevel; }
+	void setLodLevel(uint8_t lod) { mLodLevel = lod; }
 
 	Unique<RenderChunkBuilder>&& endRebuild(const Vec3& viewPos);
 	Unique<RenderChunkSorter>&& endFaceSort();
@@ -131,6 +134,12 @@ public:
 
 	static void setMaterialsBasedOnCameraUnderLiquid(const bool isUnderwater, const bool isUnderLava);
 
+	// Camera-relative origin of the next chunk(s) to render. Uploaded lazily in render(), only to
+	// the shader that actually draws, and only when it differs from what that shader already has.
+	static void setChunkOrigin(float x, float y, float z, float scale = 1.0f);
+	static void beginTerrainPass();
+	static void endTerrainPass();
+
 	BlockPos getPosition() const;
 	void setPosition(BlockPos Position);
 
@@ -184,6 +193,7 @@ private:
 	bool mSkyLit = false;
 	float mAverageSkyLight = 0;
 	bool mAllDark = false;
+	uint8_t mLodLevel = 0;
 
 	double mReadyTime = 0;
 	Tick mLastChangeTick, mFirstChangeTick;

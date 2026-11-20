@@ -23,7 +23,9 @@ public:
 		PIXELS_PER_MILLIMETER,
 		DESTROY_VIBRATION,
 		FANCY_SKIES,
-		ANIMATE_TEXTURES
+		ANIMATE_TEXTURES,
+		SHOW_FPS,
+		FPS_LIMIT
 	};
 
 	float musicVolume = 1.0f;
@@ -46,6 +48,8 @@ public:
 	bool destroyVibration = true;
 	bool fancySkies = true;
 	bool animateTextures = true;
+	bool showFps = false;
+	int fpsLimit = 0; // 0=VSync, 1=30, 2=60, 3=120, 4=240, 5=Unlimited
 
 	float getProgressValue(Option opt) const;
 	void set(Option opt, float value);

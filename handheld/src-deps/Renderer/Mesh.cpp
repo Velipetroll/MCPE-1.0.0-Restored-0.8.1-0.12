@@ -288,6 +288,23 @@ namespace mce
         glBindVertexArray(0);
     }
 
+    void Mesh::renderRangeNoUnbind(int start, int count)
+    {
+        if (VBO == -1)
+            upload();
+
+        glBindVertexArray(VAO);
+        if (useMode == IndexBufferUsageMode::Normal && indexCount * indexSize > 0)
+        {
+            int realMode = mode == PrimitiveMode::QuadList ? GL_TRIANGLES : primitiveConversions[(int)mode];
+            glDrawElements(realMode, count, indexSize == 4 ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT, (void *)(start * indexSize));
+        }
+        else
+        {
+            glDrawArrays(primitiveConversions[(int)mode], 0, vertexCount);
+        }
+    }
+
     void Mesh::reset()
     {
         recycleGlHandle(VAO, sFreeVAOs, true);

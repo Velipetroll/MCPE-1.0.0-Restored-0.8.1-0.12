@@ -4,15 +4,15 @@
 #include "world/level/BlockPos.h"
 #include "world/level/BlockSource.h"
 
-const Block& BlockTessellatorCache::mUnsetBlockValue = *Block::mInfoUpdateGame1;// Unset value
-
 void BlockTessellatorCache::reset(BlockSource& region, const BlockPos& startPostion){
 	mRegion = &region;
 	// we can always read one outside the chunk on each side
 	pos = startPostion.west(2).north(2).below(2);
 
-	std::fill(mLightColors.begin(), mLightColors.end(), BrightnessPair{Brightness::INVALID, Brightness::INVALID});
-	mBlocks.fill(&mUnsetBlockValue);
+	// memset all three cache arrays directly (~88 KB total):
+	// BrightnessPair{INVALID,INVALID} == 0xFFFF, DataID unset == 255, nullptr == unset Block*.
+	memset(mLightColors.data(), 0xFF, sizeof(mLightColors));
+	memset(mBlocks.data(), 0, sizeof(mBlocks));
 	memset(mData.data(), 255, sizeof(mData));
 }
 
@@ -20,7 +20,9 @@ BrightnessPair BlockTessellatorCache::getLightColor(const BlockPos& p) {
 	if (p.y >= mRegion->getMaxHeight()) {
 		return{ Brightness::MAX, Brightness::MIN }; //just skylight
 	}
-	int index = _getIndexFromPositionInArray(_getPosInArray(p));
+	DEBUG_ASSERT(p.x >= pos.x && p.y >= pos.y && p.z >= pos.z, "Point is outside cache, should be possible.");
+	DEBUG_ASSERT(p.x - pos.x < CACHE_SIDE_X && p.y - pos.y < CACHE_SIDE_Y && p.z - pos.z < CACHE_SIDE_Z, "Point is outside cache, should be possible.");
+	int index = _getIndexFromPositionInArray(p);
 
 	auto cachedLightColor = mLightColors[index];
 	if(cachedLightColor.block != Brightness::INVALID && cachedLightColor.sky != Brightness::INVALID) {
@@ -52,34 +54,21 @@ const Block& BlockTessellatorCache::getBlock(const BlockPos& p) {
 		return *Block::mAir;
 	}
 
-	int index = _getIndexFromPositionInArray(_getPosInArray(p));
+	DEBUG_ASSERT(p.x >= pos.x && p.y >= pos.y && p.z >= pos.z, "Point is outside cache, should be possible.");
+	DEBUG_ASSERT(p.x - pos.x < CACHE_SIDE_X && p.y - pos.y < CACHE_SIDE_Y && p.z - pos.z < CACHE_SIDE_Z, "Point is outside cache, should be possible.");
+	int index = _getIndexFromPositionInArray(p);
 	const Block* cachedBlock = mBlocks[index];
-	if(cachedBlock != &mUnsetBlockValue) {
+	if(cachedBlock != nullptr) {
 		return *cachedBlock;
 	}
 
 	auto& checkedBlock = mRegion->getBlock(p);
 	mBlocks[index] = &checkedBlock;
-	return *mBlocks[index];
-}
-
-BlockPos BlockTessellatorCache::_getPosInArray(const BlockPos& p) {
-	DEBUG_ASSERT(p.x >= pos.x && p.y >= pos.y && p.z >= pos.z, "Point is outside cache, should be possible.");
-	DEBUG_ASSERT(p.x - pos.x < CACHE_SIDE_X && p.y - pos.y < CACHE_SIDE_Y && p.z - pos.z < CACHE_SIDE_Z, "Point is outside cache, should be possible.");
-
-	return p - pos;
-}
-
-int BlockTessellatorCache::_getIndexFromPositionInArray(const BlockPos& p) {
-	DEBUG_ASSERT(p.x >= 0 && p.y >= 0 && p.z >= 0, "Point is outside cache, should be possible.");
-	DEBUG_ASSERT(p.x < CACHE_SIDE_X && p.y < CACHE_SIDE_Y && p.z < CACHE_SIDE_Z, "Point is outside cache, should be possible.");
-	// TODO: Check if this order is optimal based on rendering ordering.
-	//       Since we read all sides, perhaps it makes no difference.
-	return (p.x * CACHE_SIDE_Y * CACHE_SIDE_Z) + (p.y * CACHE_SIDE_Z) + p.z;
+	return checkedBlock;
 }
 
 void BlockTessellatorCache::setBlockAtPosition(const Block& block, BlockPos& p) {
-	int index = _getIndexFromPositionInArray(_getPosInArray(p));
+	int index = _getIndexFromPositionInArray(p);
 	mBlocks[index] = &block;
 }
 
@@ -88,7 +77,9 @@ DataID BlockTessellatorCache::getData(const BlockPos& _pos) {
 		return 0;
 	}
 
-	int index = _getIndexFromPositionInArray(_getPosInArray(_pos));
+	DEBUG_ASSERT(_pos.x >= pos.x && _pos.y >= pos.y && _pos.z >= pos.z, "Point is outside cache, should be possible.");
+	DEBUG_ASSERT(_pos.x - pos.x < CACHE_SIDE_X && _pos.y - pos.y < CACHE_SIDE_Y && _pos.z - pos.z < CACHE_SIDE_Z, "Point is outside cache, should be possible.");
+	int index = _getIndexFromPositionInArray(_pos);
 	DataID cachedData = mData[index];
 	if(cachedData != 255) {
 		return cachedData;

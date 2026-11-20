@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 namespace mce {
 	struct Shader {
@@ -19,6 +20,14 @@ namespace mce {
 		GLuint doComponent(unsigned int type, const std::string& componentfile, const std::vector<std::string>& defines);
 
 		void activate() const;
+
+		// Uniform locations never change after link, so resolve each name once instead of
+		// asking the driver (string hash + GL call) on every set*() call.
+		GLint getUniformLocation(const std::string& name) const;
+
+		// Per-shader cache of the last CHUNK_ORIGIN_AND_SCALE applied (see RenderChunk::render)
+		mutable GLint mChunkOriginLoc = -2;
+		mutable uint32_t mChunkOriginSerial = 0;
 
 		void setMatrix2(const std::string& name, float*) const;
 		void setMatrix3(const std::string& name, float*) const;
@@ -46,5 +55,7 @@ namespace mce {
 		void setVector4(unsigned int offset, float valuex, float valuey, float valuez, float valuew) const;
 		void setVector4(unsigned int offset, glm::vec4& vector) const;
 
+	private:
+		mutable std::unordered_map<std::string, GLint> mUniformLocations;
 	};
 }

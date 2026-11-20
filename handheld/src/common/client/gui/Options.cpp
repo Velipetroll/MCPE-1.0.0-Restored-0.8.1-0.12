@@ -29,6 +29,7 @@ int Options::getIntValue(Option opt) const {
 	case Option::RENDER_DISTANCE: return renderDistance;
 	case Option::GUI_SCALE: return guiScale;
 	case Option::DIFFICULTY: return difficulty;
+	case Option::FPS_LIMIT: return fpsLimit;
 	default: return 0;
 	}
 }
@@ -38,6 +39,7 @@ void Options::set(Option opt, int value) {
 	case Option::RENDER_DISTANCE: renderDistance = std::max(0, std::min(3, value)); break;
 	case Option::GUI_SCALE: guiScale = std::max(1, std::min(4, value)); break;
 	case Option::DIFFICULTY: difficulty = std::max(0, std::min(3, value)); break;
+	case Option::FPS_LIMIT: fpsLimit = std::max(0, std::min(5, value)); break;
 	default: break;
 	}
 }
@@ -56,6 +58,7 @@ bool Options::getBooleanValue(Option opt) const {
 	case Option::DESTROY_VIBRATION: return destroyVibration;
 	case Option::FANCY_SKIES: return fancySkies;
 	case Option::ANIMATE_TEXTURES: return animateTextures;
+	case Option::SHOW_FPS: return showFps;
 	default: return false;
 	}
 }
@@ -74,6 +77,7 @@ void Options::toggle(Option opt) {
 	case Option::DESTROY_VIBRATION: destroyVibration = !destroyVibration; break;
 	case Option::FANCY_SKIES: fancySkies = !fancySkies; break;
 	case Option::ANIMATE_TEXTURES: animateTextures = !animateTextures; break;
+	case Option::SHOW_FPS: showFps = !showFps; break;
 	default: break;
 	}
 }
@@ -130,6 +134,13 @@ std::string Options::getMessage(Option opt) const {
 		return std::string("Beautiful Skies: ") + (fancySkies ? "ON" : "OFF");
 	case Option::ANIMATE_TEXTURES:
 		return std::string("Animated Water: ") + (animateTextures ? "ON" : "OFF");
+	case Option::SHOW_FPS:
+		return std::string("Show FPS: ") + (showFps ? "ON" : "OFF");
+	case Option::FPS_LIMIT: {
+		static const char* names[] = { "VSync", "30", "60", "120", "240", "Unlimited" };
+		int idx = std::max(0, std::min(5, fpsLimit));
+		return std::string("Max FPS: ") + names[idx];
+	}
 	}
 	return "";
 }
@@ -144,7 +155,8 @@ std::string Options::serialize() const {
 	  << "\nserverVisible=" << serverVisible << "\nleftHanded=" << leftHanded
 	  << "\nuseTouchJoypad=" << useTouchJoypad << "\ndpadSize=" << dpadSize
 	  << "\ndestroyVibration=" << destroyVibration << "\nfancySkies=" << fancySkies
-	  << "\nanimateTextures=" << animateTextures << "\n";
+	  << "\nanimateTextures=" << animateTextures << "\nshowFps=" << showFps
+	  << "\nfpsLimit=" << fpsLimit << "\n";
 	return o.str();
 }
 
@@ -182,6 +194,8 @@ void Options::load(const std::string& path) {
 			else if (k == "destroyVibration") destroyVibration = std::stoi(v) != 0;
 			else if (k == "fancySkies") fancySkies = std::stoi(v) != 0;
 			else if (k == "animateTextures") animateTextures = std::stoi(v) != 0;
+			else if (k == "showFps") showFps = std::stoi(v) != 0;
+			else if (k == "fpsLimit") fpsLimit = std::max(0, std::min(5, std::stoi(v)));
 		} catch (...) {}
 	}
 }

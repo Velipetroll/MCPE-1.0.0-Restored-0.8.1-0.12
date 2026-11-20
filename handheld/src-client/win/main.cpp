@@ -909,11 +909,13 @@ int main(int argc, char** argv)
 #ifdef UNSTABLE_THREADING
 	WorkerPool::workers.resize((unsigned int)WorkerRole::NumWorkerRoles);
 
-	// Parallelize terrain generation across 4 Streaming workers with thread-local BiomeSource layers
+	// Parallelize terrain generation across 4 Streaming workers with thread-local BiomeSource layers,
+	// 1 Disk worker, and 3 MainThread meshing workers with per-worker RenderChunkBuilders.
 	for (int i = 0; i < 4; i++)
 		WorkerPool::workers[0].push_back(new BackgroundWorker());
 	WorkerPool::workers[1].push_back(new BackgroundWorker());
-	WorkerPool::workers[2].push_back(new BackgroundWorker());
+	for (int i = 0; i < 3; i++)
+		WorkerPool::workers[2].push_back(new BackgroundWorker());
 #endif
 	DebugLog::createLog("./restore/");
 	LOGI("Minecraft restoration is running\n");

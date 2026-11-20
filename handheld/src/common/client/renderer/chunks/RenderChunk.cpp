@@ -20,6 +20,8 @@
 #include "util/Math.h"
 #include "Core/Debug/Log.h"
 #include "Renderer/materialptr.h"
+#include "Renderer/rendermaterial.h"
+#include "Renderer/hal/interface/RenderContextImmediate.h"
 #include <TextureGroup.h>
 
  mce::MaterialPtr RenderChunk::sFadingChunksMaterial;
@@ -28,6 +30,47 @@
  mce::MaterialPtr RenderChunk::sBelowWaterStencilMaterial;
  mce::MaterialPtr RenderChunk::sMaterialMap[enum_cast(TerrainLayer::Count)] = { };
  mce::MaterialPtr RenderChunk::sFogMaterialMap[enum_cast(TerrainLayer::Count)] = { };
+
+namespace {
+	float sChunkOrigin[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+	uint32_t sChunkOriginSerial = 1; // shaders start at 0, so the first render always uploads
+	bool sInTerrainPass = false;
+	const mce::RenderMaterial* sLastTerrainMaterial = nullptr;
+	const mce::Texture* sLastTerrainTex0 = nullptr;
+	const mce::Texture* sLastTerrainTex1 = nullptr;
+	const mce::Texture* sLastTerrainTex2 = nullptr;
+}
+
+void RenderChunk::setChunkOrigin(float x, float y, float z, float scale) {
+	if (sChunkOrigin[0] == x && sChunkOrigin[1] == y && sChunkOrigin[2] == z && sChunkOrigin[3] == scale) {
+		return;
+	}
+	sChunkOrigin[0] = x;
+	sChunkOrigin[1] = y;
+	sChunkOrigin[2] = z;
+	sChunkOrigin[3] = scale;
+	if (++sChunkOriginSerial == 0) {
+		sChunkOriginSerial = 1;
+	}
+}
+
+void RenderChunk::beginTerrainPass() {
+	sInTerrainPass = true;
+	sLastTerrainMaterial = nullptr;
+	sLastTerrainTex0 = nullptr;
+	sLastTerrainTex1 = nullptr;
+	sLastTerrainTex2 = nullptr;
+}
+
+void RenderChunk::endTerrainPass() {
+	sInTerrainPass = false;
+	sLastTerrainMaterial = nullptr;
+	sLastTerrainTex0 = nullptr;
+	sLastTerrainTex1 = nullptr;
+	sLastTerrainTex2 = nullptr;
+	glBindVertexArray(0);
+	glActiveTexture(GL_TEXTURE0);
+}
  mce::TexturePtr RenderChunk::endPortalTexture;
  mce::TexturePtr RenderChunk::endPortalColorTexture;
  
@@ -227,7 +270,7 @@ Unique<RenderChunkSorter>&& RenderChunk::endFaceSort() {
 	return std::move(mCurrentSorter);
 }
 
-void RenderChunk::rebuild(bool transparentLeaves, bool smoothLighting) {
+void RenderChunk::rebuild(bool transparentLeaves, bool smoothLighting, uint8_t lodLevel) {
 
 	DEBUG_ASSERT(mCurrentBuilder, "Renderchunk is attempting to rebuild, but 'currentBuilder' is empty!!!\n");
 	if (mCurrentBuilder == nullptr) {
@@ -235,7 +278,8 @@ void RenderChunk::rebuild(bool transparentLeaves, bool smoothLighting) {
 		return;
 	}
 
-	mCurrentBuilder->build(*this, transparentLeaves, smoothLighting);
+	mLodLevel = lodLevel;
+	mCurrentBuilder->build(*this, transparentLeaves, smoothLighting, lodLevel);
 }
 #ifndef TAC_COMPILE
 //Basically what it is in ghidra
@@ -274,23 +318,23 @@ Unique<RenderChunkBuilder>&& RenderChunk::endRebuild(const Vec3& viewPos) {
 	builder.localSource->clear();
 
 	if (mBuildState == BuildState::Building) {
+		const bool preSortedReady = (t.isTessellating() && builder.mSortedNumFaces > 0);
 		if (t.isTessellating()) {
  			ScopedProfile("Upload RenderChunk");
 
  			mMesh = t.END();
-			const std::vector<FacingID>& quadFacingList = t.getFaces();
+			mNumFaces = builder.mSortedNumFaces;
+			mIndexSize = builder.mSortedIndexSize;
 
-			mNumFaces = quadFacingList.size();
-
-			// Initialize the quad facing lists from the tessellator quad list
+			if (mNumFaces > 0) {
+				if (mIndexSize == sizeof(uint16_t)) {
+					mMesh.loadIndexBuffer(mIndexSize, builder.mSortedIndices16.data(), static_cast<unsigned int>(builder.mSortedIndices16.size()));
+				} else {
+					mMesh.loadIndexBuffer(mIndexSize, builder.mSortedIndices32.data(), static_cast<unsigned int>(builder.mSortedIndices32.size()));
+				}
+			}
 			for (int i = 0; i < Facing::NUM_CULLING_IDS; i++) {
 				mFaces[i].clear();
-				mFaces[i].reserve(mNumFaces / Facing::NUM_CULLING_IDS);	// estimated reserve
-			}
-
-			// Place the quads in the correct collection
-			for (uint32_t i = 0; i < quadFacingList.size(); i++) {
-				mFaces[quadFacingList[i]].push_back(i);
 			}
 
 			t.setOffset(0, 0, 0);
@@ -325,6 +369,11 @@ Unique<RenderChunkBuilder>&& RenderChunk::endRebuild(const Vec3& viewPos) {
 		memcpy(mIndexRange, builder.mTerrainLayerRange, sizeof(mIndexRange));
 		memcpy(mRenderLayerIndexRange, builder.mRenderLayerRange, sizeof(mRenderLayerIndexRange));
 
+		if (preSortedReady) {
+			memcpy(mSortedIndexRange, builder.mSortedTerrainLayerRange, sizeof(mSortedIndexRange));
+			memcpy(mSortedRenderLayerIndexRange, builder.mSortedRenderLayerRange, sizeof(mSortedRenderLayerIndexRange));
+		}
+
 		if (mLastChangeTick < Tick::MAX) {
 			//if the dirty tick was set while rebuilding, rebuild again... there might be some changes we didn't account for
 			_changeBuildState(BuildState::Building, BuildState::Dirty);
@@ -333,9 +382,10 @@ Unique<RenderChunkBuilder>&& RenderChunk::endRebuild(const Vec3& viewPos) {
 			_changeBuildState(BuildState::Building, isEmpty() ? BuildState::Empty : BuildState::Ready);
 		}
 
-		if (mNumFaces == 0) {
+		if (mNumFaces == 0 || preSortedReady) {
 			_tryChangeSortState(SortState::SortDirty, SortState::Ready);
 			_tryChangeSortState(SortState::RestartSort, SortState::Ready);
+			_tryChangeSortState(SortState::Sorting, SortState::Ready);
 		}
 		else {
 			updateFaceSortState(viewPos);
@@ -551,9 +601,66 @@ void RenderChunk::render(const RenderChunkRenderParameters& renderChunkRenderPar
  	DEBUG_ASSERT(hasLayer(geometryLayer), "Can't render this layer, pls");
  
  	auto& material = _chooseMaterial(renderChunkRenderParameters.layer, currentTime, renderChunkRenderParameters.forceFog);
- 
+	const mce::RenderMaterial* matPtr = material.operator->();
+
  	auto& tex1 = (renderChunkRenderParameters.layer == TerrainLayer::EndPortal) ? endPortalTexture : atlasTexture;
  	auto& tex2 = (renderChunkRenderParameters.layer == TerrainLayer::EndPortal) ? endPortalColorTexture : brightnessTexture;
+
+	if (sInTerrainPass) {
+		if (sLastTerrainMaterial != matPtr) {
+			if (matPtr) matPtr->activate();
+			sLastTerrainMaterial = matPtr;
+		}
+		if (matPtr && matPtr->myShader && matPtr->myShader->mChunkOriginSerial != sChunkOriginSerial) {
+			const mce::Shader* shader = matPtr->myShader;
+			if (shader->mChunkOriginLoc == -2) {
+				shader->mChunkOriginLoc = shader->getUniformLocation("CHUNK_ORIGIN_AND_SCALE");
+			}
+			glUniform4f(shader->mChunkOriginLoc, sChunkOrigin[0], sChunkOrigin[1], sChunkOrigin[2], sChunkOrigin[3]);
+			shader->mChunkOriginSerial = sChunkOriginSerial;
+		}
+		const mce::Texture* t3 = *foliageTexture;
+		const mce::Texture* t2 = *tex2;
+		const mce::Texture* t1 = *tex1;
+		if (t3 != nullptr && t3 != sLastTerrainTex2) {
+			t3->bindTexture(mce::RenderContextImmediate::get(), 2, 0);
+			sLastTerrainTex2 = t3;
+		}
+		if (t2 != nullptr && t2 != sLastTerrainTex1) {
+			t2->bindTexture(mce::RenderContextImmediate::get(), 1, 0);
+			sLastTerrainTex1 = t2;
+		}
+		if (t1 != nullptr && t1 != sLastTerrainTex0) {
+			t1->bindTexture(mce::RenderContextImmediate::get(), 0, 0);
+			sLastTerrainTex0 = t1;
+		}
+
+		if (mSortState == SortState::Ready && !renderChunkRenderParameters.forceUnsorted) {
+			auto& ri = mSortedIndexRange[(int)geometryLayer];
+			if (ri.mCount > 0) {
+				mMesh.setIndexBufferUsageMode(mce::IndexBufferUsageMode::Normal);
+				mMesh.renderRangeNoUnbind(ri.mStart, ri.mCount);
+			}
+		} else {
+			auto& ri = mIndexRange[(int)geometryLayer];
+			mMesh.setIndexBufferUsageMode(mce::IndexBufferUsageMode::ForceUseUnsorted);
+			mMesh.renderRangeNoUnbind(ri.mStart, ri.mCount);
+		}
+		return;
+	}
+
+	// Non-batched fallback path (outside beginTerrainPass/endTerrainPass)
+	if (matPtr && matPtr->myShader) {
+		const mce::Shader* shader = matPtr->myShader;
+		if (shader->mChunkOriginSerial != sChunkOriginSerial) {
+			if (shader->mChunkOriginLoc == -2) {
+				shader->mChunkOriginLoc = shader->getUniformLocation("CHUNK_ORIGIN_AND_SCALE");
+			}
+			shader->activate();
+			glUniform4f(shader->mChunkOriginLoc, sChunkOrigin[0], sChunkOrigin[1], sChunkOrigin[2], sChunkOrigin[3]);
+			shader->mChunkOriginSerial = sChunkOriginSerial;
+		}
+	}
  
  	if (mSortState == SortState::Ready && !renderChunkRenderParameters.forceUnsorted) {
  		// The sorted index buffer is ready, so use it
@@ -607,6 +714,7 @@ void RenderChunk::reset() {
 	mCanRender = false;
 	mSkyLit = false;
 	mAllDark = false;
+	mLodLevel = 0;
 	mAverageSkyLight = 0.0f;
 	mReadyTime = 0;
 	mImmediateChange = false;
@@ -769,6 +877,13 @@ bool RenderChunk::isSortState(SortState s) const {
 }
 
 void RenderChunk::setMaterialsBasedOnCameraUnderLiquid(const bool isUnderwater, const bool isUnderLava) {
+	// Called every frame: only re-resolve the materials (5 name lookups) when the liquid state changes.
+	static int sLastState = -1;
+	const int state = (isUnderwater ? 1 : 0) | (isUnderLava ? 2 : 0);
+	if (state == sLastState) {
+		return;
+	}
+	sLastState = state;
 
  	sFogMaterialMap[enum_cast(TerrainLayer::Opaque)] = mce::RenderMaterialGroup::switchable.getMaterial(isUnderLava ? "terrain_opaque_fog_no_cull" : "terrain_opaque_fog");
  

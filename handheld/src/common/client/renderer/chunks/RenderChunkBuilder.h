@@ -46,13 +46,23 @@ public:
 
 	~RenderChunkBuilder();
 
-	void build(RenderChunk& rc, bool transparentLeaves, bool smoothLighting);
+	void build(RenderChunk& rc, bool transparentLeaves, bool smoothLighting, uint8_t lodLevel = 0);
 
 	VisibilityExtimator* _getVisibilityHelper();
 
 
 	RangeIndices mTerrainLayerRange[enum_cast(TerrainLayer::Count)];
 	RangeIndices mRenderLayerRange[enum_cast(BlockRenderLayer::_RENDERLAYER_COUNT)];
+
+	// Pre-sorted index buffer produced during build() so endRebuild() uploads VBO+EBO
+	// immediately without waiting for a separate faceSort() pass.
+	std::vector<uint16_t> mSortedIndices16;
+	std::vector<uint32_t> mSortedIndices32;
+	std::array<std::vector<uint32_t>, 7> mSortBuckets;
+	uint32_t mSortedIndexSize = 0;
+	uint32_t mSortedNumFaces = 0;
+	RangeIndices mSortedRenderLayerRange[enum_cast(BlockRenderLayer::_RENDERLAYER_COUNT)];
+	RangeIndices mSortedTerrainLayerRange[enum_cast(TerrainLayer::Count)];
 
 	void trim();
 
@@ -68,9 +78,14 @@ protected:
 
 	void _checkPropagatedBrightness(BlockSource& source, const BlockPos& p);
 	bool _seesSkyDirectly(RenderChunk& rc, BlockSource& region);
-	bool _sortBlocks(BlockSource& region, RenderChunk& rc, VisibilityExtimator* VE, bool transparentLeaves);
-	bool _tessellateQueues(RenderChunk& rc, BlockSource& region);
+	bool _sortBlocks(BlockSource& region, RenderChunk& rc, VisibilityExtimator* VE, bool transparentLeaves, uint8_t lodLevel);
+	void _greedyMeshOpaque(RenderChunk& rc, BlockSource& region, uint8_t lodLevel);
+	void _greedyMeshWater(RenderChunk& rc, BlockSource& region, uint8_t lodLevel);
+	bool _tessellateQueues(RenderChunk& rc, BlockSource& region, uint8_t lodLevel);
 	void _buildRanges();
 	void _checkAllDark(BlockSource& region, const BlockPos& p);
 
+	bool mHasGreedyOpaque = false;
+	bool mHasGreedyWater = false;
+	bool mNeedsBlockTessCache = false;
 };

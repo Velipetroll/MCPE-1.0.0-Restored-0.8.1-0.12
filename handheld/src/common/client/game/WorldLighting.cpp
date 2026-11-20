@@ -64,45 +64,82 @@ struct ChunkGrid3x3 {
 	}
 };
 
-inline void markTouchedSubChunkBit(TouchedSubChunkMap* subMap, int cx, int cz, int sy) {
-	if (subMap && static_cast<unsigned>(sy) < 8u) {
-		(*subMap)[ChunkPos(cx, cz)] |= static_cast<uint8_t>(1u << sy);
-	}
-}
+struct TouchedTracker {
+	int baseX = 0;
+	int baseZ = 0;
+	std::unordered_set<ChunkPos>* outChunks = nullptr;
+	TouchedSubChunkMap* outSubChunks = nullptr;
+	uint8_t subMask[3][3]{};
+	bool chunkHit[3][3]{};
 
-inline void markTouched(std::unordered_set<ChunkPos>* touched,
-                        TouchedSubChunkMap* subMap,
-                        int wx, int y, int wz) {
-	const int cx = floorDiv16(wx);
-	const int cz = floorDiv16(wz);
-	const ChunkPos cp(cx, cz);
-	if (touched) {
-		touched->insert(cp);
-	}
-	if (subMap) {
-		const int sy = y >> 4;
-		const int ly = y & 15;
-		const int lx = wx & 15;
-		const int lz = wz & 15;
-		markTouchedSubChunkBit(subMap, cx, cz, sy);
-		if (ly == 0 && sy > 0) markTouchedSubChunkBit(subMap, cx, cz, sy - 1);
-		if (ly == 15 && sy < 7) markTouchedSubChunkBit(subMap, cx, cz, sy + 1);
-		if (lx == 0) {
-			if (touched) touched->insert(ChunkPos(cx - 1, cz));
-			markTouchedSubChunkBit(subMap, cx - 1, cz, sy);
-		} else if (lx == 15) {
-			if (touched) touched->insert(ChunkPos(cx + 1, cz));
-			markTouchedSubChunkBit(subMap, cx + 1, cz, sy);
-		}
-		if (lz == 0) {
-			if (touched) touched->insert(ChunkPos(cx, cz - 1));
-			markTouchedSubChunkBit(subMap, cx, cz - 1, sy);
-		} else if (lz == 15) {
-			if (touched) touched->insert(ChunkPos(cx, cz + 1));
-			markTouchedSubChunkBit(subMap, cx, cz + 1, sy);
+	TouchedTracker(int bx, int bz, std::unordered_set<ChunkPos>* c, TouchedSubChunkMap* s)
+		: baseX(bx), baseZ(bz), outChunks(c), outSubChunks(s) {}
+
+	inline void markSub(int cx, int cz, int sy) {
+		if (!outSubChunks || static_cast<unsigned>(sy) >= 8u) return;
+		const unsigned dx = static_cast<unsigned>(cx - baseX + 1);
+		const unsigned dz = static_cast<unsigned>(cz - baseZ + 1);
+		if (dx < 3u && dz < 3u) {
+			subMask[dx][dz] |= static_cast<uint8_t>(1u << sy);
+		} else {
+			(*outSubChunks)[ChunkPos(cx, cz)] |= static_cast<uint8_t>(1u << sy);
 		}
 	}
-}
+
+	inline void markChunk(int cx, int cz) {
+		if (!outChunks) return;
+		const unsigned dx = static_cast<unsigned>(cx - baseX + 1);
+		const unsigned dz = static_cast<unsigned>(cz - baseZ + 1);
+		if (dx < 3u && dz < 3u) {
+			chunkHit[dx][dz] = true;
+		} else {
+			outChunks->insert(ChunkPos(cx, cz));
+		}
+	}
+
+	inline void mark(int wx, int y, int wz) {
+		if (!outChunks && !outSubChunks) return;
+		const int cx = floorDiv16(wx);
+		const int cz = floorDiv16(wz);
+		markChunk(cx, cz);
+		if (outSubChunks) {
+			const int sy = y >> 4;
+			const int ly = y & 15;
+			const int lx = wx & 15;
+			const int lz = wz & 15;
+			markSub(cx, cz, sy);
+			if (ly == 0 && sy > 0) markSub(cx, cz, sy - 1);
+			if (ly == 15 && sy < 7) markSub(cx, cz, sy + 1);
+			if (lx == 0) {
+				markChunk(cx - 1, cz);
+				markSub(cx - 1, cz, sy);
+			} else if (lx == 15) {
+				markChunk(cx + 1, cz);
+				markSub(cx + 1, cz, sy);
+			}
+			if (lz == 0) {
+				markChunk(cx, cz - 1);
+				markSub(cx, cz - 1, sy);
+			} else if (lz == 15) {
+				markChunk(cx, cz + 1);
+				markSub(cx, cz + 1, sy);
+			}
+		}
+	}
+
+	void flush() {
+		for (int dx = 0; dx < 3; ++dx) {
+			for (int dz = 0; dz < 3; ++dz) {
+				if (outChunks && chunkHit[dx][dz]) {
+					outChunks->insert(ChunkPos(baseX + dx - 1, baseZ + dz - 1));
+				}
+				if (outSubChunks && subMask[dx][dz] != 0) {
+					(*outSubChunks)[ChunkPos(baseX + dx - 1, baseZ + dz - 1)] |= subMask[dx][dz];
+				}
+			}
+		}
+	}
+};
 
 inline size_t subBlockIdx(int lx, int y, int lz) {
 	return static_cast<size_t>((y & 15) | ((lz & 15) << 4) | ((lx & 15) << 8));
@@ -133,8 +170,7 @@ void runLightBfs(const ChunkGrid3x3& grid,
                  int minX, int maxX,
                  int minY, int maxY,
                  int minZ, int maxZ,
-                 std::unordered_set<ChunkPos>* touched,
-                 TouchedSubChunkMap* touchedSubChunks) {
+                 TouchedTracker& tracker) {
 	for (size_t head = 0; head < q.size(); ++head) {
 		const LightNode cur = q[head];
 		if (cur.light <= 1) continue;
@@ -150,15 +186,29 @@ void runLightBfs(const ChunkGrid3x3& grid,
 
 			const int nlx = nx & 15;
 			const int nlz = nz & 15;
-			const BlockID nid = getBlockFast(nlc, nlx, ny, nlz);
+			const size_t sy = static_cast<size_t>(ny >> 4);
+			const auto& nsubs = nlc->getSubChunks();
+			const size_t sbIdx = subBlockIdx(nlx, ny, nlz);
+			const BlockID nid = (sy < nsubs.size()) ? nsubs[sy]->mBlocks[sbIdx] : BlockID::AIR;
 			const int opacity = std::max(1, static_cast<int>(Block::mLightBlock[nid]));
 			const int nextLight = static_cast<int>(cur.light) - opacity;
 			if (nextLight <= 0) continue;
 
-			const uint8_t existing = getLightFast(nlc, layer, nlx, ny, nlz);
+			const uint8_t existing = (sy < nsubs.size())
+				? (layer.isSky() ? nsubs[sy]->mSkyLight : nsubs[sy]->mBlockLight).get(sbIdx)
+				: static_cast<uint8_t>(layer.getSurrounding());
 			if (nextLight > existing) {
-				nlc->setBrightness(layer, ChunkBlockPos(nlx, ny, nlz), Brightness(static_cast<uint8_t>(nextLight)));
-				markTouched(touched, touchedSubChunks, nx, ny, nz);
+				if (sy < nsubs.size()) {
+					auto& nsc = *nsubs[sy];
+					auto& dataLayer = layer.isSky() ? nsc.mSkyLight : nsc.mBlockLight;
+					dataLayer.set(sbIdx, Brightness(static_cast<uint8_t>(nextLight)));
+					if (nlc->isLoaded() && nlc->getDebugDisplaySavedState() == ChunkDebugDisplaySavedState::Saved) {
+						nsc.mDirtyTicksCounter.touch();
+					}
+				} else {
+					nlc->setBrightness(layer, ChunkBlockPos(nlx, ny, nlz), Brightness(static_cast<uint8_t>(nextLight)));
+				}
+				tracker.mark(nx, ny, nz);
 				if (nextLight > 1) {
 					q.push_back({ nx, ny, nz, static_cast<uint8_t>(nextLight) });
 				}
@@ -336,6 +386,8 @@ void propagateChunkLighting(BlockSource& region,
 	std::vector<LightNode> blkQ;
 	skyQ.reserve(1024);
 	blkQ.reserve(256);
+	TouchedTracker tracker(cp.x, cp.z, outTouchedChunks, outTouchedSubChunks);
+	const bool touchDirtyTicks = (lc->isLoaded() && lc->getDebugDisplaySavedState() == ChunkDebugDisplaySavedState::Saved);
 
 	const bool isSavedPreLit = (lc->getDebugDisplaySavedState() == ChunkDebugDisplaySavedState::Saved &&
 	                            !lc->needsUpgradeFix() &&
@@ -348,12 +400,13 @@ void propagateChunkLighting(BlockSource& region,
 			const int minZ = baseZ - 15;
 			const int maxZ = baseZ + 30;
 			if (!skyQ.empty()) {
-				runLightBfs(grid, skyLayer, skyQ, minX, maxX, 0, maxH, minZ, maxZ, outTouchedChunks, outTouchedSubChunks);
+				runLightBfs(grid, skyLayer, skyQ, minX, maxX, 0, maxH, minZ, maxZ, tracker);
 			}
 			if (!blkQ.empty()) {
-				runLightBfs(grid, LightLayer::BLOCK, blkQ, minX, maxX, 0, maxH, minZ, maxZ, outTouchedChunks, outTouchedSubChunks);
+				runLightBfs(grid, LightLayer::BLOCK, blkQ, minX, maxX, 0, maxH, minZ, maxZ, tracker);
 			}
 		}
+		tracker.flush();
 		auto lightUs = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - tLight0).count();
 		ChunkPerfMetrics::instance.lightUs.fetch_add(static_cast<uint64_t>(lightUs), std::memory_order_relaxed);
 		return;
@@ -384,7 +437,7 @@ void propagateChunkLighting(BlockSource& region,
 			}
 
 			for (int sy = maxSy; sy >= 0; --sy) {
-				const auto& sc = subs[sy];
+				auto& sc = *subs[sy];
 				const int baseY = sy << 4;
 				const int topLy = std::min(15, maxH - baseY);
 				const uint16_t bit = static_cast<uint16_t>(1u << sy);
@@ -400,10 +453,12 @@ void propagateChunkLighting(BlockSource& region,
 					}
 					for (int ly = topLy; ly >= 0; --ly) {
 						const int y = baseY + ly;
-						const uint8_t oldSky = sc->mSkyLight.get(subBlockIdx(lx, ly, lz));
+						const size_t sbIdx = subBlockIdx(lx, ly, lz);
+						const uint8_t oldSky = sc.mSkyLight.get(sbIdx);
 						if (oldSky != static_cast<uint8_t>(curSky)) {
-							lc->setBrightness(skyLayer, ChunkBlockPos(lx, y, lz), Brightness(static_cast<uint8_t>(curSky)));
-							markTouched(outTouchedChunks, outTouchedSubChunks, baseX + lx, y, baseZ + lz);
+							sc.mSkyLight.set(sbIdx, Brightness(static_cast<uint8_t>(curSky)));
+							if (touchDirtyTicks) sc.mDirtyTicksCounter.touch();
+							tracker.mark(baseX + lx, y, baseZ + lz);
 						}
 						if (curSky > 1) {
 							colLowSky = y;
@@ -412,11 +467,37 @@ void propagateChunkLighting(BlockSource& region,
 					continue;
 				}
 
+				// Fast path once sunlight is blocked (curSky == 0) and subchunk skylight is already all-zero:
+				// only check for light-emitting blocks instead of per-voxel skylight attenuation & nibble reads.
+				if (curSky == 0 && (centerFlags.skyAllZero & bit) != 0) {
+					for (int ly = topLy; ly >= 0; --ly) {
+						const int y = baseY + ly;
+						const size_t sbIdx = subBlockIdx(lx, ly, lz);
+						const BlockID id = sc.mBlocks[sbIdx];
+						if (colTop == 0 && Block::mLightBlock[id] > 0) {
+							colTop = y;
+						}
+						const uint8_t emit = static_cast<uint8_t>(Block::mLightEmission[id]);
+						if (emit > 0) {
+							const uint8_t oldBlk = sc.mBlockLight.get(sbIdx);
+							if (emit > oldBlk) {
+								sc.mBlockLight.set(sbIdx, Brightness(emit));
+								if (touchDirtyTicks) sc.mDirtyTicksCounter.touch();
+								tracker.mark(baseX + lx, y, baseZ + lz);
+							}
+							const uint8_t seed = std::max(emit, oldBlk);
+							if (seed > 1) {
+								blkQ.push_back({ baseX + lx, y, baseZ + lz, seed });
+							}
+						}
+					}
+					continue;
+				}
+
 				for (int ly = topLy; ly >= 0; --ly) {
 					const int y = baseY + ly;
-					const ChunkBlockPos cbp(lx, y, lz);
 					const size_t sbIdx = subBlockIdx(lx, ly, lz);
-					const BlockID id = sc->mBlocks[sbIdx];
+					const BlockID id = sc.mBlocks[sbIdx];
 					const int trans = static_cast<int>(Block::mLightBlock[id]);
 					if (trans > 0 && colTop == 0) {
 						colTop = y;
@@ -426,18 +507,20 @@ void propagateChunkLighting(BlockSource& region,
 						colLowSky = y;
 					}
 
-					const uint8_t oldSky = sc->mSkyLight.get(sbIdx);
+					const uint8_t oldSky = sc.mSkyLight.get(sbIdx);
 					if (oldSky != static_cast<uint8_t>(curSky)) {
-						lc->setBrightness(skyLayer, cbp, Brightness(static_cast<uint8_t>(curSky)));
-						markTouched(outTouchedChunks, outTouchedSubChunks, baseX + lx, y, baseZ + lz);
+						sc.mSkyLight.set(sbIdx, Brightness(static_cast<uint8_t>(curSky)));
+						if (touchDirtyTicks) sc.mDirtyTicksCounter.touch();
+						tracker.mark(baseX + lx, y, baseZ + lz);
 					}
 
 					const uint8_t emit = static_cast<uint8_t>(Block::mLightEmission[id]);
 					if (emit > 0) {
-						const uint8_t oldBlk = sc->mBlockLight.get(sbIdx);
+						const uint8_t oldBlk = sc.mBlockLight.get(sbIdx);
 						if (emit > oldBlk) {
-							lc->setBrightness(LightLayer::BLOCK, cbp, Brightness(emit));
-							markTouched(outTouchedChunks, outTouchedSubChunks, baseX + lx, y, baseZ + lz);
+							sc.mBlockLight.set(sbIdx, Brightness(emit));
+							if (touchDirtyTicks) sc.mDirtyTicksCounter.touch();
+							tracker.mark(baseX + lx, y, baseZ + lz);
 						}
 						const uint8_t seed = std::max(emit, oldBlk);
 						if (seed > 1) {
@@ -452,14 +535,16 @@ void propagateChunkLighting(BlockSource& region,
 		}
 	}
 
-	// Scan only the 1-block exterior perimeter columns using precomputed 3x3 subchunk flags
+	// Only precompute SubChunkScanFlags for the 4 cardinal neighbor chunks (16 columns each);
+	// diagonal corners only touch 1 column each so building full chunk flags isn't worth scanning 32 KB.
 	SubChunkScanFlags gridFlags[3][3];
-	for (int dx = 0; dx < 3; ++dx) {
-		for (int dz = 0; dz < 3; ++dz) {
-			if (dx == 1 && dz == 1) continue;
-			gridFlags[dx][dz].build(grid.c[dx][dz]);
-		}
-	}
+	gridFlags[0][1].build(grid.c[0][1]);
+	gridFlags[2][1].build(grid.c[2][1]);
+	gridFlags[1][0].build(grid.c[1][0]);
+	gridFlags[1][2].build(grid.c[1][2]);
+	SubChunkScanFlags allActiveFlags;
+	allActiveFlags.hasBlocks = 0xFFFF;
+	allActiveFlags.blkHasLight = 0xFFFF;
 	for (int lx = -1; lx <= 16; ++lx) {
 		for (int lz = -1; lz <= 16; ++lz) {
 			if (lx >= 0 && lx < 16 && lz >= 0 && lz < 16) continue;
@@ -469,9 +554,10 @@ void propagateChunkLighting(BlockSource& region,
 			const int gz = (lz < 0) ? 0 : (lz >= 16 ? 2 : 1);
 			LevelChunk* nlc = grid.c[gx][gz];
 			if (!nlc) continue;
+			const SubChunkScanFlags& colFlags = (gx == 1 || gz == 1) ? gridFlags[gx][gz] : allActiveFlags;
 			int nTop = 0;
 			int nMinSky = maxH + 1;
-			scanExteriorBorderColumn(nlc, gridFlags[gx][gz], wx & 15, wz & 15, wx, wz, maxH, nTop, nMinSky, blkQ);
+			scanExteriorBorderColumn(nlc, colFlags, wx & 15, wz & 15, wx, wz, maxH, nTop, nMinSky, blkQ);
 			topSolid[lx + 1][lz + 1] = static_cast<uint16_t>(nTop);
 			minSkyY[lx + 1][lz + 1] = static_cast<uint16_t>(nMinSky);
 		}
@@ -500,19 +586,30 @@ void propagateChunkLighting(BlockSource& region,
 				const uint8_t sky = getLightFast(lc, skyLayer, lx, y, lz);
 				if (sky <= 1) continue;
 
-				for (const auto& d : kDirs) {
-					const int ax = wx + d[0];
-					const int ay = y + d[1];
-					const int az = wz + d[2];
-					if (ay < 0 || ay > maxH) continue;
-					LevelChunk* nlc = (ax >= baseX && ax < baseX + 16 && az >= baseZ && az < baseZ + 16)
-						? lc
-						: grid.atWorld(ax, az);
-					if (!nlc) continue;
-					const uint8_t ns = getLightFast(nlc, skyLayer, ax & 15, ay, az & 15);
-					if (ns + 1 < sky) {
+				if (lx > 0 && lx < 15 && lz > 0 && lz < 15) {
+					if ((y < maxH && getLightFast(lc, skyLayer, lx, y + 1, lz) + 1 < sky) ||
+					    (y > 0 && getLightFast(lc, skyLayer, lx, y - 1, lz) + 1 < sky) ||
+					    getLightFast(lc, skyLayer, lx + 1, y, lz) + 1 < sky ||
+					    getLightFast(lc, skyLayer, lx - 1, y, lz) + 1 < sky ||
+					    getLightFast(lc, skyLayer, lx, y, lz + 1) + 1 < sky ||
+					    getLightFast(lc, skyLayer, lx, y, lz - 1) + 1 < sky) {
 						skyQ.push_back({ wx, y, wz, sky });
-						break;
+					}
+				} else {
+					for (const auto& d : kDirs) {
+						const int ax = wx + d[0];
+						const int ay = y + d[1];
+						const int az = wz + d[2];
+						if (ay < 0 || ay > maxH) continue;
+						LevelChunk* nlc = (ax >= baseX && ax < baseX + 16 && az >= baseZ && az < baseZ + 16)
+							? lc
+							: grid.atWorld(ax, az);
+						if (!nlc) continue;
+						const uint8_t ns = getLightFast(nlc, skyLayer, ax & 15, ay, az & 15);
+						if (ns + 1 < sky) {
+							skyQ.push_back({ wx, y, wz, sky });
+							break;
+						}
 					}
 				}
 			}
@@ -552,11 +649,12 @@ void propagateChunkLighting(BlockSource& region,
 	const int minZ = baseZ - 15;
 	const int maxZ = baseZ + 30;
 	if (!skyQ.empty()) {
-		runLightBfs(grid, skyLayer, skyQ, minX, maxX, 0, maxH, minZ, maxZ, outTouchedChunks, outTouchedSubChunks);
+		runLightBfs(grid, skyLayer, skyQ, minX, maxX, 0, maxH, minZ, maxZ, tracker);
 	}
 	if (!blkQ.empty()) {
-		runLightBfs(grid, LightLayer::BLOCK, blkQ, minX, maxX, 0, maxH, minZ, maxZ, outTouchedChunks, outTouchedSubChunks);
+		runLightBfs(grid, LightLayer::BLOCK, blkQ, minX, maxX, 0, maxH, minZ, maxZ, tracker);
 	}
+	tracker.flush();
 
 	auto lightUs = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - tLight0).count();
 	ChunkPerfMetrics::instance.lightUs.fetch_add(static_cast<uint64_t>(lightUs), std::memory_order_relaxed);
@@ -600,6 +698,7 @@ void updateLocalLighting(BlockSource& region,
 	std::vector<LightNode> blkQ;
 	skyQ.reserve(256);
 	blkQ.reserve(128);
+	TouchedTracker tracker(centerCx, centerCz, outTouchedChunks, outTouchedSubChunks);
 
 	uint16_t colTop[32][32]{};
 	uint16_t colMinSky[32][32]{};
@@ -652,7 +751,7 @@ void updateLocalLighting(BlockSource& region,
 								const int y = baseY + ly;
 								if (sc->mBlockLight.get(subBlockIdx(lx, ly, lz)) != 0) {
 									lc->setBrightness(LightLayer::BLOCK, ChunkBlockPos(lx, y, lz), Brightness::MIN);
-									markTouched(outTouchedChunks, outTouchedSubChunks, x, y, z);
+									tracker.mark(x, y, z);
 								}
 							}
 						}
@@ -684,7 +783,7 @@ void updateLocalLighting(BlockSource& region,
 							const uint8_t oldSky = sc->mSkyLight.get(sbIdx);
 							if (oldSky != static_cast<uint8_t>(targetSky)) {
 								lc->setBrightness(skyLayer, cbp, Brightness(static_cast<uint8_t>(targetSky)));
-								markTouched(outTouchedChunks, outTouchedSubChunks, x, y, z);
+								tracker.mark(x, y, z);
 							}
 							if (targetSky > 1) {
 								lowSkyY = y;
@@ -695,7 +794,7 @@ void updateLocalLighting(BlockSource& region,
 								const uint8_t oldBlk = sc->mBlockLight.get(sbIdx);
 								if (oldBlk != emit) {
 									lc->setBrightness(LightLayer::BLOCK, cbp, Brightness(emit));
-									markTouched(outTouchedChunks, outTouchedSubChunks, x, y, z);
+									tracker.mark(x, y, z);
 								}
 								if (emit > 1) {
 									blkQ.push_back({ x, y, z, emit });
@@ -801,11 +900,12 @@ void updateLocalLighting(BlockSource& region,
 	}
 
 	if (!skyQ.empty()) {
-		runLightBfs(grid, skyLayer, skyQ, minX, maxX, minY, maxY, minZ, maxZ, outTouchedChunks, outTouchedSubChunks);
+		runLightBfs(grid, skyLayer, skyQ, minX, maxX, minY, maxY, minZ, maxZ, tracker);
 	}
 	if (!blkQ.empty()) {
-		runLightBfs(grid, LightLayer::BLOCK, blkQ, minX, maxX, minY, maxY, minZ, maxZ, outTouchedChunks, outTouchedSubChunks);
+		runLightBfs(grid, LightLayer::BLOCK, blkQ, minX, maxX, minY, maxY, minZ, maxZ, tracker);
 	}
+	tracker.flush();
 }
 
 float sampleWorldBrightness(BlockSource& region, const BlockPos& pos, float sunFactor) {

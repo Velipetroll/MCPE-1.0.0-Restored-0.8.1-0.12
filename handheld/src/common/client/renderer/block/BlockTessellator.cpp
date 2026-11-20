@@ -162,9 +162,13 @@ bool BlockTessellator::tessellateBlockInWorldFlat(const Block& block, const Bloc
 	bool changed = false;
 
 	bool e = Block::mLightEmission[block.mID] > 0;
-	const float brightnessBelow = std::pow( e ? 0.875f : 0.5f, block.getBrightnessGamma());
-	const float brightnessZ = std::pow(e ? 0.95f : 0.8f, block.getBrightnessGamma());
-	const float brightnessX = std::pow(e ? 0.9f : 0.6f, block.getBrightnessGamma());
+	const float gamma = block.getBrightnessGamma();
+	const float baseBelow = e ? 0.875f : 0.5f;
+	const float baseZ = e ? 0.95f : 0.8f;
+	const float baseX = e ? 0.9f : 0.6f;
+	const float brightnessBelow = (gamma == 1.0f) ? baseBelow : std::pow(baseBelow, gamma);
+	const float brightnessZ = (gamma == 1.0f) ? baseZ : std::pow(baseZ, gamma);
+	const float brightnessX = (gamma == 1.0f) ? baseX : std::pow(baseX, gamma);
 
 	auto centerColor = getLightColor(p);
 
