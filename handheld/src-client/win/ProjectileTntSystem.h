@@ -3,6 +3,7 @@
 #include <vector>
 #include <cmath>
 #include <glad/glad.h>
+#include "common/client/gui/GuiComponent.h"
 #include "world/phys/Vec3.h"
 #include "world/phys/AABB.h"
 #include "world/level/BlockSource.h"
@@ -86,30 +87,32 @@ inline void spawnPrimedTnt(float x, float y, float z) {
 inline void renderArrows() {
     auto& arrows = getArrows();
     if (arrows.empty()) return;
-    glDisable(GL_TEXTURE_2D);
-    glLineWidth(2.5f);
-    glBegin(GL_LINES);
-    for (const auto& a : arrows) {
-        constexpr float degToRad = 3.14159265f / 180.0f;
-        float yawRad = a.yaw * degToRad;
-        float pitchRad = a.pitch * degToRad;
-        float cosP = std::cos(pitchRad);
-        float dx = std::sin(yawRad) * cosP;
-        float dy = std::sin(pitchRad);
-        float dz = std::cos(yawRad) * cosP;
-        // Wooden shaft
-        glColor3f(0.55f, 0.38f, 0.20f);
-        glVertex3f(a.x - dx * 0.35f, a.y - dy * 0.35f, a.z - dz * 0.35f);
-        glVertex3f(a.x + dx * 0.25f, a.y + dy * 0.25f, a.z + dz * 0.25f);
-        // Iron tip
-        glColor3f(0.82f, 0.84f, 0.88f);
-        glVertex3f(a.x + dx * 0.25f, a.y + dy * 0.25f, a.z + dz * 0.25f);
-        glVertex3f(a.x + dx * 0.38f, a.y + dy * 0.38f, a.z + dz * 0.38f);
-    }
-    glEnd();
-    glLineWidth(1.0f);
+    if (!GuiComponent::bindTexture("textures/entity/arrows.png")) return;
     glEnable(GL_TEXTURE_2D);
-    glColor3f(1.0f, 1.0f, 1.0f);
+    glEnable(GL_ALPHA_TEST);
+    glAlphaFunc(GL_GREATER, 0.1f);
+    glDisable(GL_CULL_FACE);
+    for (const auto& a : arrows) {
+        glPushMatrix();
+        glTranslatef(a.x, a.y, a.z);
+        glRotatef(a.yaw, 0.0f, 1.0f, 0.0f);
+        glRotatef(-a.pitch, 1.0f, 0.0f, 0.0f);
+        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+        glBegin(GL_QUADS);
+        glTexCoord2f(0.0f, 0.0f);         glVertex3f(0.0f, -0.09f, -0.45f);
+        glTexCoord2f(0.5f, 0.0f);         glVertex3f(0.0f, -0.09f,  0.45f);
+        glTexCoord2f(0.5f, 5.0f / 32.0f); glVertex3f(0.0f,  0.09f,  0.45f);
+        glTexCoord2f(0.0f, 5.0f / 32.0f); glVertex3f(0.0f,  0.09f, -0.45f);
+
+        glTexCoord2f(0.0f, 0.0f);         glVertex3f(-0.09f, 0.0f, -0.45f);
+        glTexCoord2f(0.5f, 0.0f);         glVertex3f(-0.09f, 0.0f,  0.45f);
+        glTexCoord2f(0.5f, 5.0f / 32.0f); glVertex3f( 0.09f, 0.0f,  0.45f);
+        glTexCoord2f(0.0f, 5.0f / 32.0f); glVertex3f( 0.09f, 0.0f, -0.45f);
+        glEnd();
+        glPopMatrix();
+    }
+    glDisable(GL_ALPHA_TEST);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 }
 
 inline void renderTnts() {
