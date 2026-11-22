@@ -1472,16 +1472,15 @@ void drawBlockSelectionOutline(const BlockPos& pos, const AABB& localShape,
 
 void drawBlockBreakOverlay(const BlockPos& pos, const AABB& localShape, float progress,
                            const glm::mat4& projection, const glm::mat4& view) {
-	if (progress <= 0.01f) return;
+	if (progress <= 0.0f) return;
 	float p = std::max(0.0f, std::min(1.0f, progress));
 	int stage = std::max(0, std::min(9, static_cast<int>(p * 10.0f)));
-	const float eps = 0.002f;
-	float minX = pos.x + localShape.min.x - eps;
-	float minY = pos.y + localShape.min.y - eps;
-	float minZ = pos.z + localShape.min.z - eps;
-	float maxX = pos.x + localShape.max.x + eps;
-	float maxY = pos.y + localShape.max.y + eps;
-	float maxZ = pos.z + localShape.max.z + eps;
+	float minX = pos.x + localShape.min.x;
+	float minY = pos.y + localShape.min.y;
+	float minZ = pos.z + localShape.min.z;
+	float maxX = pos.x + localShape.max.x;
+	float maxY = pos.y + localShape.max.y;
+	float maxZ = pos.z + localShape.max.z;
 
 	glUseProgram(0);
 	glMatrixMode(GL_PROJECTION);
@@ -1492,10 +1491,13 @@ void drawBlockBreakOverlay(const BlockPos& pos, const AABB& localShape, float pr
 	glLoadMatrixf(glm::value_ptr(view));
 
 	glActiveTexture(GL_TEXTURE0);
+	glEnable(GL_TEXTURE_2D);
 	GuiComponent::bindTexture("textures/environment/destroy_stage_" + std::to_string(stage) + ".png");
 	glDisable(GL_CULL_FACE);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_DST_COLOR, GL_ZERO);
+	glEnable(GL_POLYGON_OFFSET_FILL);
+	glPolygonOffset(-1.0f, -1.0f);
 	glDepthMask(GL_FALSE);
 	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
@@ -1507,33 +1509,35 @@ void drawBlockBreakOverlay(const BlockPos& pos, const AABB& localShape, float pr
 	glTexCoord2f(0.0f, 1.0f); glVertex3f(minX, minY, maxZ);
 
 	glTexCoord2f(0.0f, 0.0f); glVertex3f(minX, maxY, minZ);
-	glTexCoord2f(1.0f, 0.0f); glVertex3f(minX, maxY, maxZ);
+	glTexCoord2f(0.0f, 1.0f); glVertex3f(minX, maxY, maxZ);
 	glTexCoord2f(1.0f, 1.0f); glVertex3f(maxX, maxY, maxZ);
-	glTexCoord2f(0.0f, 1.0f); glVertex3f(maxX, maxY, minZ);
+	glTexCoord2f(1.0f, 0.0f); glVertex3f(maxX, maxY, minZ);
 
 	// North (-Z) & South (+Z)
-	glTexCoord2f(0.0f, 0.0f); glVertex3f(minX, minY, minZ);
+	glTexCoord2f(1.0f, 1.0f); glVertex3f(minX, minY, minZ);
 	glTexCoord2f(1.0f, 0.0f); glVertex3f(minX, maxY, minZ);
-	glTexCoord2f(1.0f, 1.0f); glVertex3f(maxX, maxY, minZ);
+	glTexCoord2f(0.0f, 0.0f); glVertex3f(maxX, maxY, minZ);
 	glTexCoord2f(0.0f, 1.0f); glVertex3f(maxX, minY, minZ);
 
-	glTexCoord2f(0.0f, 0.0f); glVertex3f(minX, minY, maxZ);
-	glTexCoord2f(1.0f, 0.0f); glVertex3f(maxX, minY, maxZ);
-	glTexCoord2f(1.0f, 1.0f); glVertex3f(maxX, maxY, maxZ);
-	glTexCoord2f(0.0f, 1.0f); glVertex3f(minX, maxY, maxZ);
+	glTexCoord2f(0.0f, 1.0f); glVertex3f(minX, minY, maxZ);
+	glTexCoord2f(1.0f, 1.0f); glVertex3f(maxX, minY, maxZ);
+	glTexCoord2f(1.0f, 0.0f); glVertex3f(maxX, maxY, maxZ);
+	glTexCoord2f(0.0f, 0.0f); glVertex3f(minX, maxY, maxZ);
 
 	// West (-X) & East (+X)
-	glTexCoord2f(0.0f, 0.0f); glVertex3f(minX, minY, minZ);
-	glTexCoord2f(1.0f, 0.0f); glVertex3f(minX, minY, maxZ);
-	glTexCoord2f(1.0f, 1.0f); glVertex3f(minX, maxY, maxZ);
-	glTexCoord2f(0.0f, 1.0f); glVertex3f(minX, maxY, minZ);
+	glTexCoord2f(0.0f, 1.0f); glVertex3f(minX, minY, minZ);
+	glTexCoord2f(1.0f, 1.0f); glVertex3f(minX, minY, maxZ);
+	glTexCoord2f(1.0f, 0.0f); glVertex3f(minX, maxY, maxZ);
+	glTexCoord2f(0.0f, 0.0f); glVertex3f(minX, maxY, minZ);
 
-	glTexCoord2f(0.0f, 0.0f); glVertex3f(maxX, minY, minZ);
+	glTexCoord2f(1.0f, 1.0f); glVertex3f(maxX, minY, minZ);
 	glTexCoord2f(1.0f, 0.0f); glVertex3f(maxX, maxY, minZ);
-	glTexCoord2f(1.0f, 1.0f); glVertex3f(maxX, maxY, maxZ);
+	glTexCoord2f(0.0f, 0.0f); glVertex3f(maxX, maxY, maxZ);
 	glTexCoord2f(0.0f, 1.0f); glVertex3f(maxX, minY, maxZ);
 	glEnd();
 
+	glDisable(GL_POLYGON_OFFSET_FILL);
+	glPolygonOffset(0.0f, 0.0f);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glDisable(GL_TEXTURE_2D);
 	glDisable(GL_BLEND);
