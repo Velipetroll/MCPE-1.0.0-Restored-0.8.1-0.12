@@ -46,6 +46,11 @@
 #include "world/level/block/LeverBlock.h"
 #include "world/level/block/RotatedPillarBlock.h"
 #include "world/level/block/SlabBlock.h"
+#include "world/level/block/NetherReactor.h"
+#include "world/level/block/HeavyBlock.h"
+#include "world/level/block/entity/NetherReactorBlockEntity.h"
+#include "world/level/block/entity/SignBlockEntity.h"
+#include "world/level/BlockTickingQueue.h"
 #include "world/Direction.h"
 #include "world/level/GameType.h"
 #include "world/level/material/Material.h"
@@ -1014,6 +1019,13 @@ void Camera::move(const Vec3& posIn) {
 		movY *= 0.05f;
 		movZ *= 0.25f;
 	}
+	if (mRegion && Block::mSoulSand) {
+		BlockPos soulPos(Math::floor(mCurrPos.x), Math::floor(mBB.min.y + 0.05f), Math::floor(mCurrPos.z));
+		if (mRegion->getBlockID(soulPos) == Block::mSoulSand->mID) {
+			movX *= 0.4f;
+			movZ *= 0.4f;
+		}
+	}
 
 	AABB boundingBox = mBB;
 	BlockSource& reg = getRegion();
@@ -1726,11 +1738,11 @@ MiningTargetInfo evaluateBlockMining(const Block* block, const ItemInstance& hel
 	else if (tool.type == ToolType::Shears && isBlockOneOf({ Block::mWool, Block::mLeaves, Block::mLeaves2, Block::mWeb, Block::mTallgrass })) out.effectiveTool = true;
 
 	int reqLevel = -1; // -1 = hand/any
-	if (block == Block::mObsidian) {
+	if (block == Block::mObsidian || block == Block::mGlowingObsidian) {
 		reqLevel = 3;
-	} else if (isBlockOneOf({ Block::mGoldOre, Block::mDiamondOre, Block::mEmeraldOre, Block::mRedStoneOre, Block::mLitRedStoneOre })) {
+	} else if (isBlockOneOf({ Block::mGoldOre, Block::mGoldBlock, Block::mDiamondOre, Block::mDiamondBlock, Block::mEmeraldOre, Block::mRedStoneOre, Block::mLitRedStoneOre })) {
 		reqLevel = 2;
-	} else if (isBlockOneOf({ Block::mIronOre, Block::mLapisOre, Block::mLapisBlock })) {
+	} else if (isBlockOneOf({ Block::mIronOre, Block::mIronBlock, Block::mLapisOre, Block::mLapisBlock })) {
 		reqLevel = 1;
 	} else if (!mat.isAlwaysDestroyable() || mat.isType(MaterialType::Stone) || mat.isType(MaterialType::Metal)) {
 		reqLevel = 0;
@@ -1741,11 +1753,21 @@ MiningTargetInfo evaluateBlockMining(const Block* block, const ItemInstance& hel
 	} else {
 		out.canHarvest = (tool.type == ToolType::Pickaxe && tool.harvestLevel >= reqLevel);
 	}
+	if (block == Block::mWeb) {
+		out.canHarvest = (tool.type == ToolType::Sword || tool.type == ToolType::Shears);
+	} else if (block == Block::mTopSnow || block == Block::mSnow) {
+		out.canHarvest = (tool.type == ToolType::Shovel);
+	}
 
 	if (hardness <= 0.0001f) {
 		out.breakTime = 0.0f;
 	} else {
 		float speedMult = out.effectiveTool ? tool.speedMultiplier : 1.0f;
+		if (block == Block::mWeb && (tool.type == ToolType::Sword || tool.type == ToolType::Shears)) {
+			speedMult = 15.0f;
+		} else if ((block == Block::mLeaves || block == Block::mLeaves2) && tool.type == ToolType::Shears) {
+			speedMult = 15.0f;
+		}
 		float divisor = out.canHarvest ? 1.5f : 5.0f;
 		out.breakTime = std::max(0.05f, hardness * divisor / speedMult);
 	}
@@ -4538,16 +4560,17 @@ void renderThreadStuff()
 				}
 
 				auto performBreakBlock = [&](const BlockPos& hitPos, const FullBlock& fb, const Block* block, bool canHarvest) {
-					static Random dropRng;
-					int dropId = block->getResource(dropRng, fb.data, 0);
-					int dropCount = block->getResourceCount(dropRng, fb.data, 0);
-					DataID dropData = (dropId == fb.id && block != Block::mFurnace && block != Block::mLitFurnace &&
-					                   block != Block::mChest && block != Block::mTrappedChest) ? fb.data : 0;
-
 					BlockPos bedSecondPos;
 					bool hasBedSecond = (Block::mBed && block == Block::mBed &&
 					                     Block::mBed->getSecondPart(region, hitPos, bedSecondPos) &&
 					                     region.getBlockID(bedSecondPos) == Block::mBed->mID);
+					BlockPos doorSecondPos;
+					bool hasDoorSecond = false;
+					if (block->hasProperty(BlockProperty::Door)) {
+						bool isUpper = block->getBlockState(BlockState::UpperBlockBit).getBool(fb.data);
+						doorSecondPos = isUpper ? hitPos.below() : hitPos.above();
+						hasDoorSecond = (region.getBlockID(doorSecondPos) == fb.id);
+					}
 
 					int blockTintCol = (block == Block::mGrass) ? 0xFFFFFF : block->getColor(region, hitPos, fb.data);
 					if (region.removeBlock(hitPos)) {
@@ -4577,12 +4600,16 @@ void renderThreadStuff()
 						if (hasBedSecond) {
 							region.removeBlock(bedSecondPos);
 						}
+						if (hasDoorSecond) {
+							region.removeBlock(doorSecondPos);
+						}
+						if (block == Block::mIce && (region.getMaterial(hitPos.below()).getBlocksMotion() || region.getMaterial(hitPos.below()).isLiquid())) {
+							region.setBlockAndData(hitPos, FullBlock(Block::mFlowingWater->mID, 0), Block::UPDATE_ALL);
+						}
 						BlockCoordKey bkey{ hitPos.x, hitPos.y, hitPos.z };
 						auto dropContainerItem = [&](const ItemInstance& ci) {
 							if (ci.isNull() || ci.getStackSize() <= 0) return;
-							Vec3 dpos(hitPos.x + 0.5f, hitPos.y + 0.35f, hitPos.z + 0.5f);
-							Vec3 dvel((dropRng.nextFloat() - 0.5f) * 2.4f, 3.0f, (dropRng.nextFloat() - 0.5f) * 2.4f);
-							spawnWorldItem(worldItems, ci, dpos, dvel, 0.35f);
+							block->popResource(region, hitPos, ci);
 						};
 						auto chestIt = gGuiContext.chests.find(bkey);
 						if (chestIt != gGuiContext.chests.end()) {
@@ -4596,15 +4623,16 @@ void renderThreadStuff()
 							dropContainerItem(furnIt->second.output);
 							gGuiContext.furnaces.erase(furnIt);
 						}
-						if (!gGuiContext.isCreative && canHarvest && dropId > 0 && dropCount > 0) {
-							ItemInstance dropItem(dropId, dropCount, dropData);
-							if (!dropItem.isNull()) {
-								Vec3 dropPos(hitPos.x + 0.5f, hitPos.y + 0.35f, hitPos.z + 0.5f);
-								Vec3 dropVel((dropRng.nextFloat() - 0.5f) * 2.4f,
-								             3.2f + dropRng.nextFloat() * 1.0f,
-								             (dropRng.nextFloat() - 0.5f) * 2.4f);
-								spawnWorldItem(worldItems, dropItem, dropPos, dropVel, 0.35f);
-							}
+						bool holdingShears = (Item::mShears && !held.isNull() && held.getItem() == Item::mShears);
+						if (!gGuiContext.isCreative && holdingShears &&
+						    (block == Block::mLeaves || block == Block::mLeaves2 || block == Block::mTallgrass ||
+						     block == Block::mDeadBush || block == Block::mWeb)) {
+							DataID shearAux = (block == Block::mLeaves || block == Block::mLeaves2) ? (fb.data & 3) : fb.data;
+							block->popResource(region, hitPos, ItemInstance(block, 1, shearAux));
+						} else if (!gGuiContext.isCreative && block == Block::mTopSnow && canHarvest && Item::mSnowBall) {
+							block->popResource(region, hitPos, ItemInstance(Item::mSnowBall, 1 + (fb.data & 7) / 2, 0));
+						} else if (!gGuiContext.isCreative && canHarvest) {
+							block->spawnResources(region, hitPos, fb.data, 1.0f, 0);
 						}
 						if (!gGuiContext.isCreative && block->getDestroySpeed() > 0.0f) {
 							gGuiContext.exhaustion += 0.025f;
@@ -4741,6 +4769,9 @@ void renderThreadStuff()
 									ItemInstance& aSlot = gGuiContext.inventorySlots[static_cast<size_t>(arrowSlot)];
 									aSlot.remove(1);
 									if (aSlot.getStackSize() <= 0) aSlot.setNull();
+									int nextAux = static_cast<int>(held.getAuxValue()) + 1;
+									if (nextAux > 384) held.setNull();
+									else held.setAuxValue(static_cast<short>(nextAux));
 								}
 							}
 						}
@@ -4767,6 +4798,15 @@ void renderThreadStuff()
 										if (nextAux > maxDur) held.setNull();
 										else held.setAuxValue(static_cast<short>(nextAux));
 									}
+								}
+								handledRightClick = true;
+							}
+						} else if (Item::mDye_powder && held.getItem() == Item::mDye_powder) {
+							if (mobManager.dyeSheep(targetMobIdx, (~held.getAuxValue()) & 0xF)) {
+								c.triggerSwing();
+								if (!gGuiContext.isCreative) {
+									held.remove(1);
+									if (held.getStackSize() <= 0) held.setNull();
 								}
 								handledRightClick = true;
 							}
@@ -4818,8 +4858,46 @@ void renderThreadStuff()
 							region.removeBlock(hitPos);
 							rebuildChunksForBlock(hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
 							ProjectileTntSystem::spawnPrimedTnt(hitPos.x + 0.5f, static_cast<float>(hitPos.y), hitPos.z + 0.5f);
+							if (!gGuiContext.isCreative) {
+								int nextAux = static_cast<int>(held.getAuxValue()) + 1;
+								if (nextAux > 64) held.setNull();
+								else held.setAuxValue(static_cast<short>(nextAux));
+							}
 							c.triggerSwing();
 							handledRightClick = true;
+						} else if (Block::mCake && fb.id == Block::mCake->mID) {
+							if (!gGuiContext.isCreative && (gGuiContext.health < 20 || gGuiContext.hunger < 20)) {
+								gGuiContext.health = std::min(20, gGuiContext.health + 2);
+								gGuiContext.hunger = std::min(20, gGuiContext.hunger + 2);
+								int bites = Block::mCake->getBlockState(BlockState::BiteCounter).get<int>(fb.data) + 1;
+								if (bites > 5) {
+									region.removeBlock(hitPos);
+								} else {
+									DataID nd = fb.data;
+									Block::mCake->getBlockState(BlockState::BiteCounter).set(nd, bites);
+									region.setBlockAndData(hitPos, FullBlock(fb.id, nd), Block::UPDATE_ALL);
+								}
+								rebuildChunksForBlock(hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+								SoundEngine::play(SoundEngine::SND_EAT, 0.8f);
+								c.triggerSwing();
+								handledRightClick = true;
+							}
+						} else if (Block::mNetherReactor && fb.id == Block::mNetherReactor->mID) {
+							std::string reactorMsg;
+							if (NetherReactorBlock::activateReactor(region, hitPos, Vec3(c.mPos.x, c.mPos.y - c.mHeightOffset, c.mPos.z), gGuiContext.isCreative, reactorMsg)) {
+								updateLightingAndRebuildChunks(region, hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+							}
+							if (!reactorMsg.empty()) {
+								gGuiContext.addChatMessage(reactorMsg);
+							}
+							c.triggerSwing();
+							handledRightClick = true;
+						} else if (Block::mRedStoneOre && fb.id == Block::mRedStoneOre->mID) {
+							region.setBlockAndData(hitPos, FullBlock(Block::mLitRedStoneOre->mID, 0), Block::UPDATE_ALL);
+							if (auto* tq = region.getTickQueue(hitPos)) {
+								tq->add(region, hitPos, Block::mLitRedStoneOre->mID, 30);
+							}
+							updateLightingAndRebuildChunks(region, hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
 						} else if (hitBlk && hitBlk->hasProperty(BlockProperty::Door) && !hitBlk->getMaterial().isType(MaterialType::Metal)) {
 							const DoorBlock* door = static_cast<const DoorBlock*>(hitBlk);
 							bool wasOpen = door->isOpen(region, hitPos);
@@ -4867,6 +4945,16 @@ void renderThreadStuff()
 							c.triggerSwing();
 							handledRightClick = true;
 						}
+					}
+
+					if (!handledRightClick && !held.isNull() && held.getStackSize() > 0 &&
+					    Item::mBucket && held.getItem() == Item::mBucket && held.getAuxValue() == 1 &&
+					    !gGuiContext.isCreative && eatCooldown <= 0.0f) {
+						c.triggerSwing();
+						held = ItemInstance(Item::mBucket, 1, 0);
+						SoundEngine::play(SoundEngine::SND_EAT, 0.8f);
+						eatCooldown = 0.25f;
+						handledRightClick = true;
 					}
 
 					if (!handledRightClick && !held.isNull() && held.getStackSize() > 0) {
@@ -4953,7 +5041,7 @@ void renderThreadStuff()
 					    Item::mBed && Block::mBed && held.getId() == Item::mBed->getId()) {
 						BlockPos hitPos = targetHit.getBlock();
 						FacingID face = targetHit.getFacing();
-						if (face < Facing::MAX) {
+						if (face == Facing::UP) {
 							BlockPos footPos = hitPos + Facing::DIRECTION[face];
 							int dir = 0;
 							if (std::abs(c.cameraMoveFront.z) >= std::abs(c.cameraMoveFront.x)) {
@@ -4970,7 +5058,8 @@ void renderThreadStuff()
 								const Block* eb = Block::mBlocks[eid];
 								return eid == 0 || (eb && eb->getMaterial().isReplaceable());
 							};
-							if (isRepl(footPos) && isRepl(headPos)) {
+							if (isRepl(footPos) && isRepl(headPos) &&
+							    region.isSolidBlockingBlock(footPos.below()) && region.isSolidBlockingBlock(headPos.below())) {
 								AABB footBB(footPos.x, footPos.y, footPos.z, footPos.x + 1.0f, footPos.y + 0.5625f, footPos.z + 1.0f);
 								AABB headBB(headPos.x, headPos.y, headPos.z, headPos.x + 1.0f, headPos.y + 0.5625f, headPos.z + 1.0f);
 								if (!footBB.intersects(c.mBB) && !headBB.intersects(c.mBB)) {
@@ -5023,6 +5112,9 @@ void renderThreadStuff()
 												if (held.getStackSize() <= 0) held.setNull();
 											}
 											updateLightingAndRebuildChunks(region, placePos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+											if (BlockEntity* be = region.getBlockEntity(placePos); be && be->isType(BlockEntityType::Sign)) {
+												gGuiContext.setScreen(new TextEditScreen(static_cast<SignBlockEntity*>(be)));
+											}
 											handledRightClick = true;
 										}
 									}
@@ -5047,6 +5139,8 @@ void renderThreadStuff()
 								case 32: eggType = MobType::Zombie; break;
 								case 33: eggType = MobType::Creeper; break;
 								case 34: eggType = MobType::Skeleton; break;
+								case 35: eggType = MobType::Spider; break;
+								case 36: eggType = MobType::PigZombie; break;
 								default: validEgg = false; break;
 							}
 							if (validEgg && mobManager.spawnMobAt(eggType, spawnBlock.x + 0.5f, spawnBlock.y + yOff, spawnBlock.z + 0.5f)) {
@@ -5057,6 +5151,144 @@ void renderThreadStuff()
 								handledRightClick = true;
 							}
 						}
+					}
+
+					// 0.8.1 Item useOn: Flint & Steel, Bucket, Bonemeal, Hoes, Seeds, Carrot, Potato, Reeds, Cake
+					if (!handledRightClick && hasTargetHit && !held.isNull() && held.getStackSize() > 0) {
+						BlockPos hitPos = targetHit.getBlock();
+						FacingID face = targetHit.getFacing();
+						BlockPos placePos = (face < Facing::MAX) ? (hitPos + Facing::DIRECTION[face]) : hitPos;
+						int hid = held.getId();
+						if (Item::mFlintAndSteel && hid == Item::mFlintAndSteel->getId() && face < Facing::MAX) {
+							if (placePos.y >= 1 && placePos.y < 127 && region.getBlockID(placePos) == BlockID::AIR && Block::mFire) {
+								region.setBlockAndData(placePos, FullBlock(Block::mFire->mID, 0), Block::UPDATE_ALL);
+								SoundEngine::play(SoundEngine::SND_EXPLODE, 0.3f, 1.5f);
+								c.triggerSwing();
+								if (!gGuiContext.isCreative) {
+									int nextAux = static_cast<int>(held.getAuxValue()) + 1;
+									if (nextAux > 64) held.setNull();
+									else held.setAuxValue(static_cast<short>(nextAux));
+								}
+								updateLightingAndRebuildChunks(region, placePos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+								handledRightClick = true;
+							}
+						} else if (Item::mBucket && hid == Item::mBucket->getId()) {
+							int baux = held.getAuxValue();
+							if (baux == 0 && face < Facing::MAX) {
+								BlockID lid = region.getBlockID(placePos);
+								int newAux = 0;
+								if ((Block::mFlowingWater && lid == Block::mFlowingWater->mID) || (Block::mStillWater && lid == Block::mStillWater->mID)) {
+									if (region.getData(placePos) == 0) newAux = 8;
+								} else if ((Block::mFlowingLava && lid == Block::mFlowingLava->mID) || (Block::mStillLava && lid == Block::mStillLava->mID)) {
+									if (region.getData(placePos) == 0) newAux = 10;
+								}
+								if (newAux > 0) {
+									region.removeBlock(placePos);
+									c.triggerSwing();
+									if (!gGuiContext.isCreative) {
+										ItemInstance filled(Item::mBucket, 1, newAux);
+										if (held.getStackSize() <= 1) held = filled;
+										else { held.remove(1); gGuiContext.addItemToInventory(filled); }
+									}
+									updateLightingAndRebuildChunks(region, placePos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+									handledRightClick = true;
+								}
+							} else if ((baux == 8 || baux == 10) && face < Facing::MAX) {
+								BlockID eid = region.getBlockID(placePos);
+								const Block* eb = Block::mBlocks[eid];
+								if (eid == BlockID::AIR || (eb && eb->getMaterial().isReplaceable())) {
+									BlockID placeLiq = (baux == 10) ? Block::mFlowingLava->mID : Block::mFlowingWater->mID;
+									region.setBlockAndData(placePos, FullBlock(placeLiq, 0), Block::UPDATE_ALL);
+									c.triggerSwing();
+									if (!gGuiContext.isCreative) {
+										held = ItemInstance(Item::mBucket, 1, 0);
+									}
+									updateLightingAndRebuildChunks(region, placePos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+									handledRightClick = true;
+								}
+							}
+						} else if (Item::mDye_powder && hid == Item::mDye_powder->getId() && held.getAuxValue() == 15) {
+							const Block* hb = Block::mBlocks[region.getBlockID(hitPos)];
+							if (hb && hb->onFertilized(region, hitPos, nullptr)) {
+								c.triggerSwing();
+								if (!gGuiContext.isCreative) {
+									held.remove(1);
+									if (held.getStackSize() <= 0) held.setNull();
+								}
+								updateLightingAndRebuildChunks(region, hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+								handledRightClick = true;
+							}
+						} else if ((Item::mHoe_wood && hid == Item::mHoe_wood->getId()) ||
+						           (Item::mHoe_stone && hid == Item::mHoe_stone->getId()) ||
+						           (Item::mHoe_iron && hid == Item::mHoe_iron->getId()) ||
+						           (Item::mHoe_diamond && hid == Item::mHoe_diamond->getId()) ||
+						           (Item::mHoe_gold && hid == Item::mHoe_gold->getId())) {
+							BlockID hbId = region.getBlockID(hitPos);
+							if ((hbId == Block::mGrass->mID || hbId == Block::mDirt->mID) &&
+							    region.getBlockID(hitPos.above()) == BlockID::AIR && face != Facing::DOWN) {
+								region.setBlockAndData(hitPos, FullBlock(Block::mFarmland->mID, 0), Block::UPDATE_ALL);
+								SoundEngine::play(SoundEngine::SND_PLACE, 0.75f, 0.9f);
+								c.triggerSwing();
+								if (hbId == Block::mGrass->mID && (std::rand() % 8) == 0 && !gGuiContext.isCreative) {
+									const Item* seed = ((std::rand() % 15) == 0 && Item::mSeeds_beetroot) ? Item::mSeeds_beetroot : Item::mSeeds_wheat;
+									if (seed) {
+										spawnWorldItem(worldItems, ItemInstance(seed, 1, 0), Vec3(hitPos.x + 0.5f, hitPos.y + 1.1f, hitPos.z + 0.5f), Vec3(0, 2.0f, 0), 0.25f);
+									}
+								}
+								if (!gGuiContext.isCreative) {
+									int maxD = getItemMaxDurability(held);
+									int nextAux = static_cast<int>(held.getAuxValue()) + 1;
+									if (maxD > 0 && nextAux > maxD) held.setNull();
+									else held.setAuxValue(static_cast<short>(nextAux));
+								}
+								rebuildChunksForBlock(hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+								handledRightClick = true;
+							}
+						} else {
+							const Block* cropBlock = nullptr;
+							bool needsFarmland = true;
+							if (Item::mSeeds_wheat && hid == Item::mSeeds_wheat->getId()) cropBlock = Block::mWheatCrop;
+							else if (Item::mSeeds_pumpkin && hid == Item::mSeeds_pumpkin->getId()) cropBlock = Block::mPumpkinStem;
+							else if (Item::mSeeds_melon && hid == Item::mSeeds_melon->getId()) cropBlock = Block::mMelonStem;
+							else if (Item::mSeeds_beetroot && hid == Item::mSeeds_beetroot->getId()) cropBlock = Block::mBeetrootCrop;
+							else if (Item::mCarrot && hid == Item::mCarrot->getId()) cropBlock = Block::mCarrotCrop;
+							else if (Item::mPotato && hid == Item::mPotato->getId()) cropBlock = Block::mPotatoCrop;
+							else if (Item::mReeds && hid == Item::mReeds->getId()) { cropBlock = Block::mReeds; needsFarmland = false; }
+							else if (Item::mCake && hid == Item::mCake->getId()) { cropBlock = Block::mCake; needsFarmland = false; }
+
+							if (cropBlock && face < Facing::MAX && region.getBlockID(placePos) == BlockID::AIR) {
+								bool ok = needsFarmland ? (face == Facing::UP && region.getBlockID(hitPos) == Block::mFarmland->mID)
+								                        : cropBlock->mayPlace(region, placePos, face);
+								if (ok && region.setBlockAndData(placePos, FullBlock(cropBlock->mID, 0), Block::UPDATE_ALL)) {
+									SoundEngine::play(SoundEngine::SND_PLACE, 0.75f, 0.95f);
+									c.triggerSwing();
+									if (!gGuiContext.isCreative) {
+										held.remove(1);
+										if (held.getStackSize() <= 0) held.setNull();
+									}
+									updateLightingAndRebuildChunks(region, placePos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+									handledRightClick = true;
+								}
+							}
+						}
+					}
+
+					// Snowball & Egg throw
+					if (!handledRightClick && !held.isNull() && held.getStackSize() > 0 &&
+					    ((Item::mSnowBall && held.getItem() == Item::mSnowBall) ||
+					     (Item::mEgg && held.getItem() == Item::mEgg))) {
+						glm::vec3 rightVec = glm::normalize(glm::cross(c.cameraFront, c.cameraUp));
+						Vec3 spawnPos(c.mPos.x + rightVec.x * 0.16f + c.cameraFront.x * 0.25f,
+						              c.mPos.y - 0.10f + c.cameraFront.y * 0.25f,
+						              c.mPos.z + rightVec.z * 0.16f + c.cameraFront.z * 0.25f);
+						ProjectileTntSystem::spawnArrow(spawnPos, Vec3(c.cameraFront.x, c.cameraFront.y, c.cameraFront.z), 30.0f, 0, true);
+						SoundEngine::play(SoundEngine::SND_BOW, 0.5f, 1.4f);
+						c.triggerSwing();
+						if (!gGuiContext.isCreative) {
+							held.remove(1);
+							if (held.getStackSize() <= 0) held.setNull();
+						}
+						handledRightClick = true;
 					}
 
 					if (!handledRightClick && hasTargetHit && !held.isNull() && held.getStackSize() > 0 && held.isBlock()) {
@@ -5251,6 +5483,9 @@ void renderThreadStuff()
 											placeData = 0;
 											placeBlock->getBlockState(BlockState::FacingDirection).set(placeData, computeFacingAll(true));
 										}
+										if (allowPlace && !placeBlock->mayPlace(region, placePos, face)) {
+											allowPlace = false;
+										}
 										if (allowPlace && region.setBlockAndData(placePos, FullBlock(placeBlock->mID, placeData), Block::UPDATE_ALL)) {
 											SoundEngine::play(SoundEngine::SND_PLACE, 0.75f, 0.95f + (std::rand() % 15) * 0.01f);
 											c.triggerSwing();
@@ -5284,6 +5519,97 @@ void renderThreadStuff()
 				updateWorldItemEntities(worldItems, worldItemTickAccum, deltaTime, c.getRegion(), c.mBB, gGuiContext, allowPickup);
 				SoundEngine::setMasterVolume(gGuiOptions.soundVolume);
 				ParticleSystem::tick(clampedDt, &c.getRegion());
+
+				// Wire 1:1 0.8.1 world callbacks (popResource, FallingBlock, NetherReactor)
+				struct FallingBlockEnt {
+					float x, y, z, vy;
+					BlockID id;
+					DataID data;
+					bool creative;
+				};
+				static std::vector<FallingBlockEnt> sFallingBlocks;
+				static bool sCallbacksWired = false;
+				if (!sCallbacksWired) {
+					sCallbacksWired = true;
+					Block::setPopResourceCallback([&](BlockSource&, const BlockPos& pos, const ItemInstance& item) {
+						static Random popRng;
+						Vec3 dpos(pos.x + 0.5f, pos.y + 0.5f, pos.z + 0.5f);
+						Vec3 dvel((popRng.nextFloat() - 0.5f) * 2.4f, 3.0f, (popRng.nextFloat() - 0.5f) * 2.4f);
+						spawnWorldItem(worldItems, item, dpos, dvel, 0.35f);
+					});
+					HeavyBlock::setStartFallingCallback([](BlockSource&, const BlockPos& pos, const Block* blk, DataID data, bool creative) {
+						sFallingBlocks.push_back({ pos.x + 0.5f, static_cast<float>(pos.y), pos.z + 0.5f, 0.0f, blk->mID, data, creative });
+					});
+					NetherReactorBlockEntity::setCallbacks(
+						[&](const Vec3& sp) { mobManager.spawnMobAt(MobType::PigZombie, sp.x, sp.y, sp.z); },
+						[&](const BlockPos& pos, float rad) { mobManager.removePigZombiesNear(pos, rad); },
+						[&](bool night) {
+							if (night) gGuiContext.worldTime = 18000.0;
+						});
+				}
+
+				// 20 TPS world tick: random ticks, scheduled ticks, BlockEntities, FallingBlocks, animateTick
+				static float worldTickAccum = 0.0f;
+				static uint64_t worldTickCounter = 0;
+				worldTickAccum += clampedDt;
+				while (worldTickAccum >= 0.05f) {
+					worldTickAccum -= 0.05f;
+					++worldTickCounter;
+					BlockSource& reg = c.getRegion();
+					Level& lvl = c.getLevel();
+					int pcx = Math::floor(c.mPos.x) >> 4;
+					int pcz = Math::floor(c.mPos.z) >> 4;
+					Tick curTick(worldTickCounter);
+					for (int dx = -3; dx <= 3; ++dx) {
+						for (int dz = -3; dz <= 3; ++dz) {
+							LevelChunk* lc = reg.getChunk(ChunkPos(pcx + dx, pcz + dz));
+							if (!lc || lc->getState() != ChunkState::Loaded) continue;
+							lc->tickBlocks(reg, lvl);
+							lc->getTickQueue().tickPendingTicks(reg, curTick, 100, false);
+							for (auto& bePair : lc->getBlockEntities()) {
+								if (bePair.second) {
+									bePair.second->tick(reg);
+								}
+							}
+						}
+					}
+
+					// Falling blocks tick (gravity -0.04/tick, drag 0.98)
+					for (size_t fi = 0; fi < sFallingBlocks.size();) {
+						FallingBlockEnt& fb = sFallingBlocks[fi];
+						fb.vy = (fb.vy - 0.04f) * 0.98f;
+						fb.y += fb.vy;
+						BlockPos belowPos(Math::floor(fb.x), Math::floor(fb.y - 0.01f), Math::floor(fb.z));
+						if (fb.y <= 0.0f) {
+							sFallingBlocks.erase(sFallingBlocks.begin() + fi);
+							continue;
+						}
+						if (Block::mSand && !static_cast<const HeavyBlock*>(Block::mSand)->isFree(reg, belowPos)) {
+							BlockPos landPos(Math::floor(fb.x), Math::floor(fb.y + 0.5f), Math::floor(fb.z));
+							if (reg.getBlockID(landPos) == BlockID::AIR || reg.getMaterial(landPos).isReplaceable()) {
+								reg.setBlockAndData(landPos, FullBlock(fb.id, fb.data), Block::UPDATE_ALL);
+								updateLightingAndRebuildChunks(reg, landPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+							} else if (!fb.creative && Block::mBlocks[fb.id]) {
+								Block::mBlocks[fb.id]->popResource(reg, landPos, ItemInstance(fb.id, 1, fb.data));
+							}
+							sFallingBlocks.erase(sFallingBlocks.begin() + fi);
+						} else {
+							++fi;
+						}
+					}
+
+					// 1:1 Level::animateTick (100 random blocks in r=16)
+					BlockPos basePos(Math::floor(c.mPos.x), Math::floor(c.mPos.y), Math::floor(c.mPos.z));
+					Random& animRng = lvl.getRandom();
+					for (int ai = 0; ai < 100; ++ai) {
+						BlockPos ap(basePos.x + animRng.nextGaussianInt(16),
+						            basePos.y + animRng.nextGaussianInt(16),
+						            basePos.z + animRng.nextGaussianInt(16));
+						if (ap.y >= 1 && ap.y < 127) {
+							reg.getBlock(ap).animateTick(reg, ap, animRng);
+						}
+					}
+				}
 
 				// Ambient torch / lit furnace particles near player (1:1 MCPE 0.8.1 TorchTile/FurnaceTile::animateTick)
 				static float ambientParticleAccum = 0.0f;

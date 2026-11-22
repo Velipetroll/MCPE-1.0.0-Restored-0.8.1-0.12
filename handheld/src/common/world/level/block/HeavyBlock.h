@@ -32,6 +32,9 @@ public:
 
 	virtual bool isFree(BlockSource& region, const BlockPos& pos) const;
 
+	using StartFallingCallback = std::function<void(BlockSource&, const BlockPos&, const Block*, DataID, bool)>;
+	static void setStartFallingCallback(StartFallingCallback cb);
+
 protected:
 	
 	void checkSlide(BlockSource& region, const BlockPos& pos) const;

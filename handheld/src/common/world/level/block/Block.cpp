@@ -425,7 +425,7 @@ void Block::initBlocks() {
 	mTNT = &registerBlock<TntBlock>("tnt", 46).setDestroyTime(0.0f).setCategory(CreativeItemCategory::Tools).addBlockState(BlockState::ExplodeBit, 1);
 	mBookshelf = &registerBlock<BookshelfBlock>("bookshelf", 47).setDestroyTime(1.5f).setCategory(CreativeItemCategory::Decorations);
 	mMossyCobblestone = &registerBlock<Block>("mossy_cobblestone", 48, Material::getMaterial(MaterialType::Stone)).setDestroyTime(2.0f).setExplodeable(10).setCategory(CreativeItemCategory::BuildingBlocks);
-	mObsidian = &registerBlock<ObsidianBlock>("obsidian", 49, false).setDestroyTime(35.0f).setExplodeable(2000).setCategory(CreativeItemCategory::BuildingBlocks);
+	mObsidian = &registerBlock<ObsidianBlock>("obsidian", 49, false).setDestroyTime(10.0f).setExplodeable(2000).setCategory(CreativeItemCategory::BuildingBlocks);
 	mTorch = &registerBlock<TorchBlock>("torch", 50).setDestroyTime(0.0f).setLightEmission(15 / 16.0f).setCategory(CreativeItemCategory::Tools).addBlockState(BlockState::FacingDirection, 3);
 
 	mMobSpawner = &registerBlock<MobSpawnerBlock>("mob_spawner", 52).setDestroyTime(5.0f).setLightBlock(Brightness::MIN).setCategory(CreativeItemCategory::Decorations);
@@ -882,45 +882,40 @@ HitResult Block::clip(BlockSource& region, const BlockPos& pos, const Vec3& A, c
 	return clip(region, pos, A, B, isClipping, clipData, tmpAABB);
 }
 
+static Block::PopResourceCallback gPopResourceCallback;
+
+void Block::setPopResourceCallback(PopResourceCallback cb) {
+	gPopResourceCallback = std::move(cb);
+}
+
 void Block::spawnResources(BlockSource& region, const BlockPos& pos, int data, float odds, int bonusLootLevel) const {
-// 	auto& level = region.getLevel();
-// 	if (level.isClientSide()) {
-// 		return;
-// 	}
-// 
-// 	int count = getResourceCount(level.getRandom(), data, bonusLootLevel);
-// 
-// 	for (int i = 0; i < count; i++) {
-// 		if (level.getRandom().nextFloat() > odds) {
-// 			continue;
-// 		}
-// 		int type = getResource(level.getRandom(), data, bonusLootLevel);
-// 		if (type <= 0) {
-// 			continue;
-// 		}
-// 		const float s = 0.7f;
-// 		const float xo = level.getRandom().nextFloat() * s + (1 - s) * 0.5f;
-// 		const float yo = level.getRandom().nextFloat() * s + (1 - s) * 0.5f;
-// 		const float zo = level.getRandom().nextFloat() * s + (1 - s) * 0.5f;
-// 		level.getSpawner().spawnItem(region, ItemInstance(type, 1, getSpawnResourcesAuxValue(data)), nullptr, Vec3(pos.x + xo, pos.y + yo, pos.z + zo), 10);
-// 	}
-// 
-// 	ExperienceOrb::spawnOrbs(region, Vec3(pos), getExperienceDrop(level.getRandom()));
+	auto& level = region.getLevel();
+	if (level.isClientSide()) {
+		return;
+	}
+
+	int count = getResourceCount(level.getRandom(), data, bonusLootLevel);
+
+	for (int i = 0; i < count; i++) {
+		if (level.getRandom().nextFloat() > odds) {
+			continue;
+		}
+		int type = getResource(level.getRandom(), data, bonusLootLevel);
+		if (type <= 0) {
+			continue;
+		}
+		popResource(region, pos, ItemInstance(type, 1, getSpawnResourcesAuxValue(data)));
+	}
 }
 
 void Block::popResource(BlockSource& region, const BlockPos& pos, const ItemInstance& itemInstance) const {
-// 	auto& level = region.getLevel();
-// 	// TODO: Check Game Rules for block drops once it is implemented
-// 	if (level.isClientSide()) {
-// 		return;
-// 	}
-// 
-// 	const float s = 0.7f;
-// 	const float xo = level.getRandom().nextFloat() * s + (1 - s) * 0.5f;
-// 	const float yo = level.getRandom().nextFloat() * s + (1 - s) * 0.5f;
-// 	const float zo = level.getRandom().nextFloat() * s + (1 - s) * 0.5f;
-// 
-// 	region.getLevel().getSpawner().spawnItem(region, itemInstance, nullptr, Vec3(pos.x + xo, pos.y + yo, pos.z + zo), 10);
+	auto& level = region.getLevel();
+	if (level.isClientSide()) {
+		return;
+	}
+	if (gPopResourceCallback && !itemInstance.isNull()) {
+		gPopResourceCallback(region, pos, itemInstance);
+	}
 }
 
 bool Block::spawnBurnResources(BlockSource& region, float x, float y, float z){

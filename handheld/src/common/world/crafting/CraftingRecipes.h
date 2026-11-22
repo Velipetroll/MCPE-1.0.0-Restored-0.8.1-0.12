@@ -93,7 +93,7 @@ public:
 	static Recipes* getInstance();
 
 	void init();
-	ItemInstance findMatchingRecipe(const CraftingContainer& container) const;
+	ItemInstance findMatchingRecipe(const CraftingContainer& container, bool isStonecutter = false) const;
 	const std::vector<std::unique_ptr<CraftingRecipe>>& getRecipes() const { return mRecipes; }
 
 private:

@@ -213,11 +213,13 @@ void LevelChunk::_createBlockEntity(const BlockPos& block, BlockSource* currentS
 		if (_needsToCreateBlockEntity(newBlock, Block::mBlocks[old])) {	//create the block entity
 
 			auto te = static_cast<const EntityBlock*>(newBlock)->newBlockEntity(block, current);
-			auto ptr = te.get();
-			_placeBlockEntity(std::move(te));
+			if (te) {
+				auto ptr = te.get();
+				_placeBlockEntity(std::move(te));
 
-			if (currentSource) {
-				currentSource->fireBlockEntityChanged(*ptr);
+				if (currentSource) {
+					currentSource->fireBlockEntityChanged(*ptr);
+				}
 			}
 		}
 	}
@@ -694,18 +696,18 @@ Unique<Entity> LevelChunk::removeEntity(Entity& toRemove) {
 	}
 }
 
-// Unique<BlockEntity> LevelChunk::removeBlockEntity(const BlockPos& blockPos) {
-// 	auto blockEntity = mBlockEntities.find(ChunkBlockPos(blockPos));
-// 	if (blockEntity != mBlockEntities.end()) {
-// 		auto tmp = std::move(blockEntity->second);
-// 
-// 		mBlockEntities.erase(blockEntity);
-// 
-// 		return tmp;
-// 	}
-// 
-// 	return nullptr;
-// }
+Unique<BlockEntity> LevelChunk::removeBlockEntity(const BlockPos& blockPos) {
+	auto blockEntity = mBlockEntities.find(ChunkBlockPos(blockPos));
+	if (blockEntity != mBlockEntities.end()) {
+		auto tmp = std::move(blockEntity->second);
+
+		mBlockEntities.erase(blockEntity);
+
+		return tmp;
+	}
+
+	return nullptr;
+}
 
 LevelChunk::LightList && LevelChunk::moveLightSources() {
 	std::lock_guard<SpinLock> lock(mLightListLock);
@@ -767,11 +769,11 @@ const LevelChunk::OwnedBlockEntityMap& LevelChunk::getBlockEntities() const {
 	return mBlockEntities;
 }
 
-// BlockEntity* LevelChunk::getBlockEntity(const ChunkBlockPos& localPos) {
-// 	OwnedBlockEntityMap::iterator cit = mBlockEntities.find(localPos);
-// 
-// 	return (cit == mBlockEntities.end()) ? nullptr : cit->second.get();
-// }
+BlockEntity* LevelChunk::getBlockEntity(const ChunkBlockPos& localPos) {
+	OwnedBlockEntityMap::iterator cit = mBlockEntities.find(localPos);
+
+	return (cit == mBlockEntities.end()) ? nullptr : cit->second.get();
+}
 
 bool LevelChunk::hasBlockEntity(const ChunkBlockPos& cp) {
 	return mBlockEntities.find(cp) != mBlockEntities.end();
@@ -1132,10 +1134,12 @@ static void _spawnLightning(BlockSource &region, const Vec3 &pos) {
 }
 
 void LevelChunk::tickBlocks(Player* player) {
-	auto& level = player->getLevel();
-	auto& region = player->getRegion();
+	tickBlocks(player->getRegion(), player->getLevel());
+}
+
+void LevelChunk::tickBlocks(BlockSource& region, Level& level) {
 	auto& random = level.getRandom();
-	auto& tickRegion = player->getRegion();
+	auto& tickRegion = region;
 
 	static int _randValue = 42184323, _addend(1013904223);
 

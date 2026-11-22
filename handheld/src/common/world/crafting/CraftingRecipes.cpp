@@ -1,6 +1,7 @@
 #include "world/crafting/CraftingRecipes.h"
 #include "world/item/Item.h"
 #include "world/level/block/Block.h"
+#include "world/level/material/Material.h"
 #include <unordered_map>
 #include <vector>
 
@@ -228,15 +229,15 @@ namespace {
 		}
 
 		// Register items that are commented out in Item::registerItems()
-		ensureItem(Item::mFlintAndSteel, "flint_and_steel", 3, 1);
-		ensureItem(Item::mBow, "bow", 5, 1);
+		ensureItem(Item::mFlintAndSteel, "flint_and_steel", 3, 1)->setMaxDamage(64);
+		ensureItem(Item::mBow, "bow", 5, 1)->setMaxDamage(384);
 		ensureItem(Item::mArrow, "arrow", 6);
 		ensureItem(Item::mSign, "sign", 67, 16);
-		ensureItem(Item::mDoor_wood, "door_wood", 68);
+		ensureItem(Item::mDoor_wood, "door_wood", 68, 1);
 		ensureItem(Item::mBucket, "bucket", 69, 16);
 		ensureItem(Item::mMinecart, "minecart", 72, 1);
 		ensureItem(Item::mSaddle, "saddle", 73, 1);
-		ensureItem(Item::mDoor_iron, "door_iron", 74);
+		ensureItem(Item::mDoor_iron, "door_iron", 74, 1);
 		ensureItem(Item::mCoal, "coal", 7);
 		ensureItem(Item::mDiamond, "diamond", 8);
 		ensureItem(Item::mIronIngot, "iron_ingot", 9);
@@ -353,6 +354,9 @@ namespace {
 		ensureBlockItem(Block::mCobblestoneWall, "cobblestone_wall");
 		ensureBlockItem(Block::mStoneSlab, "stone_slab");
 		ensureBlockItem(Block::mStonecutterBench, "stonecutter");
+
+		if (Item::mMushroomStew) const_cast<Item*>(Item::mMushroomStew)->setMaxStackSize(1);
+		if (Item::mBeetrootSoup) const_cast<Item*>(Item::mBeetrootSoup)->setMaxStackSize(1);
 
 		for (int i = 1; i < 256; ++i) {
 			if (Block::mBlocks[i] && !Item::mItems[i]) {
@@ -489,17 +493,201 @@ void Recipes::init() {
 	}, ItemInstance(Item::mBed, 1, 0), ItemCategory::Structures);
 
 	// Decorative & Stonecutter Blocks
-	addShaped(2, 2, { stone, stone, stone, stone }, ItemInstance(Block::mStoneBrick, 4, 0), ItemCategory::Structures, true);
-	addShaped(2, 2, { sand, sand, sand, sand }, ItemInstance(Block::mSandStone, 1, 0), ItemCategory::Structures, true);
-	addShaped(3, 2, { glass, glass, glass, glass, glass, glass }, ItemInstance(Block::mGlassPane, 16, 0), ItemCategory::Decorations, false);
-	addShaped(3, 1, { planksAny, planksAny, planksAny }, ItemInstance(Block::mWoodenSlab, 6, 0), ItemCategory::Structures, false);
-	addShaped(3, 1, { cobble, cobble, cobble }, ItemInstance(Block::mStoneSlab, 6, 3), ItemCategory::Structures, true);
-	addShaped(3, 2, { cobble, cobble, cobble, cobble, cobble, cobble }, ItemInstance(Block::mCobblestoneWall, 6, 0), ItemCategory::Structures, true);
+	auto isSC = [](const ItemInstance& res) -> bool {
+		if (res.isNull() || res.getId() > 255) return false;
+		const Block* b = Block::mBlocks[res.getId()];
+		if (!b || b == Block::mLapisBlock || b == Block::mFurnace || b == Block::mStonecutterBench ||
+		    (b == Block::mStoneSlab && res.getAuxValue() == 2)) {
+			return false;
+		}
+		return b->getMaterial().isType(MaterialType::Stone) || b->getMaterial().isType(MaterialType::Sand);
+	};
+	auto addShaped081 = [&](int w, int h, std::vector<ItemInstance> ing, const ItemInstance& res, ItemCategory cat) {
+		addShaped(w, h, std::move(ing), res, cat, isSC(res));
+	};
+	auto addShapeless081 = [&](std::vector<ItemInstance> ing, const ItemInstance& res, ItemCategory cat) {
+		addShapeless(std::move(ing), res, cat, isSC(res));
+	};
+
+	// StructureRecipes
+	addShaped081(2, 2, { sand, sand, sand, sand }, ItemInstance(Block::mSandStone, 1, 0), ItemCategory::Structures);
+	addShaped081(2, 2, { ItemInstance(Block::mSandStone, 1, 0), ItemInstance(Block::mSandStone, 1, 0), ItemInstance(Block::mSandStone, 1, 0), ItemInstance(Block::mSandStone, 1, 0) }, ItemInstance(Block::mSandStone, 4, 2), ItemCategory::Structures);
+	addShaped081(1, 2, { ItemInstance(Block::mStoneSlab, 1, 1), ItemInstance(Block::mStoneSlab, 1, 1) }, ItemInstance(Block::mSandStone, 1, 1), ItemCategory::Structures);
+	addShaped081(2, 2, { stone, stone, stone, stone }, ItemInstance(Block::mStoneBrick, 4, 0), ItemCategory::Structures);
+	addShaped081(3, 2, { glass, glass, glass, glass, glass, glass }, ItemInstance(Block::mGlassPane, 16, 0), ItemCategory::Decorations);
+	if (Item::mNetherbrick && Block::mNetherBrick) {
+		ItemInstance nb(Item::mNetherbrick, 1, 0);
+		addShaped081(2, 2, { nb, nb, nb, nb }, ItemInstance(Block::mNetherBrick, 1, 0), ItemCategory::Structures);
+	}
+	if (Item::mNetherQuartz && Block::mQuartzBlock) {
+		ItemInstance nq(Item::mNetherQuartz, 1, 0);
+		addShaped081(2, 2, { nq, nq, nq, nq }, ItemInstance(Block::mQuartzBlock, 1, 0), ItemCategory::Structures);
+		addShaped081(1, 2, { ItemInstance(Block::mStoneSlab, 1, 6), ItemInstance(Block::mStoneSlab, 1, 6) }, ItemInstance(Block::mQuartzBlock, 1, 1), ItemCategory::Structures);
+		addShaped081(1, 2, { ItemInstance(Block::mQuartzBlock, 1, 0), ItemInstance(Block::mQuartzBlock, 1, 0) }, ItemInstance(Block::mQuartzBlock, 2, 2), ItemCategory::Structures);
+	}
+
+	// ToolRecipes: Hoes & Shears
+	auto addHoe = [&](const ItemInstance& mat, const Item* hoe) {
+		if (hoe) {
+			addShaped081(2, 3, { mat, mat, empty, stick, empty, stick }, ItemInstance(hoe, 1, 0), ItemCategory::Tools);
+		}
+	};
+	addHoe(planksAny, Item::mHoe_wood);
+	addHoe(cobble, Item::mHoe_stone);
+	addHoe(iron, Item::mHoe_iron);
+	addHoe(diamond, Item::mHoe_diamond);
+	addHoe(gold, Item::mHoe_gold);
+	if (Item::mShears) {
+		addShaped081(2, 2, { empty, iron, iron, empty }, ItemInstance(Item::mShears, 1, 0), ItemCategory::Tools);
+	}
+
+	// WeaponRecipes: Bow & Arrow
+	if (Item::mBow && Item::mString) {
+		ItemInstance str(Item::mString, 1, 0);
+		addShaped081(3, 3, { empty, stick, str, stick, empty, str, empty, stick, str }, ItemInstance(Item::mBow, 1, 0), ItemCategory::Tools);
+	}
+	if (Item::mArrow && Item::mFlint && Item::mFeather) {
+		addShaped081(1, 3, { ItemInstance(Item::mFlint, 1, 0), stick, ItemInstance(Item::mFeather, 1, 0) }, ItemInstance(Item::mArrow, 4, 0), ItemCategory::Tools);
+	}
+
+	// OreRecipes (12 recipes)
+	struct OrePair { const Block* block; ItemInstance item9; };
+	OrePair orePairs[] = {
+		{ Block::mGoldBlock, ItemInstance(Item::mGoldIngot, 9, 0) },
+		{ Block::mIronBlock, ItemInstance(Item::mIronIngot, 9, 0) },
+		{ Block::mDiamondBlock, ItemInstance(Item::mDiamond, 9, 0) },
+		{ Block::mLapisBlock, ItemInstance(Item::mDye_powder, 9, 4) },
+		{ Block::mHayBlock, ItemInstance(Item::mWheat, 9, 0) },
+		{ Block::mCoalBlock, ItemInstance(Item::mCoal, 9, 0) }
+	};
+	for (const auto& op : orePairs) {
+		if (!op.block || op.item9.isNull()) continue;
+		ItemInstance single(op.item9.getItem(), 1, op.item9.getAuxValue());
+		addShaped081(3, 3, { single, single, single, single, single, single, single, single, single }, ItemInstance(op.block, 1, 0), ItemCategory::Structures);
+		addShaped081(1, 1, { ItemInstance(op.block, 1, 0) }, op.item9, ItemCategory::Structures);
+	}
+
+	// FoodRecipes
+	if (Item::mMushroomStew && Block::mBrownMushroom && Block::mRedMushroom && Item::mBowl) {
+		addShapeless081({ ItemInstance(Block::mBrownMushroom, 1, 0), ItemInstance(Block::mRedMushroom, 1, 0), ItemInstance(Item::mBowl, 1, 0) }, ItemInstance(Item::mMushroomStew, 1, 0), ItemCategory::FoodArmor);
+	}
+	if (Item::mBeetrootSoup && Item::mBeetroot && Item::mBowl) {
+		ItemInstance beet(Item::mBeetroot, 1, 0);
+		addShaped081(2, 3, { beet, beet, beet, beet, ItemInstance(Item::mBowl, 1, 0), empty }, ItemInstance(Item::mBeetrootSoup, 1, 0), ItemCategory::FoodArmor);
+	}
+	if (Block::mMelon && Item::mMelon) {
+		ItemInstance m(Item::mMelon, 1, 0);
+		addShaped081(3, 3, { m, m, m, m, m, m, m, m, m }, ItemInstance(Block::mMelon, 1, 0), ItemCategory::FoodArmor);
+		if (Item::mSeeds_melon) {
+			addShaped081(1, 1, { m }, ItemInstance(Item::mSeeds_melon, 1, 0), ItemCategory::FoodArmor);
+		}
+	}
+	if (Block::mPumpkin && Item::mSeeds_pumpkin) {
+		addShaped081(1, 1, { ItemInstance(Block::mPumpkin, 1, 0) }, ItemInstance(Item::mSeeds_pumpkin, 4, 0), ItemCategory::FoodArmor);
+	}
+	if (Item::mPumpkinPie && Block::mPumpkin && Item::mSugar && Item::mEgg) {
+		addShapeless081({ ItemInstance(Block::mPumpkin, 1, 0), ItemInstance(Item::mSugar, 1, 0), ItemInstance(Item::mEgg, 1, 0) }, ItemInstance(Item::mPumpkinPie, 1, 0), ItemCategory::FoodArmor);
+	}
+
+	// ClothDyeRecipes (32 recipes)
+	if (Item::mDye_powder && Block::mWool) {
+		for (int c = 0; c < 16; ++c) {
+			addShapeless081({ ItemInstance(Item::mDye_powder, 1, c), ItemInstance(Block::mWool, 1, 0) }, ItemInstance(Block::mWool, 1, (~c) & 0xF), ItemCategory::Decorations);
+		}
+		if (Block::mYellowFlower) addShapeless081({ ItemInstance(Block::mYellowFlower, 1, 0) }, ItemInstance(Item::mDye_powder, 2, 11), ItemCategory::Decorations);
+		if (Item::mBeetroot) addShapeless081({ ItemInstance(Item::mBeetroot, 1, 0) }, ItemInstance(Item::mDye_powder, 2, 1), ItemCategory::Decorations);
+		if (Item::mBone) addShapeless081({ ItemInstance(Item::mBone, 1, 0) }, ItemInstance(Item::mDye_powder, 3, 15), ItemCategory::Decorations);
+		auto dye = [&](int aux) { return ItemInstance(Item::mDye_powder, 1, aux); };
+		addShapeless081({ dye(1), dye(15) }, ItemInstance(Item::mDye_powder, 2, 9), ItemCategory::Decorations);
+		addShapeless081({ dye(1), dye(11) }, ItemInstance(Item::mDye_powder, 2, 14), ItemCategory::Decorations);
+		addShapeless081({ dye(2), dye(15) }, ItemInstance(Item::mDye_powder, 2, 10), ItemCategory::Decorations);
+		addShapeless081({ dye(0), dye(15) }, ItemInstance(Item::mDye_powder, 2, 8), ItemCategory::Decorations);
+		addShapeless081({ dye(8), dye(15) }, ItemInstance(Item::mDye_powder, 2, 7), ItemCategory::Decorations);
+		addShapeless081({ dye(0), dye(15), dye(15) }, ItemInstance(Item::mDye_powder, 3, 7), ItemCategory::Decorations);
+		addShapeless081({ dye(0), dye(14) }, ItemInstance(Item::mDye_powder, 2, 3), ItemCategory::Decorations);
+		addShapeless081({ dye(0), dye(1), dye(11) }, ItemInstance(Item::mDye_powder, 3, 3), ItemCategory::Decorations);
+		addShapeless081({ dye(4), dye(15) }, ItemInstance(Item::mDye_powder, 2, 12), ItemCategory::Decorations);
+		addShapeless081({ dye(4), dye(2) }, ItemInstance(Item::mDye_powder, 2, 6), ItemCategory::Decorations);
+		addShapeless081({ dye(4), dye(1) }, ItemInstance(Item::mDye_powder, 2, 5), ItemCategory::Decorations);
+		addShapeless081({ dye(5), dye(9) }, ItemInstance(Item::mDye_powder, 2, 13), ItemCategory::Decorations);
+		addShapeless081({ dye(4), dye(1), dye(9) }, ItemInstance(Item::mDye_powder, 3, 13), ItemCategory::Decorations);
+		addShapeless081({ dye(4), dye(1), dye(1), dye(15) }, ItemInstance(Item::mDye_powder, 4, 13), ItemCategory::Decorations);
+	}
+
+	// Base Recipes.cpp
+	for (int p = 0; p < 3; ++p) {
+		addShapeless081({ ItemInstance(Block::mLog, 1, p) }, ItemInstance(Block::mWoodPlanks, 4, p), ItemCategory::Structures);
+		addShaped081(3, 1, { ItemInstance(Block::mWoodPlanks, 1, p), ItemInstance(Block::mWoodPlanks, 1, p), ItemInstance(Block::mWoodPlanks, 1, p) }, ItemInstance(Block::mWoodenSlab, 6, p), ItemCategory::Structures);
+	}
+	if (Item::mReeds && Item::mPaper) {
+		addShaped081(3, 1, { ItemInstance(Item::mReeds, 1, 0), ItemInstance(Item::mReeds, 1, 0), ItemInstance(Item::mReeds, 1, 0) }, ItemInstance(Item::mPaper, 3, 0), ItemCategory::Structures);
+		if (Item::mBook) {
+			ItemInstance pap(Item::mPaper, 1, 0);
+			addShaped081(1, 3, { pap, pap, pap }, ItemInstance(Item::mBook, 1, 0), ItemCategory::Structures);
+			if (Block::mBookshelf) {
+				addShaped081(3, 3, { planksAny, planksAny, planksAny, ItemInstance(Item::mBook, 1, 0), ItemInstance(Item::mBook, 1, 0), ItemInstance(Item::mBook, 1, 0), planksAny, planksAny, planksAny }, ItemInstance(Block::mBookshelf, 1, 0), ItemCategory::Decorations);
+			}
+		}
+		if (Item::mSugar) {
+			addShaped081(1, 1, { ItemInstance(Item::mReeds, 1, 0) }, ItemInstance(Item::mSugar, 1, 0), ItemCategory::FoodArmor);
+		}
+	}
+	addShaped081(3, 2, { stick, stick, stick, stick, stick, stick }, ItemInstance(Block::mFence, 2, 0), ItemCategory::Structures);
+	addShaped081(3, 2, { cobble, cobble, cobble, cobble, cobble, cobble }, ItemInstance(Block::mCobblestoneWall, 6, 0), ItemCategory::Structures);
+	addShaped081(3, 2, { stick, planksAny, stick, stick, planksAny, stick }, ItemInstance(Block::mFenceGateOak, 1, 0), ItemCategory::Structures);
+	if (Item::mSnowBall) addShaped081(2, 2, { ItemInstance(Item::mSnowBall, 1, 0), ItemInstance(Item::mSnowBall, 1, 0), ItemInstance(Item::mSnowBall, 1, 0), ItemInstance(Item::mSnowBall, 1, 0) }, ItemInstance(Block::mSnow, 1, 0), ItemCategory::Structures);
+	if (Item::mClay) addShaped081(2, 2, { ItemInstance(Item::mClay, 1, 0), ItemInstance(Item::mClay, 1, 0), ItemInstance(Item::mClay, 1, 0), ItemInstance(Item::mClay, 1, 0) }, ItemInstance(Block::mClay, 1, 0), ItemCategory::Structures);
+	if (Item::mBrick) addShaped081(2, 2, { ItemInstance(Item::mBrick, 1, 0), ItemInstance(Item::mBrick, 1, 0), ItemInstance(Item::mBrick, 1, 0), ItemInstance(Item::mBrick, 1, 0) }, ItemInstance(Block::mBrick, 1, 0), ItemCategory::Structures);
+	if (Item::mYellowDust) addShaped081(2, 2, { ItemInstance(Item::mYellowDust, 1, 0), ItemInstance(Item::mYellowDust, 1, 0), ItemInstance(Item::mYellowDust, 1, 0), ItemInstance(Item::mYellowDust, 1, 0) }, ItemInstance(Block::mGlowStone, 1, 0), ItemCategory::Decorations);
+	if (Item::mString) addShaped081(2, 2, { ItemInstance(Item::mString, 1, 0), ItemInstance(Item::mString, 1, 0), ItemInstance(Item::mString, 1, 0), ItemInstance(Item::mString, 1, 0) }, ItemInstance(Block::mWool, 1, 0), ItemCategory::Structures);
+	if (Item::mSulphur) {
+		ItemInstance gp(Item::mSulphur, 1, 0);
+		addShaped081(3, 3, { gp, sand, gp, sand, gp, sand, gp, sand, gp }, ItemInstance(Block::mTNT, 1, 0), ItemCategory::Tools);
+	}
+	addShaped081(3, 1, { cobble, cobble, cobble }, ItemInstance(Block::mStoneSlab, 6, 3), ItemCategory::Structures);
+	addShaped081(3, 1, { stone, stone, stone }, ItemInstance(Block::mStoneSlab, 6, 0), ItemCategory::Structures);
+	addShaped081(3, 1, { ItemInstance(Block::mSandStone, 1, 0), ItemInstance(Block::mSandStone, 1, 0), ItemInstance(Block::mSandStone, 1, 0) }, ItemInstance(Block::mStoneSlab, 6, 1), ItemCategory::Structures);
+	addShaped081(3, 1, { ItemInstance(Block::mBrick, 1, 0), ItemInstance(Block::mBrick, 1, 0), ItemInstance(Block::mBrick, 1, 0) }, ItemInstance(Block::mStoneSlab, 6, 4), ItemCategory::Structures);
+	addShaped081(3, 1, { ItemInstance(Block::mStoneBrick, 1, 0), ItemInstance(Block::mStoneBrick, 1, 0), ItemInstance(Block::mStoneBrick, 1, 0) }, ItemInstance(Block::mStoneSlab, 6, 5), ItemCategory::Structures);
+	addShaped081(3, 1, { ItemInstance(Block::mQuartzBlock, 1, 0), ItemInstance(Block::mQuartzBlock, 1, 0), ItemInstance(Block::mQuartzBlock, 1, 0) }, ItemInstance(Block::mStoneSlab, 6, 6), ItemCategory::Structures);
+	addShaped081(3, 3, { stick, empty, stick, stick, stick, stick, stick, empty, stick }, ItemInstance(Block::mLadder, 2, 0), ItemCategory::Structures);
+	if (Item::mDoor_wood) addShaped081(2, 3, { planksAny, planksAny, planksAny, planksAny, planksAny, planksAny }, ItemInstance(Item::mDoor_wood, 1, 0), ItemCategory::Structures);
+	addShaped081(3, 2, { planksAny, planksAny, planksAny, planksAny, planksAny, planksAny }, ItemInstance(Block::mTrapdoor, 2, 0), ItemCategory::Structures);
+	if (Item::mSign) addShaped081(3, 3, { planksAny, planksAny, planksAny, planksAny, planksAny, planksAny, empty, stick, empty }, ItemInstance(Item::mSign, 1, 0), ItemCategory::Decorations);
+	if (Item::mCake && Item::mBucket && Item::mSugar && Item::mEgg) {
+		ItemInstance milk(Item::mBucket, 1, 1);
+		ItemInstance sug(Item::mSugar, 1, 0);
+		addShaped081(3, 3, { milk, milk, milk, sug, ItemInstance(Item::mEgg, 1, 0), sug, wheat, wheat, wheat }, ItemInstance(Item::mCake, 1, 0), ItemCategory::FoodArmor);
+	}
+	if (Item::mBowl) addShaped081(3, 2, { planksAny, empty, planksAny, empty, planksAny, empty }, ItemInstance(Item::mBowl, 4, 0), ItemCategory::Structures);
+	addShaped081(3, 3, { iron, empty, iron, iron, stick, iron, iron, empty, iron }, ItemInstance(Block::mRail, 16, 0), ItemCategory::Structures);
+	if (Item::mRedStone) addShaped081(3, 3, { gold, empty, gold, gold, stick, gold, gold, ItemInstance(Item::mRedStone, 1, 0), gold }, ItemInstance(Block::mGoldenRail, 6, 0), ItemCategory::Structures);
+	if (Item::mMinecart) addShaped081(3, 2, { iron, empty, iron, iron, iron, iron }, ItemInstance(Item::mMinecart, 1, 0), ItemCategory::Tools);
+	addShaped081(1, 2, { ItemInstance(Block::mPumpkin, 1, 0), ItemInstance(Block::mTorch, 1, 0) }, ItemInstance(Block::mLitPumpkin, 1, 0), ItemCategory::Decorations);
+	if (Item::mBucket) addShaped081(3, 2, { iron, empty, iron, empty, iron, empty }, ItemInstance(Item::mBucket, 1, 0), ItemCategory::Tools);
+	if (Item::mFlintAndSteel && Item::mFlint) addShaped081(2, 2, { iron, empty, empty, ItemInstance(Item::mFlint, 1, 0) }, ItemInstance(Item::mFlintAndSteel, 1, 0), ItemCategory::Tools);
+	auto addStairs = [&](const ItemInstance& mat, const Block* stair) {
+		if (stair) addShaped081(3, 3, { mat, empty, empty, mat, mat, empty, mat, mat, mat }, ItemInstance(stair, 4, 0), ItemCategory::Structures);
+	};
+	addStairs(ItemInstance(Block::mWoodPlanks, 1, 0), Block::mOakStairs);
+	addStairs(ItemInstance(Block::mWoodPlanks, 1, 1), Block::mSpruceStairs);
+	addStairs(ItemInstance(Block::mWoodPlanks, 1, 2), Block::mBirchStairs);
+	addStairs(cobble, Block::mStoneStairs);
+	addStairs(ItemInstance(Block::mBrick, 1, 0), Block::mBrickStairs);
+	addStairs(ItemInstance(Block::mSandStone, 1, 0), Block::mSandstoneStairs);
+	addStairs(ItemInstance(Block::mStoneBrick, 1, 0), Block::mStoneBrickStairs);
+	addStairs(ItemInstance(Block::mNetherBrick, 1, 0), Block::mNetherBrickStairs);
+	if (Item::mPainting) addShaped081(3, 3, { stick, stick, stick, stick, woolAny, stick, stick, stick, stick }, ItemInstance(Item::mPainting, 1, 0), ItemCategory::Decorations);
+	if (Item::mClock && Item::mRedStone) addShaped081(3, 3, { empty, gold, empty, gold, ItemInstance(Item::mRedStone, 1, 0), gold, empty, gold, empty }, ItemInstance(Item::mClock, 1, 0), ItemCategory::Tools);
+	if (Item::mCompass && Item::mRedStone) addShaped081(3, 3, { empty, iron, empty, iron, ItemInstance(Item::mRedStone, 1, 0), iron, empty, iron, empty }, ItemInstance(Item::mCompass, 1, 0), ItemCategory::Tools);
+	addShaped081(3, 2, { iron, iron, iron, iron, iron, iron }, ItemInstance(Block::mIronFence, 16, 0), ItemCategory::Structures);
+	if (Block::mNetherReactor) addShaped081(3, 3, { iron, diamond, iron, iron, diamond, iron, iron, diamond, iron }, ItemInstance(Block::mNetherReactor, 1, 0), ItemCategory::Structures);
+	if (Block::mWoolCarpet) addShaped081(2, 1, { ItemInstance(Block::mWool, 1, 14), ItemInstance(Block::mWool, 1, 14) }, ItemInstance(Block::mWoolCarpet, 3, 14), ItemCategory::Decorations);
 }
 
-ItemInstance Recipes::findMatchingRecipe(const CraftingContainer& container) const {
+ItemInstance Recipes::findMatchingRecipe(const CraftingContainer& container, bool isStonecutter) const {
 	for (const auto& recipe : mRecipes) {
-		if (recipe && recipe->matches(container)) {
+		if (recipe && recipe->isStonecutter() == isStonecutter && recipe->matches(container)) {
 			return recipe->assemble(container);
 		}
 	}

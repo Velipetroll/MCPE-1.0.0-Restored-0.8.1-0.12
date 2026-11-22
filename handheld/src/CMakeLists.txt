@@ -204,6 +204,7 @@ common/world/item/ItemInstance.cpp
 common/world/level/BlockPatternBuilder.cpp
 common/world/level/BlockPos.cpp
 common/world/level/BlockSource.cpp
+common/world/level/BlockTickingQueue.cpp
 common/world/level/BlockSourceListener.cpp
 common/world/level/ChunkBlockPos.cpp
 common/world/level/ChunkPos.cpp
@@ -392,6 +393,10 @@ common/world/level/block/WoodSlabBlock.cpp
 common/world/level/block/WoolCarpetBlock.cpp
 common/world/level/block/WorkbenchBlock.cpp
 common/world/level/block/entity/BlockEntity.cpp
+common/world/level/block/entity/ChestBlockEntity.cpp
+common/world/level/block/entity/FurnaceBlockEntity.cpp
+common/world/level/block/entity/NetherReactorBlockEntity.cpp
+common/world/level/block/entity/SignBlockEntity.cpp
 common/world/level/chunk/ChunkRefCount.cpp
 common/world/level/chunk/ChunkSource.cpp
 common/world/level/chunk/ChunkViewSource.cpp

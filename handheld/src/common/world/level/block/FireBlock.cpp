@@ -11,7 +11,7 @@
 #include "world/level/material/Material.h"
 #include "world/level/Level.h"
 #include "world/level/BlockSource.h"
-// #include "world/level/BlockTickingQueue.h"
+#include "world/level/BlockTickingQueue.h"
 #include "world/level/Weather.h"
 #include "world/level/dimension/Dimension.h"
 
@@ -112,10 +112,11 @@ void FireBlock::tick(BlockSource& region, const BlockPos& pos, Random& random) c
 		region.setBlockAndData(pos, t, Block::UPDATE_NONE);
 	}
 
-// 	BlockTickingQueue* tickQueue = region.getTickQueue(pos);
-// 	if (!tickQueue->isInstaticking()) {
-// 		tickQueue->add(region, pos, mID, getTickDelay() + random.nextInt(10));
-// 	}
+	if (BlockTickingQueue* tickQueue = region.getTickQueue(pos)) {
+		if (!tickQueue->isInstaticking()) {
+			tickQueue->add(region, pos, mID, getTickDelay() + random.nextInt(10));
+		}
+	}
 
 	if (!infiniBurn && !isValidFireLocation(region, pos)) {
 		if (!region.isSolidBlockingBlock(pos.below()) || fireAge> 3) {
@@ -279,7 +280,9 @@ void FireBlock::onPlace(BlockSource& region, const BlockPos& pos) const{
 		return;
 	}
 
-// 	region.getTickQueue(pos)->add(region, pos, mID, getTickDelay());
+	if (auto* tq = region.getTickQueue(pos)) {
+		tq->add(region, pos, mID, getTickDelay());
+	}
 }
 
 void FireBlock::ignite(BlockSource& region, const BlockPos& pos) {

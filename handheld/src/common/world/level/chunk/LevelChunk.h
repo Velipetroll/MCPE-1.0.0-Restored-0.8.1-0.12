@@ -206,14 +206,14 @@ public:
 	bool hasEntity(Entity& e);
 
 	Unique<Entity> removeEntity(Entity& e);
-	//Unique<BlockEntity> removeBlockEntity(const BlockPos& blockPos);
+	Unique<BlockEntity> removeBlockEntity(const BlockPos& blockPos);
 
 	LightList && moveLightSources();
 
 	//
 	// BlockEntity
 	//
-	//BlockEntity* getBlockEntity(const ChunkBlockPos& localPos);
+	BlockEntity* getBlockEntity(const ChunkBlockPos& localPos);
 	
 	bool hasBlockEntity(const ChunkBlockPos& cp );
 
@@ -326,6 +326,7 @@ public:
 
 	void tick(Player* player, const Tick& tick );
 	void tickBlocks(Player* player);
+	void tickBlocks(BlockSource& region, Level& level);
 
 	BlockPos findLightningTarget(const BlockPos& pos, BlockSource& region);
 

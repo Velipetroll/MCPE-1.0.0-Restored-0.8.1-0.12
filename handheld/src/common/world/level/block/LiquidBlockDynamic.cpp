@@ -8,7 +8,7 @@
 #include "world/level/BlockSource.h"
 #include "world/level/Level.h"
 #include "world/level/material/Material.h"
-// #include "world/level/BlockTickingQueue.h"
+#include "world/level/BlockTickingQueue.h"
 #include "world/level/dimension/Dimension.h"
 
 LiquidBlockDynamic::LiquidBlockDynamic(const std::string& nameId, int id, const Material& material)
@@ -21,34 +21,35 @@ void LiquidBlockDynamic::_spread(BlockSource& region, const BlockPos& pos, int d
 
 	region.setBlockAndData(pos, mID, depth, Block::UPDATE_ALL);
 
-// 	if (region.getTickQueue(pos)->isInstaticking()) {	//when instaticking, no updates are sent, sent manually
-// 		region.updateNeighborsAt(pos);
-// 	}
-// 
-// 	region.getTickQueue(pos)->add(region, pos, mID, getTickDelay(region));
+	if (auto* tq = region.getTickQueue(pos)) {
+		if (tq->isInstaticking()) {	//when instaticking, no updates are sent, sent manually
+			region.updateNeighborsAt(pos);
+		}
+		tq->add(region, pos, mID, getTickDelay(region));
+	}
 }
 
 void LiquidBlockDynamic::_trySpreadTo(BlockSource& region, const BlockPos& pos, int neighbor) const{
-// 	if (_canSpreadTo(region, pos)) {
-// 		//dont create any effect when instaticking
-// 		BlockTickingQueue* tickQueue = region.getTickQueue(pos);
-// 		if (tickQueue != nullptr) {
-// 			if (!tickQueue->isInstaticking()) {
-// 				BlockID old = region.getBlockID(pos);
-// 
-// 				// don't bother spawning
-// 				if (old > 0) {
-// 					if (mMaterial.isType(MaterialType::Lava)) {
-// 						emitFizzParticle(region, pos);
-// 					} else if (Block::mBlocks[old]->waterSpreadCausesSpawn()) {
-// 						Block::mBlocks[old]->spawnResources(region, pos, region.getData(pos), 1.0f);
-// 					}
-// 				}
-// 			}
-// 
-// 			_spread(region, pos, neighbor);
-// 		}
-// 	}
+	if (_canSpreadTo(region, pos)) {
+		//dont create any effect when instaticking
+		BlockTickingQueue* tickQueue = region.getTickQueue(pos);
+		if (tickQueue != nullptr) {
+			if (!tickQueue->isInstaticking()) {
+				BlockID old = region.getBlockID(pos);
+
+				// don't bother spawning
+				if (old > 0) {
+					if (mMaterial.isType(MaterialType::Lava)) {
+						emitFizzParticle(region, pos);
+					} else if (Block::mBlocks[old]->waterSpreadCausesSpawn()) {
+						Block::mBlocks[old]->spawnResources(region, pos, region.getData(pos), 1.0f);
+					}
+				}
+			}
+
+			_spread(region, pos, neighbor);
+		}
+	}
 }
 
 void LiquidBlockDynamic::tick(BlockSource& region, const BlockPos& pos, Random& random) const{
@@ -118,7 +119,9 @@ void LiquidBlockDynamic::tick(BlockSource& region, const BlockPos& pos, Random& 
 
 				region.setBlockAndData(pos, mID, data, Block::UPDATE_ALL);
 				region.updateNeighborsAt(pos);
-// 				region.getTickQueue(pos)->add(region, pos, mID, tickDelay);	//tickdelay makes this instant if needed
+				if (auto* tq = region.getTickQueue(pos)) {
+					tq->add(region, pos, mID, tickDelay);	//tickdelay makes this instant if needed
+				}
 			}
 		} else {
 			if (becomeStatic) {
@@ -322,7 +325,9 @@ int LiquidBlockDynamic::_getSlopeDistance(BlockSource& region, const BlockPos& p
 
 void LiquidBlockDynamic::onPlace(BlockSource& region, const BlockPos& pos) const {
 	LiquidBlock::onPlace(region, pos);
-// 	if (region.getBlockID(pos) == mID) {
-// 		region.getTickQueue(pos)->add(region, pos, mID, getTickDelay(region));
-// 	}
+	if (region.getBlockID(pos) == mID) {
+		if (auto* tq = region.getTickQueue(pos)) {
+			tq->add(region, pos, mID, getTickDelay(region));
+		}
+	}
 }

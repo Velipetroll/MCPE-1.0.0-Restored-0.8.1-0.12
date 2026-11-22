@@ -494,22 +494,26 @@ int getMaxHealthForType(MobType type) {
 	case MobType::Cow:      return 10;
 	case MobType::Sheep:    return 8;
 	case MobType::Chicken:  return 4;
-	case MobType::Zombie:   return 20;
-	case MobType::Creeper:  return 20;
-	case MobType::Skeleton: return 20;
+	case MobType::Zombie:    return 20;
+	case MobType::Creeper:   return 20;
+	case MobType::Skeleton:  return 20;
+	case MobType::Spider:    return 16;
+	case MobType::PigZombie: return 20;
 	}
 	return 10;
 }
 
 const char* getMobTexturePath(MobType type) {
 	switch (type) {
-	case MobType::Pig:      return "textures/entity/pig/pig.png";
-	case MobType::Cow:      return "textures/entity/cow/cow.png";
-	case MobType::Sheep:    return "textures/entity/sheep/sheep.tga";
-	case MobType::Chicken:  return "textures/entity/chicken.png";
-	case MobType::Zombie:   return "textures/entity/zombie/zombie.png";
-	case MobType::Creeper:  return "textures/entity/creeper/creeper.png";
-	case MobType::Skeleton: return "textures/entity/skeleton/skeleton.png";
+	case MobType::Pig:       return "textures/entity/pig/pig.png";
+	case MobType::Cow:       return "textures/entity/cow/cow.png";
+	case MobType::Sheep:     return "textures/entity/sheep/sheep.tga";
+	case MobType::Chicken:   return "textures/entity/chicken.png";
+	case MobType::Zombie:    return "textures/entity/zombie/zombie.png";
+	case MobType::Creeper:   return "textures/entity/creeper/creeper.png";
+	case MobType::Skeleton:  return "textures/entity/skeleton/skeleton.png";
+	case MobType::Spider:    return "textures/entity/spider/spider.png";
+	case MobType::PigZombie: return "textures/entity/pig/pigzombie.png";
 	}
 	return "textures/entity/pig/pig.png";
 }
@@ -888,19 +892,22 @@ void moveMobWithPhysics(WorldMobEntity& mob, float dt, BlockSource& region) {
 } // namespace
 
 bool WorldMobEntity::isHostile() const {
-	return type == MobType::Zombie || type == MobType::Creeper || type == MobType::Skeleton;
+	return type == MobType::Zombie || type == MobType::Creeper || type == MobType::Skeleton ||
+	       type == MobType::Spider || type == MobType::PigZombie;
 }
 
 float WorldMobEntity::halfWidth() const {
 	float s = isBaby ? 0.5f : 1.0f;
 	switch (type) {
-	case MobType::Pig:      return 0.45f * s;
-	case MobType::Cow:      return 0.45f * s;
-	case MobType::Sheep:    return 0.45f * s;
-	case MobType::Chicken:  return 0.25f * s;
-	case MobType::Zombie:   return 0.30f;
-	case MobType::Creeper:  return 0.30f;
-	case MobType::Skeleton: return 0.30f;
+	case MobType::Pig:       return 0.45f * s;
+	case MobType::Cow:       return 0.45f * s;
+	case MobType::Sheep:     return 0.45f * s;
+	case MobType::Chicken:   return 0.25f * s;
+	case MobType::Zombie:    return 0.30f;
+	case MobType::Creeper:   return 0.30f;
+	case MobType::Skeleton:  return 0.30f;
+	case MobType::Spider:    return 0.70f;
+	case MobType::PigZombie: return 0.30f;
 	}
 	return 0.35f * s;
 }
@@ -908,13 +915,15 @@ float WorldMobEntity::halfWidth() const {
 float WorldMobEntity::height() const {
 	float s = isBaby ? 0.5f : 1.0f;
 	switch (type) {
-	case MobType::Pig:      return 0.90f * s;
-	case MobType::Cow:      return 1.30f * s;
-	case MobType::Sheep:    return 1.30f * s;
-	case MobType::Chicken:  return 0.70f * s;
-	case MobType::Zombie:   return 1.80f;
-	case MobType::Creeper:  return 1.65f;
-	case MobType::Skeleton: return 1.80f;
+	case MobType::Pig:       return 0.90f * s;
+	case MobType::Cow:       return 1.30f * s;
+	case MobType::Sheep:     return 1.30f * s;
+	case MobType::Chicken:   return 0.70f * s;
+	case MobType::Zombie:    return 1.80f;
+	case MobType::Creeper:   return 1.65f;
+	case MobType::Skeleton:  return 1.80f;
+	case MobType::Spider:    return 0.90f;
+	case MobType::PigZombie: return 1.80f;
 	}
 	return 1.0f * s;
 }
@@ -1038,6 +1047,29 @@ bool MobManager::damageMob(int index,
 		spawnDropsForMob(mob, onDropItem);
 	}
 	return true;
+}
+
+bool MobManager::dyeSheep(int index, int woolColor) {
+	if (index < 0 || index >= static_cast<int>(mobs.size())) return false;
+	WorldMobEntity& mob = mobs[static_cast<size_t>(index)];
+	if (mob.isDying || mob.type != MobType::Sheep) return false;
+	int c = woolColor & 0xF;
+	if (mob.woolColor == c) return false;
+	mob.woolColor = c;
+	return true;
+}
+
+void MobManager::removePigZombiesNear(const BlockPos& pos, float radius) {
+	float r2 = radius * radius;
+	mobs.erase(
+		std::remove_if(mobs.begin(), mobs.end(), [&](const WorldMobEntity& m) {
+			if (m.type != MobType::PigZombie) return false;
+			float dx = m.pos.x - (pos.x + 0.5f);
+			float dy = m.pos.y - (pos.y + 0.5f);
+			float dz = m.pos.z - (pos.z + 0.5f);
+			return (dx * dx + dy * dy + dz * dz) <= r2;
+		}),
+		mobs.end());
 }
 
 bool MobManager::shearSheep(int index,
@@ -2044,7 +2076,8 @@ void MobManager::render(BlockSource& region,
 				}
 				break;
 			}
-			case MobType::Zombie: {
+			case MobType::Zombie:
+			case MobType::PigZombie: {
 				zombieModel.head.yRot = netHeadYawRad;
 				zombieModel.head.xRot = headPitchRad;
 				zombieModel.rightLeg.xRot = legSwingRad;

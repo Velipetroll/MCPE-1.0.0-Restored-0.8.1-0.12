@@ -5,12 +5,12 @@
 #include "common_header.h"
 
 #include "world/level/block/NetherReactor.h"
+#include "world/level/block/NetherReactorPattern.h"
 #include "world/level/Level.h"
-// #include "world/level/block/entity/NetherReactorBlockEntity.h"
+#include "world/level/block/entity/NetherReactorBlockEntity.h"
 #include "world/level/BlockSource.h"
+#include "world/entity/player/Player.h"
 #include "world/item/Item.h"
-// #include "world/entity/item/ItemEntity.h"
-// #include "world/level/Spawner.h"
 
 NetherReactorBlock::NetherReactorBlock(const std::string& nameId, int id, const Material& material)
 	: EntityBlock(nameId, id, material) {
@@ -32,11 +32,57 @@ void NetherReactorBlock::spawnResources(BlockSource& region, const BlockPos& pos
 }
 
 void NetherReactorBlock::_dropItem(BlockSource& region, const BlockPos& pos, Item* item) const {
-// 	auto& level = region.getLevel();
-// 
-// 	static const float s = 0.7f;
-// 	const float xo = level.getRandom().nextFloat() * s + (1 - s) * 0.5f;
-// 	const float yo = level.getRandom().nextFloat() * s + (1 - s) * 0.5f;
-// 	const float zo = level.getRandom().nextFloat() * s + (1 - s) * 0.5f;
-// 	level.getSpawner().spawnItem(region, ItemInstance(item, 1), nullptr, Vec3(pos.x + xo, pos.y + yo, pos.z + zo), 10);
+	if (item) {
+		popResource(region, pos, ItemInstance(item, 1));
+	}
+}
+
+void NetherReactorBlock::setPhase(BlockSource& region, const BlockPos& pos, int phase) {
+	if (region.getData(pos) != phase) {
+		region.setBlockAndData(pos, Block::mNetherReactor->mID, static_cast<DataID>(phase), Block::UPDATE_CLIENTS);
+	}
+}
+
+bool NetherReactorBlock::activateReactor(BlockSource& region, const BlockPos& pos, const Vec3& playerPos, bool isCreative, std::string& outMessage) {
+	if (isCreative) {
+		return false;
+	}
+	NetherReactorPattern pat;
+	for (int yy = 0; yy < 3; ++yy) {
+		for (int xx = 0; xx < 3; ++xx) {
+			for (int zz = 0; zz < 3; ++zz) {
+				BlockPos checkPos(pos.x - 1 + xx, pos.y - 1 + yy, pos.z - 1 + zz);
+				if (static_cast<unsigned int>(region.getBlockID(checkPos)) != pat.getBlockAt(yy, xx, zz)) {
+					outMessage = "Not the correct pattern!";
+					return false;
+				}
+			}
+		}
+	}
+	if (playerPos.x < pos.x - 5 || playerPos.x > pos.x + 5 ||
+	    playerPos.y < pos.y - 1 || playerPos.y > pos.y + 1 ||
+	    playerPos.z < pos.z - 5 || playerPos.z > pos.z + 5) {
+		outMessage = "All players need to be close to the reactor.";
+		return false;
+	}
+	if (pos.y > 100) {
+		outMessage = "The nether reactor needs to be built lower down.";
+		return false;
+	}
+	if (pos.y <= 1) {
+		outMessage = "The nether reactor needs to be built higher up.";
+		return false;
+	}
+	outMessage = "Active!";
+	BlockEntity* be = region.getBlockEntity(pos);
+	if (be && be->isType(BlockEntityType::NetherReactor)) {
+		static_cast<NetherReactorBlockEntity*>(be)->lightItUp(region, pos.x, pos.y, pos.z);
+	}
+	return true;
+}
+
+bool NetherReactorBlock::use(Player& player, const BlockPos& pos) const {
+	std::string msg;
+	bool isCreative = player.getLevel().getLevelData().getGameType() == GameType::Creative;
+	return activateReactor(player.getRegion(), pos, player.getPos(), isCreative, msg);
 }

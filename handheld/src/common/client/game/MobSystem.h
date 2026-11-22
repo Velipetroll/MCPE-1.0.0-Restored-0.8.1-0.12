@@ -16,7 +16,9 @@ enum class MobType {
 	Chicken,
 	Zombie,
 	Creeper,
-	Skeleton
+	Skeleton,
+	Spider,
+	PigZombie
 };
 
 struct WorldMobEntity {
@@ -128,6 +130,8 @@ public:
 	                const std::function<void(const Vec3& pos, float hw, float h, int count)>& onHearts);
 
 	bool milkCow(int index);
+	bool dyeSheep(int index, int woolColor);
+	void removePigZombiesNear(const BlockPos& pos, float radius);
 
 	bool spawnMobAt(MobType type, float x, float y, float z);
 

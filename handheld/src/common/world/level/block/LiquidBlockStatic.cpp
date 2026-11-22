@@ -7,7 +7,7 @@
 #include "world/level/block/LiquidBlockStatic.h"
 #include "world/level/material/Material.h"
 #include "world/level/BlockSource.h"
-// #include "world/level/BlockTickingQueue.h"
+#include "world/level/BlockTickingQueue.h"
 
 LiquidBlockStatic::LiquidBlockStatic(const std::string& nameId, int id, BlockID dynamicID, const Material& material)
 	: LiquidBlock(nameId, id, material)
@@ -34,5 +34,7 @@ bool LiquidBlockStatic::_isFlammable(BlockSource& region, const BlockPos& pos){
 
 void LiquidBlockStatic::_setDynamic(BlockSource& region, const BlockPos& pos) const {
 	region.setBlockAndData(pos, (BlockID)(mID - 1), region.getData(pos), Block::UPDATE_CLIENTS);
-// 	region.getTickQueue(pos)->add(region, pos, mDynamicID, getTickDelay(region));
+	if (auto* tq = region.getTickQueue(pos)) {
+		tq->add(region, pos, mDynamicID, getTickDelay(region));
+	}
 }

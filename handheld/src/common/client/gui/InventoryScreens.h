@@ -272,8 +272,12 @@ private:
 
 void tickFurnaces(GuiContext& ctx, float dt);
 
+class SignBlockEntity;
+
 class TextEditScreen : public Screen {
 public:
+	TextEditScreen() = default;
+	explicit TextEditScreen(SignBlockEntity* sign);
 	void init() override;
 	void setupPositions() override;
 	void render(int mouseX, int mouseY, float partialTicks) override;
@@ -285,6 +289,7 @@ public:
 	bool isPauseScreen() const override { return false; }
 
 private:
+	SignBlockEntity* mSign = nullptr;
 	std::string mLines[4];
 	int mActiveLine = 0;
 	Button* mDoneButton = nullptr;

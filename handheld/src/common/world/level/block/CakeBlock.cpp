@@ -23,23 +23,15 @@ CakeBlock::CakeBlock(const std::string& nameId, int id) :
 
 bool CakeBlock::use(Player& player, const BlockPos& pos) const {
 	auto& region = player.getRegion();
-
-// 	if (!player.mAbilities.mInvulnerable && player.isHungry()) {
-// 		
-// 
-// 		player.eat(2, FoodConstants::FOOD_SATURATION_POOR);
-// 
-// 		auto cake = region.getBlockAndData(pos);
-// 		int bites = getBlockState(BlockState::BiteCounter).get<int>(cake.data);
-// 		bites += 1;
-// 		if (bites > MAX_BITES) {
-// 			region.removeBlock(pos.x, pos.y, pos.z);
-// 		} else {
-// 			getBlockState(BlockState::BiteCounter).set(cake.data, bites);
-// 			region.setBlockAndData(pos, cake, Block::UPDATE_ALL, &player);
-// 		}
-// 	}
-
+	auto cake = region.getBlockAndData(pos);
+	int bites = getBlockState(BlockState::BiteCounter).get<int>(cake.data);
+	bites += 1;
+	if (bites > MAX_BITES) {
+		region.removeBlock(pos.x, pos.y, pos.z);
+	} else {
+		getBlockState(BlockState::BiteCounter).set(cake.data, bites);
+		region.setBlockAndData(pos, cake, Block::UPDATE_ALL, &player);
+	}
 	return true;
 }
 

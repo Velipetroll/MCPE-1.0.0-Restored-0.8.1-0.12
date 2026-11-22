@@ -6,6 +6,8 @@
 #include "Font.h"
 #include "world/item/Item.h"
 #include "world/level/block/Block.h"
+#include "world/level/block/entity/SignBlockEntity.h"
+#include "world/level/material/Material.h"
 #include <glad/glad.h>
 #include <algorithm>
 #include <chrono>
@@ -1936,7 +1938,7 @@ bool PaneCraftingScreen::renderGameBehind() const {
 
 void PaneCraftingScreen::updateCraftingResult() {
 	Recipes::getInstance()->init();
-	mResultSlot = Recipes::getInstance()->findMatchingRecipe(mCraftGrid);
+	mResultSlot = Recipes::getInstance()->findMatchingRecipe(mCraftGrid, mNumCategories == 1);
 }
 
 void PaneCraftingScreen::closeScreen() {
@@ -2170,7 +2172,7 @@ void PaneCraftingScreen::render(int mouseX, int mouseY, float partialTicks) {
 	drawPcBevelPanel(this, px, py, pw, ph);
 
 	std::string hoverText;
-	if (font) drawString(font, "Crafting", px + 28, py + 6, 0xFF404040, false);
+	if (font) drawString(font, (mNumCategories == 1) ? "Stonecutter" : "Crafting", px + 28, py + 6, 0xFF404040, false);
 
 	// 3x3 crafting grid at (px + 30, py + 17)
 	for (int r = 0; r < 3; ++r) {
@@ -2288,6 +2290,9 @@ void PaneCraftingScreen::buttonClicked(Button* button) {
 					}
 				}
 				context->addItemToInventory(active.result);
+				if (Item::mCake && active.result.getId() == Item::mCake->getId() && Item::mBucket) {
+					context->addItemToInventory(ItemInstance(Item::mBucket, 3, 0));
+				}
 				recheckRecipes();
 			}
 		}
@@ -2383,6 +2388,12 @@ ItemInstance getSmeltingResult(const ItemInstance& input) {
 	if (Item::mFish_raw_salmon && id == Item::mFish_raw_salmon->getId() && Item::mFish_cooked_salmon) {
 		return ItemInstance(Item::mFish_cooked_salmon, 1, 0);
 	}
+	if (Block::mCactus && id == Block::mCactus->mID && Item::mDye_powder) {
+		return ItemInstance(Item::mDye_powder, 1, 2); // Green dye
+	}
+	if (Block::mRedMushroom && id == Block::mRedMushroom->mID && Item::mDye_powder) {
+		return ItemInstance(Item::mDye_powder, 1, 1); // Red dye
+	}
 	return ItemInstance();
 }
 
@@ -2390,21 +2401,24 @@ float getFuelBurnSeconds(const ItemInstance& fuel) {
 	if (fuel.isNull() || fuel.getStackSize() <= 0) return 0.0f;
 	Recipes::getInstance()->init();
 	int id = fuel.getId();
+	if (id > 0 && id <= 255 && Block::mBlocks[id] && Block::mBlocks[id]->getMaterial().isType(MaterialType::Wood)) {
+		return 15.0f; // 300 ticks (1:1 0.8.1)
+	}
 	if (Item::mCoal && id == Item::mCoal->getId()) return 80.0f;
 	if (Block::mCoalBlock && id == Block::mCoalBlock->mID) return 800.0f;
-	if (Block::mWoodPlanks && id == Block::mWoodPlanks->mID) return 15.0f;
-	if ((Block::mLog && id == Block::mLog->mID) || (Block::mLog2 && id == Block::mLog2->mID)) return 15.0f;
-	if (Block::mWorkBench && id == Block::mWorkBench->mID) return 15.0f;
-	if (Block::mChest && id == Block::mChest->mID) return 15.0f;
-	if (Block::mBookshelf && id == Block::mBookshelf->mID) return 15.0f;
-	if (Block::mFence && id == Block::mFence->mID) return 15.0f;
-	if (Block::mFenceGateOak && id == Block::mFenceGateOak->mID) return 15.0f;
-	if (Block::mOakStairs && id == Block::mOakStairs->mID) return 15.0f;
-	if (Block::mWoodenSlab && id == Block::mWoodenSlab->mID) return 7.5f;
+	if (Item::mBucket && id == Item::mBucket->getId() &&
+	    ((Block::mFlowingLava && fuel.getAuxValue() == Block::mFlowingLava->mID) ||
+	     (Block::mStillLava && fuel.getAuxValue() == Block::mStillLava->mID))) {
+		return 1000.0f; // 20000 ticks
+	}
+	if (Block::mWoodenSlab && id == Block::mWoodenSlab->mID) return 15.0f; // 300 ticks in 0.8.1
 	if ((Item::mPickAxe_wood && id == Item::mPickAxe_wood->getId()) ||
 	    (Item::mHatchet_wood && id == Item::mHatchet_wood->getId()) ||
 	    (Item::mShovel_wood && id == Item::mShovel_wood->getId()) ||
-	    (Item::mSword_wood && id == Item::mSword_wood->getId())) return 10.0f;
+	    (Item::mHoe_wood && id == Item::mHoe_wood->getId()) ||
+	    (Item::mSword_wood && id == Item::mSword_wood->getId()) ||
+	    (Item::mBow && id == Item::mBow->getId()) ||
+	    (Item::mBowl && id == Item::mBowl->getId())) return 10.0f; // 200 ticks
 	if (Item::mStick && id == Item::mStick->getId()) return 5.0f;
 	if (Block::mSapling && id == Block::mSapling->mID) return 5.0f;
 	return 0.0f;
@@ -2863,6 +2877,15 @@ void ChestScreen::init() {
 }
 
 void ChestScreen::setupPositions() {
+	if (isTouchUI(context)) {
+		if (mCloseButton) {
+			mCloseButton->posX = width - 22;
+			mCloseButton->posY = 4;
+			mCloseButton->width = 18;
+			mCloseButton->height = 18;
+		}
+		return;
+	}
 	int rows = mIsDouble ? 6 : 3;
 	int pw = 176;
 	int ph = 18 + rows * 18 + 14 + 78;
@@ -2871,6 +2894,51 @@ void ChestScreen::setupPositions() {
 }
 
 void ChestScreen::render(int mouseX, int mouseY, float partialTicks) {
+	if (isTouchUI(context)) {
+		fillGradient(0, 0, width, height, 0xA0101010, 0xB0101010);
+		int margin = 10;
+		int paneGap = 12;
+		int paneW = (width - margin * 2 - paneGap) / 2;
+		int paneY = 26;
+		int paneH = height - paneY - 10;
+		drawPanel(this, margin, paneY, paneW, paneH);
+		drawPanel(this, margin + paneW + paneGap, paneY, paneW, paneH);
+		if (font) {
+			drawString(font, "Inventory", margin + 4, 10, 0xFFFFFFFF, true);
+			drawString(font, mIsDouble ? "Large Chest" : "Chest", margin + paneW + paneGap + 4, 10, 0xFFFFFFFF, true);
+		}
+		int slotSize = 24;
+		int cols = std::max(1, (paneW - 8) / slotSize);
+		if (context) {
+			for (int i = 0; i < 36; ++i) {
+				int sx = margin + 4 + (i % cols) * slotSize;
+				int sy = paneY + 4 + (i / cols) * slotSize;
+				if (sy + slotSize > paneY + paneH) break;
+				fill(sx, sy, sx + slotSize - 2, sy + slotSize - 2, 0xFF8B8B8B);
+				drawRect(sx, sy, sx + slotSize - 2, sy + slotSize - 2, 0xFF373737);
+				if (!context->inventorySlots[i].isNull()) {
+					drawPcItemStack(this, font, context->inventorySlots[i], sx + 3, sy + 3);
+				}
+			}
+			ChestData* primary = &context->chests[mPrimaryPos];
+			ChestData* secondary = mIsDouble ? &context->chests[mSecondaryPos] : nullptr;
+			int totalChest = mIsDouble ? 54 : 27;
+			int rightX = margin + paneW + paneGap;
+			for (int i = 0; i < totalChest; ++i) {
+				int sx = rightX + 4 + (i % cols) * slotSize;
+				int sy = paneY + 4 + (i / cols) * slotSize;
+				if (sy + slotSize > paneY + paneH) break;
+				fill(sx, sy, sx + slotSize - 2, sy + slotSize - 2, 0xFF8B8B8B);
+				drawRect(sx, sy, sx + slotSize - 2, sy + slotSize - 2, 0xFF373737);
+				const ItemInstance& item = (i < 27) ? primary->slots[static_cast<size_t>(i)] : secondary->slots[static_cast<size_t>(i - 27)];
+				if (!item.isNull()) {
+					drawPcItemStack(this, font, item, sx + 4, sy + 4);
+				}
+			}
+		}
+		Screen::render(mouseX, mouseY, partialTicks);
+		return;
+	}
 	fillGradient(0, 0, width, height, 0xA0101010, 0xB0101010);
 	int rows = mIsDouble ? 6 : 3;
 	int chestH = rows * 18;
@@ -2912,6 +2980,68 @@ void ChestScreen::render(int mouseX, int mouseY, float partialTicks) {
 }
 
 void ChestScreen::mouseClicked(int x, int y, int button) {
+	if (isTouchUI(context)) {
+		if (button == 0 && context) {
+			int margin = 10;
+			int paneGap = 12;
+			int paneW = (width - margin * 2 - paneGap) / 2;
+			int paneY = 26;
+			int paneH = height - paneY - 10;
+			int slotSize = 24;
+			int cols = std::max(1, (paneW - 8) / slotSize);
+			ChestData& primary = context->chests[mPrimaryPos];
+			ChestData* secondary = mIsDouble ? &context->chests[mSecondaryPos] : nullptr;
+			int totalChest = mIsDouble ? 54 : 27;
+
+			auto moveIntoChest = [&](ItemInstance& src) -> bool {
+				if (src.isNull()) return false;
+				for (int i = 0; i < totalChest; ++i) {
+					ItemInstance& dst = (i < 27) ? primary.slots[static_cast<size_t>(i)] : secondary->slots[static_cast<size_t>(i - 27)];
+					if (!dst.isNull() && dst.sameItemAndAux(&src) && dst.getStackSize() < dst.getMaxStackSize()) {
+						int move = std::min(static_cast<int>(src.getStackSize()), static_cast<int>(dst.getMaxStackSize() - dst.getStackSize()));
+						dst.add(move);
+						src.remove(move);
+						if (src.getStackSize() <= 0) src.setNull();
+						return true;
+					}
+				}
+				for (int i = 0; i < totalChest; ++i) {
+					ItemInstance& dst = (i < 27) ? primary.slots[static_cast<size_t>(i)] : secondary->slots[static_cast<size_t>(i - 27)];
+					if (dst.isNull()) {
+						dst = src;
+						src.setNull();
+						return true;
+					}
+				}
+				return false;
+			};
+
+			for (int i = 0; i < 36; ++i) {
+				int sx = margin + 4 + (i % cols) * slotSize;
+				int sy = paneY + 4 + (i / cols) * slotSize;
+				if (sy + slotSize > paneY + paneH) break;
+				if (x >= sx && x < sx + slotSize && y >= sy && y < sy + slotSize) {
+					moveIntoChest(context->inventorySlots[i]);
+					return;
+				}
+			}
+			int rightX = margin + paneW + paneGap;
+			for (int i = 0; i < totalChest; ++i) {
+				int sx = rightX + 4 + (i % cols) * slotSize;
+				int sy = paneY + 4 + (i / cols) * slotSize;
+				if (sy + slotSize > paneY + paneH) break;
+				if (x >= sx && x < sx + slotSize && y >= sy && y < sy + slotSize) {
+					ItemInstance& src = (i < 27) ? primary.slots[static_cast<size_t>(i)] : secondary->slots[static_cast<size_t>(i - 27)];
+					if (!src.isNull() && context->addItemToInventory(src)) {
+						src.setNull();
+					}
+					return;
+				}
+			}
+		}
+		Screen::mouseClicked(x, y, button);
+		return;
+	}
 	if ((button == 0 || button == 1) && context) {
 		int rows = mIsDouble ? 6 : 3;
 		int chestH = rows * 18;
@@ -2963,38 +3093,62 @@ bool ChestScreen::handleBackEvent(bool /*isDown*/) {
 }
 
 // --- TextEditScreen ---
+TextEditScreen::TextEditScreen(SignBlockEntity* sign) : mSign(sign) {
+	if (mSign) {
+		for (int i = 0; i < 4; ++i) {
+			mLines[i] = mSign->getMessage(i);
+		}
+	}
+}
+
 void TextEditScreen::init() {
-	mDoneButton = makeInvBtn(context, 1, "Done");
+	mDoneButton = makeInvBtn(context, 1, "");
 	buttons.push_back(mDoneButton);
 }
 
 void TextEditScreen::setupPositions() {
 	if (mDoneButton) {
-		mDoneButton->posX = width / 2 - 100;
-		mDoneButton->posY = height - 40;
-		mDoneButton->width = 200;
-		mDoneButton->height = 20;
+		mDoneButton->width = 19;
+		mDoneButton->height = 19;
+		mDoneButton->posX = width - 19;
+		mDoneButton->posY = 0;
 	}
 }
 
 void TextEditScreen::render(int mouseX, int mouseY, float partialTicks) {
 	fillGradient(0, 0, width, height, 0xA0101010, 0xB0101010);
-	if (font) drawCenteredString(font, "Edit Sign Message", width / 2, 24, 0xFFFFFFFF);
-	int bx = width / 2 - 60, by = 52;
-	fill(bx, by, bx + 120, by + 64, 0xFF9C7B49);
-	drawRect(bx, by, bx + 120, by + 64, 0xFF403018);
-	for (int i = 0; i < 4; ++i) {
-		std::string line = mLines[i] + (mActiveLine == i ? "_" : "");
-		if (font) drawCenteredString(font, line, width / 2, by + 8 + i * 14, 0xFF000000);
+	float scale = std::max(1.0f, static_cast<float>(height / 64) * 0.9f);
+	int bx = static_cast<int>(width * 0.5f - 32.0f * scale);
+	int by = 5;
+	int bw = static_cast<int>(64.0f * scale);
+	int bh = static_cast<int>(32.0f * scale);
+	fill(bx, by, bx + bw, by + bh, 0xFF9C7B49);
+	drawRect(bx, by, bx + bw, by + bh, 0xFF403018);
+	if (font) {
+		for (int i = 0; i < 4; ++i) {
+			std::string line = mLines[i];
+			if (mActiveLine == i && line.size() <= 13) {
+				line = "> " + line + " <";
+			}
+			int lineY = by + static_cast<int>((2.0f + i * 7.5f) * scale);
+			drawCenteredString(font, line, width / 2, lineY, 0xFF000000);
+		}
 	}
 	Screen::render(mouseX, mouseY, partialTicks);
+	if (mDoneButton && font) {
+		drawCenteredString(font, "X", mDoneButton->posX + mDoneButton->width / 2, mDoneButton->posY + 6, 0xFFFFFFFF);
+	}
 }
 
 void TextEditScreen::mouseClicked(int x, int y, int button) {
 	if (button == 0) {
-		int bx = width / 2 - 60, by = 52;
-		if (x >= bx && x < bx + 120 && y >= by && y < by + 64) {
-			mActiveLine = (y - by) / 16;
+		float scale = std::max(1.0f, static_cast<float>(height / 64) * 0.9f);
+		int bx = static_cast<int>(width * 0.5f - 32.0f * scale);
+		int by = 5;
+		int bw = static_cast<int>(64.0f * scale);
+		int bh = static_cast<int>(32.0f * scale);
+		if (x >= bx && x < bx + bw && y >= by && y < by + bh) {
+			mActiveLine = static_cast<int>((y - by) / (static_cast<float>(bh) / 4.0f));
 			if (mActiveLine < 0) mActiveLine = 0;
 			if (mActiveLine > 3) mActiveLine = 3;
 		}
@@ -3018,10 +3172,18 @@ void TextEditScreen::keyPressed(int key) {
 }
 
 bool TextEditScreen::handleBackEvent(bool /*isDown*/) {
+	if (mSign) {
+		for (int i = 0; i < 4; ++i) {
+			mSign->setMessage(i, mLines[i]);
+		}
+		mSign->setChanged();
+	}
 	if (context) context->startGame();
 	return true;
 }
 
 void TextEditScreen::buttonClicked(Button* button) {
-	if (context && button && button->id == 1) context->startGame();
+	if (button && button->id == 1) {
+		handleBackEvent(false);
+	}
 }

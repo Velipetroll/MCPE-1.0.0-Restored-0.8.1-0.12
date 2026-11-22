@@ -528,6 +528,8 @@ public:
 	virtual void spawnResources(BlockSource& region, const BlockPos& pos, int data, float odds = 1, int bonusLootLevel = 0) const;
 	virtual bool spawnBurnResources(BlockSource& region, float x, float y, float z);
 	void popResource(BlockSource& region, const BlockPos& pos, const ItemInstance& itemInstance) const;
+	using PopResourceCallback = std::function<void(BlockSource&, const BlockPos&, const ItemInstance&)>;
+	static void setPopResourceCallback(PopResourceCallback cb);
 
 	virtual float getExplosionResistance(Entity* entity = nullptr) const;
 

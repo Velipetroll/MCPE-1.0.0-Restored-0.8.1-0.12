@@ -194,7 +194,6 @@ BlockTickingQueue* BlockSource::getTickQueue(const BlockPos& forBlock) {
 		return &c->getTickQueue();
 	}
 	else {
-		DEBUG_FAIL("This shouldn't happen, ticking an unloaded tile");
 		return nullptr;
 	}
 }
@@ -515,16 +514,16 @@ bool BlockSource::setBlock(const BlockPos& pos, BlockID block, int updateFlags) 
 }
 
 void BlockSource::neighborChanged(const BlockPos& neighPos, const BlockPos& myPos){
-// 	if (!getLevelConst().isClientSide()) {
-// 		auto& block = getBlock(neighPos);
-// 		if(!block.isType(Block::mAir)) {
-// 			if (auto queue = getTickQueue(neighPos)) {
-// 				if (!queue->isInstaticking() || block.canInstatick()) {
-// 					block.neighborChanged(*this, neighPos, myPos);
-// 				}
-// 			}
-// 		}
-// 	}
+	if (!getLevelConst().isClientSide()) {
+		auto& block = getBlock(neighPos);
+		if(!block.isType(Block::mAir)) {
+			if (auto queue = getTickQueue(neighPos)) {
+				if (!queue->isInstaticking() || block.canInstatick()) {
+					block.neighborChanged(*this, neighPos, myPos);
+				}
+			}
+		}
+	}
 }
 
 void BlockSource::updateNeighborsAt(const BlockPos& pos){
@@ -656,16 +655,15 @@ bool BlockSource::removeBlock(const BlockPos& pos) {
  
 
 BlockEntity* BlockSource::getBlockEntity(const BlockPos& pos ) {
-// 	LevelChunk* lc = getChunkAt(pos);
-// 	return lc ? lc->getBlockEntity(ChunkBlockPos(pos)) : nullptr;
-	return nullptr;
+	LevelChunk* lc = getChunkAt(pos);
+	return lc ? lc->getBlockEntity(ChunkBlockPos(pos)) : nullptr;
 }
 
 Unique<BlockEntity> BlockSource::removeBlockEntity(const BlockPos& blockPos) {
-// 	LevelChunk* chunk = getChunkAt(blockPos);
-// 	if(chunk) {
-// 		return chunk->removeBlockEntity(blockPos);
-// 	}
+	LevelChunk* chunk = getChunkAt(blockPos);
+	if(chunk) {
+		return chunk->removeBlockEntity(blockPos);
+	}
 
 	return nullptr;
 }

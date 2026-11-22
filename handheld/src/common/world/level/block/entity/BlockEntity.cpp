@@ -6,6 +6,10 @@
 #include "common_header.h"
 
 #include "world/level/block/entity/BlockEntity.h"
+#include "world/level/block/entity/ChestBlockEntity.h"
+#include "world/level/block/entity/FurnaceBlockEntity.h"
+#include "world/level/block/entity/SignBlockEntity.h"
+#include "world/level/block/entity/NetherReactorBlockEntity.h"
 
 #include "nbt/CompoundTag.h"
 //#include "network/Packet.h"
@@ -44,63 +48,18 @@ BlockEntity::MapTypeId BlockEntity::classIdMap;
 int BlockEntity::_runningId = 0;
 
 Unique<BlockEntity> BlockEntityFactory::createBlockEntity(BlockEntityType type, const BlockPos& pos, const BlockID blockID) {
-// 	switch(type) {
-// 	case BlockEntityType::Furnace:
-// 		return make_unique<FurnaceBlockEntity>(pos);
-// 	case BlockEntityType::Chest:
-// 		return make_unique<ChestBlockEntity>(BlockEntityType::Chest, "Chest", TR_CHEST_RENDERER, pos);
-// 	case BlockEntityType::Sign:
-// 		return make_unique<SignBlockEntity>(pos);
-// 	case BlockEntityType::NetherReactor:
-// 		return make_unique<NetherReactorBlockEntity>(pos);
-// 	case BlockEntityType::MobSpawner:
-// 		return make_unique<MobSpawnerBlockEntity>(pos);
-// 	case BlockEntityType::Skull:
-// 		return make_unique<SkullBlockEntity>(pos);
-// 	case BlockEntityType::FlowerPot:
-// 		return make_unique<FlowerPotBlockEntity>(pos);
-// 	case BlockEntityType::BrewingStand:
-// 		return make_unique<BrewingStandBlockEntity>(pos);
-// 	case BlockEntityType::EnchantingTable:
-// 		return make_unique<EnchantingTableEntity>(pos);
-// 	case BlockEntityType::DaylightDetector:
-// 		return make_unique<DaylightDetectorBlockEntity>(pos);
-// 	case BlockEntityType::Music:
-// 		return make_unique<MusicBlockEntity>(pos);
-// 	case BlockEntityType::Comparator:
-// 		return make_unique<ComparatorBlockEntity>(pos);
-// 	case BlockEntityType::Dispenser:
-// 		return make_unique<DispenserBlockEntity>(pos);
-// 	case BlockEntityType::Dropper:
-// 		return make_unique<DropperBlockEntity>(pos);
-// 	case BlockEntityType::Hopper:
-// 		return make_unique<HopperBlockEntity>(pos);
-// 	case BlockEntityType::Cauldron:
-// 		return make_unique<CauldronBlockEntity>(pos);
-// 	case BlockEntityType::Beacon:
-// 		return make_unique<BeaconBlockEntity>(pos);
-// 	case BlockEntityType::ItemFrame:
-// 		return make_unique<ItemFrameBlockEntity>(pos);
-// 	case BlockEntityType::PistonArm:
-// 		return make_unique<PistonBlockEntity>(pos, blockID == Block::mStickyPiston->mID);	
-// 	case BlockEntityType::MovingBlock:
-// 		return make_unique<MovingBlockEntity>(pos);
-// 	case BlockEntityType::EndPortal:
-// 		return make_unique<EndPortalBlockEntity>(pos);
-// 	case BlockEntityType::EnderChest:
-// 		return make_unique<ChestBlockEntity>(BlockEntityType::EnderChest, "EnderChest", TR_ENDERCHEST_RENDERER, pos);
-// 	case BlockEntityType::EndGateway:
-// 		return make_unique<EndGatewayBlockEntity>(pos);
-// 	case BlockEntityType::StructureBlock:
-// 		return make_unique<StructureBlockEntity>(pos);
-// 	case BlockEntityType::Chalkboard:
-// 		return make_unique<ChalkboardBlockEntity>(pos);
-// 	default:
-// 		LOGE("Can't find TileEntity of type: %d\n", static_cast<int>(type));
-// 		return nullptr;
-// 	}
-
-	return nullptr;
+	switch (type) {
+	case BlockEntityType::Furnace:
+		return make_unique<FurnaceBlockEntity>(pos);
+	case BlockEntityType::Chest:
+		return make_unique<ChestBlockEntity>(BlockEntityType::Chest, "Chest", TR_CHEST_RENDERER, pos);
+	case BlockEntityType::Sign:
+		return make_unique<SignBlockEntity>(pos);
+	case BlockEntityType::NetherReactor:
+		return make_unique<NetherReactorBlockEntity>(pos);
+	default:
+		return nullptr;
+	}
 }
 
 void BlockEntity::setId(BlockEntityType type, const std::string& id) {

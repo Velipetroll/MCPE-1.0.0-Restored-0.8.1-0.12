@@ -18,10 +18,10 @@ void InBedScreen::init() {
 
 void InBedScreen::setupPositions() {
 	if (mLeaveBedButton) {
-		mLeaveBedButton->posX = width / 2 - 100;
-		mLeaveBedButton->posY = height - 40;
-		mLeaveBedButton->width = 200;
-		mLeaveBedButton->height = 20;
+		mLeaveBedButton->width = width / 3;
+		mLeaveBedButton->height = static_cast<int>(static_cast<float>(height) * 0.15f);
+		mLeaveBedButton->posY = height - static_cast<int>(static_cast<double>(mLeaveBedButton->height) * 1.5);
+		mLeaveBedButton->posX = width / 2 - mLeaveBedButton->width / 2;
 	}
 }
 
@@ -30,14 +30,14 @@ void InBedScreen::tick() {
 	if (!context) return;
 	float dt = std::min(std::max(context->deltaTime, 0.001f), 0.05f);
 	mSleepTimer += dt;
-	if (mSleepTimer >= 2.0f) {
+	if (mSleepTimer >= 5.0f) { // 100 ticks at 20 TPS (1:1 0.8.1)
 		context->sleepCompleteRequested = true;
 		context->resumeGame();
 	}
 }
 
 void InBedScreen::render(int mouseX, int mouseY, float partialTicks) {
-	float progress = std::min(1.0f, mSleepTimer / 2.0f);
+	float progress = std::min(1.0f, mSleepTimer / 5.0f);
 	uint32_t alpha = static_cast<uint32_t>(96.0f + progress * 124.0f);
 	uint32_t fadeCol = (alpha << 24) | 0x050814;
 	fillGradient(0, 0, width, height, fadeCol, fadeCol);

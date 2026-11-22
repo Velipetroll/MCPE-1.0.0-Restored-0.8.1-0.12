@@ -9,7 +9,7 @@
 #include "world/level/Level.h"
 // #include "world/entity/item/FallingBlock.h"
 #include "world/level/BlockSource.h"
-// #include "world/level/BlockTickingQueue.h"
+#include "world/level/BlockTickingQueue.h"
 // #include "world/entity/ParticleType.h"
 #include "Core/Math/Color.h"
 // #include "world/entity/EntityFactory.h"
@@ -21,14 +21,15 @@ HeavyBlock::HeavyBlock(const std::string& nameId, int id, const Material& materi
 }
 
 void HeavyBlock::_scheduleCheck(BlockSource& region, const BlockPos& pos, const Block* oldBlock, int delay) const {
-// 	if (delay < 0 ) {
-// 		delay = getTickDelay() + region.getLevel().getRandom().nextInt(6);
-// 	}
-// 
-// 	auto& queue = *region.getTickQueue(pos);
-// 	if (!queue.isInstaticking()) {	//do not tick neighbors when instaticking
-// 		queue.add(region, pos, oldBlock->mID, delay );
-// 	}
+	if (delay < 0 ) {
+		delay = getTickDelay() + region.getLevel().getRandom().nextInt(6);
+	}
+
+	if (auto* queue = region.getTickQueue(pos)) {
+		if (!queue->isInstaticking()) {	//do not tick neighbors when instaticking
+			queue->add(region, pos, oldBlock->mID, delay );
+		}
+	}
 }
 
 void HeavyBlock::_scheduleCheckIfSliding(BlockSource& region, const BlockPos& pos, const Block* oldBlock) const {
@@ -59,20 +60,20 @@ void HeavyBlock::_tickBlocksAround2D(BlockSource& region, const BlockPos& pos, c
 	_scheduleCheckIfSliding(region, pos.south(), oldBlock);
 }
 
+static HeavyBlock::StartFallingCallback gStartFallingCallback;
+
+void HeavyBlock::setStartFallingCallback(StartFallingCallback cb) {
+	gStartFallingCallback = std::move(cb);
+}
+
 void HeavyBlock::startFalling(BlockSource& region, const BlockPos& pos, const Block* oldBlock, bool creative) const {
-// 	Vec3 fpos = Vec3(pos) + 0.5f;
-// 
-// 	Unique<Entity> result = EntityFactory::createSpawnedEntity(EntityType::FallingBlock, nullptr, fpos, Vec2::ZERO);
-// 	if (result) {
-// 		// Move block data to the entity
-// 		static_cast<FallingBlock*>(result.get())->setBlock(FullBlock(oldBlock->mID, region.getData(pos)), creative);
-// 		region.setBlockAndData(pos, FullBlock::AIR, Block::UPDATE_ALL);
-// 
-// 		_tickBlocksAround2D(region, pos.above(), oldBlock);
-// 		_tickBlocksAround2D(region, pos.below(), oldBlock);
-// 
-// 		region.getLevel().addEntity(region, std::move(result));
-// 	}
+	if (gStartFallingCallback && oldBlock) {
+		DataID data = region.getData(pos);
+		region.setBlockAndData(pos, FullBlock::AIR, Block::UPDATE_ALL);
+		_tickBlocksAround2D(region, pos.above(), oldBlock);
+		_tickBlocksAround2D(region, pos.below(), oldBlock);
+		gStartFallingCallback(region, pos, oldBlock, data, creative);
+	}
 }
 
 bool HeavyBlock::isFree(BlockSource& region, const BlockPos& pos) const {

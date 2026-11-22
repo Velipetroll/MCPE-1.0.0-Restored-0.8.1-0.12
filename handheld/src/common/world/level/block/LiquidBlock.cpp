@@ -7,7 +7,7 @@
 #include "world/level/block/LiquidBlock.h"
 #include "world/level/BlockSource.h"
 #include "world/level/material/Material.h"
-// #include "world/level/BlockTickingQueue.h"
+#include "world/level/BlockTickingQueue.h"
 #include "world/level/Level.h"
 #include "world/entity/Mob.h"
 #include "world/level/biome/Biome.h"
@@ -26,9 +26,11 @@ LiquidBlock::LiquidBlock(const std::string& nameId, int id, const Material& mate
 }
 
 void LiquidBlock::trySpreadFire(BlockSource& region, const BlockPos& pos, Random& random) const {
-// 	if (region.getTickQueue(pos)->isInstaticking()) {
-// 		return;
-// 	}
+	if (auto* tq = region.getTickQueue(pos)) {
+		if (tq->isInstaticking()) {
+			return;
+		}
+	}
 
 	const int r = 1;
 	static const BlockPos offsets[] = {
@@ -239,9 +241,11 @@ bool LiquidBlock::solidify(BlockSource& region, const BlockPos& pos, const Block
 			return false;
 		}
 
-// 		if (!region.getTickQueue(pos)->isInstaticking()) {
-// 			emitFizzParticle(region, pos);
-// 		}
+		if (auto* tq = region.getTickQueue(pos)) {
+			if (!tq->isInstaticking()) {
+				emitFizzParticle(region, pos);
+			}
+		}
 
 		return true;
 	}
