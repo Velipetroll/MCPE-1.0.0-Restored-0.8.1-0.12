@@ -5854,14 +5854,26 @@ void renderThreadStuff()
 							}
 						}
 						mce::TexturePtr atTex = texgroup.getTexture(ResourceLocation("atlas.terrain"));
-						if (atTex.get() && !sFlipbooks.empty()) {
+						static bool sFlipbooksWasOn = false;
+						bool animOn = gGuiOptions.animateTextures;
+						MobManager::sAnimateTextures = animOn;
+						if (atTex.get() && !sFlipbooks.empty() && (animOn || sFlipbooksWasOn)) {
+							bool resetToZero = !animOn && sFlipbooksWasOn;
+							sFlipbooksWasOn = animOn;
 							int mipCount = std::max(1, static_cast<int>(atTex->getDescription().mMipMapCount));
 							auto& rctx = mce::RenderContextImmediate::get();
 							for (auto& fe : sFlipbooks) {
-								if (++fe.tickAcc < fe.ticksPerFrame) continue;
-								fe.tickAcc = 0;
-								fe.seqIdx = (fe.seqIdx + 1) % fe.frameSeq.size();
-								int f = fe.frameSeq[fe.seqIdx];
+								int f = 0;
+								if (resetToZero) {
+									fe.tickAcc = 0;
+									fe.seqIdx = 0;
+									f = 0;
+								} else {
+									if (++fe.tickAcc < fe.ticksPerFrame) continue;
+									fe.tickAcc = 0;
+									fe.seqIdx = (fe.seqIdx + 1) % fe.frameSeq.size();
+									f = fe.frameSeq[fe.seqIdx];
+								}
 								const uint8_t* srcFrame = fe.rgba.data() + static_cast<size_t>(f * fe.frameW * fe.frameW * 4);
 								std::vector<uint8_t> scaled(static_cast<size_t>(fe.tileW * fe.tileH * 4));
 								for (int y = 0; y < fe.tileH; ++y) {
@@ -7039,7 +7051,7 @@ void renderThreadStuff()
 					glDisable(GL_DEPTH_TEST);
 					glDisable(GL_CULL_FACE);
 					glColor4f(1.0f, 1.0f, 1.0f, 0.9f);
-					int frame = (static_cast<int>(glfwGetTime() * 20.0) & 31);
+					int frame = gGuiOptions.animateTextures ? (static_cast<int>(glfwGetTime() * 20.0) & 31) : 0;
 					float v0 = static_cast<float>(frame) / 32.0f;
 					float v1 = static_cast<float>(frame + 1) / 32.0f;
 					for (int i = 0; i < 2; ++i) {

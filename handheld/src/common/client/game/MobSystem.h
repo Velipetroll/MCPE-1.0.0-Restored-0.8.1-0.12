@@ -142,6 +142,8 @@ public:
 	            const glm::mat4& view,
 	            float sunFactor) const;
 
+	static bool sAnimateTextures;
+
 private:
 	int mNextId = 1;
 	float mSpawnTimer = 1.0f;

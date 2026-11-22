@@ -933,6 +933,8 @@ AABB WorldMobEntity::getAABB() const {
 	return AABB(pos.x - hw, pos.y, pos.z - hw, pos.x + hw, pos.y + height(), pos.z + hw);
 }
 
+bool MobManager::sAnimateTextures = true;
+
 void MobManager::clear() {
 	mobs.clear();
 	arrows.clear();
@@ -2253,7 +2255,7 @@ void MobManager::render(BlockSource& region,
 				glAlphaFunc(GL_GREATER, 0.1f);
 				glDisable(GL_CULL_FACE);
 				glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-				int frame = (static_cast<int>(m.age * 20.0f) & 31);
+				int frame = sAnimateTextures ? (static_cast<int>(m.age * 20.0f) & 31) : 0;
 				float v0 = static_cast<float>(frame) / 32.0f;
 				float v1 = static_cast<float>(frame + 1) / 32.0f;
 				float h = (m.height() / std::max(0.1f, s));
