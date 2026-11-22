@@ -3716,6 +3716,7 @@ void renderWorldSteve3D(const Camera& c,
 	steveModel.holdingRight = hasHeld;
 	steveModel.sneaking = sneaking;
 	steveModel.isUsingBow = isUsingBow;
+	steveModel.isRiding = (c.ridingMinecartId != 0);
 	steveModel.render(c.mWalkAnimPos, c.mWalkAnimSpeed, bobTicks, netHeadYaw, headPitch, kPxScale, lightShade);
 
 	// 2. Equipped Armor passes (PlayerRenderer::prepareArmor L59-86, 4 passes: 0=helmet, 1=chestplate, 2=leggings, 3=boots)
@@ -3737,6 +3738,7 @@ void renderWorldSteve3D(const Camera& c,
 		am.holdingRight = steveModel.holdingRight;
 		am.sneaking = steveModel.sneaking;
 		am.isUsingBow = steveModel.isUsingBow;
+		am.isRiding = steveModel.isRiding;
 		am.render(c.mWalkAnimPos, c.mWalkAnimSpeed, bobTicks, netHeadYaw, headPitch, kPxScale, lightShade);
 	}
 
