@@ -4899,33 +4899,38 @@ void renderThreadStuff()
 						}
 					}
 
+					if (!handledRightClick && hasTargetHit && Item::mMobPlacer && !held.isNull() && held.getStackSize() > 0 && held.getItem() == Item::mMobPlacer) {
+						BlockPos hitPos = targetHit.getBlock();
+						FacingID face = targetHit.getFacing();
+						if (face < Facing::MAX) {
+							BlockPos spawnBlock = hitPos + Facing::DIRECTION[face];
+							float yOff = (face == Facing::UP && Block::mFence && region.getBlockID(hitPos) == Block::mFence->mID) ? 0.5f : 0.0f;
+							MobType eggType = MobType::Pig;
+							bool validEgg = true;
+							switch (held.getAuxValue()) {
+								case 10: eggType = MobType::Chicken; break;
+								case 11: eggType = MobType::Cow; break;
+								case 12: eggType = MobType::Pig; break;
+								case 13: eggType = MobType::Sheep; break;
+								case 32: eggType = MobType::Zombie; break;
+								case 33: eggType = MobType::Creeper; break;
+								case 34: eggType = MobType::Skeleton; break;
+								default: validEgg = false; break;
+							}
+							if (validEgg && mobManager.spawnMobAt(eggType, spawnBlock.x + 0.5f, spawnBlock.y + yOff, spawnBlock.z + 0.5f)) {
+								if (!gGuiContext.isCreative) {
+									held.remove(1);
+									if (held.getStackSize() <= 0) held.setNull();
+								}
+								handledRightClick = true;
+							}
+						}
+					}
+
 					if (!handledRightClick && hasTargetHit && !held.isNull() && held.getStackSize() > 0 && held.isBlock()) {
 						BlockPos hitPos = targetHit.getBlock();
 						FacingID face = targetHit.getFacing();
 						if (face < Facing::MAX) {
-							if (!handledRightClick && Item::mMobPlacer && !held.isNull() && held.getItem() == Item::mMobPlacer) {
-								BlockPos spawnBlock = hitPos + Facing::DIRECTION[face];
-								float yOff = (face == Facing::UP && Block::mFence && region.getBlockID(hitPos) == Block::mFence->mID) ? 0.5f : 0.0f;
-								MobType eggType = MobType::Pig;
-								bool validEgg = true;
-								switch (held.getAuxValue()) {
-									case 10: eggType = MobType::Chicken; break;
-									case 11: eggType = MobType::Cow; break;
-									case 12: eggType = MobType::Pig; break;
-									case 13: eggType = MobType::Sheep; break;
-									case 32: eggType = MobType::Zombie; break;
-									case 33: eggType = MobType::Creeper; break;
-									case 34: eggType = MobType::Skeleton; break;
-									default: validEgg = false; break;
-								}
-								if (validEgg && mobManager.spawnMobAt(eggType, spawnBlock.x + 0.5f, spawnBlock.y + yOff, spawnBlock.z + 0.5f)) {
-									if (!gGuiContext.isCreative) {
-										held.remove(1);
-										if (held.getStackSize() <= 0) held.setNull();
-									}
-									handledRightClick = true;
-								}
-							}
 							const Block* placeBlock = held.getBlock();
 							BlockPos placePos = hitPos + Facing::DIRECTION[face];
 
