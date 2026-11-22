@@ -4363,7 +4363,7 @@ void renderThreadStuff()
 			bool hasTargetHit = false;
 			bool mobInFront = false;
 			syncCursorLock();
-			if (gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
+			if (gGuiContext.state == GameState::InGame && !isPausedByScreen) {
 				c.UpdateCam(deltaTime);
 
 				float survDt = std::min(std::max(deltaTime, 0.0001f), 0.1f);
