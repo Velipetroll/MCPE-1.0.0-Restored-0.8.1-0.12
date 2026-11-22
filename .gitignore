@@ -7,3 +7,4 @@ build/
 assets/
 reference/
 restore/Debug_Log.txt
+.agents/
