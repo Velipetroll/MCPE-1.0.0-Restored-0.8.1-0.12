@@ -21,12 +21,6 @@ void Gui::render(float partialTicks, int guiW, int guiH, Options* options, Font*
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-	if (ctx && ctx->hurtFlashTimer > 0.0f) {
-		float t = std::min(1.0f, ctx->hurtFlashTimer / 0.40f);
-		uint32_t alpha = static_cast<uint32_t>(t * 96.0f);
-		fill(0, 0, guiW, guiH, (alpha << 24) | 0x00CC1010);
-	}
-
 	renderCrosshair(guiW, guiH);
 	renderHotbar(guiW, guiH, font, ctx);
 	if (!ctx || !ctx->isCreative) {
@@ -49,10 +43,10 @@ void Gui::render(float partialTicks, int guiW, int guiH, Options* options, Font*
 
 bool Gui::handleHudClick(int guiX, int guiY, int guiW, int guiH, GuiContext* ctx) {
 	if (!ctx) return false;
-	// [...] button to the right of hotbar
-	int dotX = guiW / 2 - 91 + 182 + 2;
+	// [...] slot at the end of the hotbar (MCPE 0.8.1: numSlots = 10 -> sp = guiW/2 - 100)
+	int dotX = guiW / 2 - 100 + 180;
 	int dotY = guiH - 22;
-	if (guiX >= dotX && guiX < dotX + 20 && guiY >= dotY && guiY < dotY + 22) {
+	if (guiX >= dotX && guiX < dotX + 22 && guiY >= dotY && guiY < dotY + 22) {
 		if (ctx->isCreative) {
 			ctx->setScreen(new CreativeInventoryScreen());
 		} else {
@@ -111,39 +105,39 @@ void Gui::renderCrosshair(int guiW, int guiH) {
 }
 
 void Gui::renderHotbar(int guiW, int guiH, Font* font, GuiContext* ctx) {
-	int barW = 182;
-	int barH = 22;
-	int x = guiW / 2 - barW / 2;
-	int y = guiH - barH;
+	// MCPE 0.8.1 Gui::renderToolBar: 9 item slots + 1 [...] slot = 10 slots
+	const int numSlots = 10;
+	int sp = guiW / 2 - 10 * numSlots;
+	int sp2 = guiH - 22;
 
 	if (bindTexture("textures/gui/gui.png")) {
-		blit(x, y, 0, 0, barW, barH, 256, 256);
-		blit(x - 1 + selectedSlot * 20, y - 1, 0, 22, 24, 24, 256, 256);
+		glColor4f(1.0f, 1.0f, 1.0f, 0.65f);
+		blit(sp, sp2, 0, 0, 180, 22, 256, 256);
+		blit(sp + 180, sp2, 160, 0, 20, 22, 256, 256);
+		blit(sp + 20 * numSlots, sp2, 180, 0, 2, 22, 256, 256);
+		blit(sp - 1 + 20 * selectedSlot, sp2 - 1, 0, 22, 24, 22, 256, 256);
+		glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 	} else {
-		fill(x, y, x + barW, y + barH, 0xAA222222);
-		drawRect(x + selectedSlot * 20, y, x + (selectedSlot + 1) * 20, y + barH, 0xFFFFFFFF);
+		fill(sp, sp2, sp + 20 * numSlots + 2, sp2 + 22, 0xAA222222);
+		drawRect(sp + selectedSlot * 20, sp2, sp + (selectedSlot + 1) * 20, sp2 + 22, 0xFFFFFFFF);
 	}
 
 	if (ctx) {
-		for (int i = 0; i < 9; ++i) {
+		for (int i = 0; i < numSlots - 1; ++i) {
 			const ItemInstance& item = ctx->inventorySlots[static_cast<size_t>(i)];
 			if (!item.isNull()) {
-				drawItemInSlot(font, item, x + 3 + i * 20, y + 3);
+				drawItemInSlot(font, item, sp + 4 + i * 20, sp2 + 2);
 			}
 		}
 	}
 
-	// [...] button to the right of hotbar
-	int dotX = x + barW + 2;
+	// [...] icon in the last slot (MCPE 0.8.1: 10*NumSlots + v7/2 - 16, v8 - 13, 228, 248, 14, 4, 28, 8)
+	int dotIconX = 10 * numSlots + guiW / 2 - 16;
+	int dotIconY = guiH - 13;
 	if (bindTexture("textures/gui/gui.png")) {
-		blit(dotX, y, 0, 0, 20, 22, 256, 256);
-		blitScaled(dotX + 3, y + 9, 14, 4, 228, 248, 28, 8, 256, 256);
-	} else {
-		fill(dotX, y, dotX + 20, y + barH, 0x80222222);
-		drawRect(dotX, y, dotX + 20, y + barH, 0xFF808080);
-		if (font) {
-			drawCenteredString(font, "...", dotX + 10, y + 7, 0xFFE0E0E0);
-		}
+		blitScaled(dotIconX, dotIconY, 14, 4, 228, 248, 28, 8, 256, 256);
+	} else if (font) {
+		drawCenteredString(font, "...", dotIconX + 7, dotIconY - 2, 0xFFE0E0E0);
 	}
 }
 
