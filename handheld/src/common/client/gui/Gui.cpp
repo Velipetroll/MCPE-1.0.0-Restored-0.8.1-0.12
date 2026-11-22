@@ -48,9 +48,9 @@ bool Gui::handleHudClick(int guiX, int guiY, int guiW, int guiH, GuiContext* ctx
 	if (!ctx) return false;
 	if (!ctx->options || !ctx->options->useTouchUI) return false;
 	// [...] slot at the end of the hotbar (MCPE 0.8.1: numSlots = 10 -> sp = guiW/2 - 100)
-	int dotX = guiW / 2 - 100 + 180;
+	int dotX = guiW / 2 - 100 + 181;
 	int dotY = guiH - 22;
-	if (guiX >= dotX && guiX < dotX + 22 && guiY >= dotY && guiY < dotY + 22) {
+	if (guiX >= dotX && guiX < dotX + 20 && guiY >= dotY && guiY < dotY + 22) {
 		if (ctx->isCreative) {
 			ctx->setScreen(new CreativeInventoryScreen());
 		} else {
@@ -115,12 +115,14 @@ void Gui::renderHotbar(int guiW, int guiH, Font* font, GuiContext* ctx) {
 
 	if (bindTexture("textures/gui/gui.png")) {
 		glColor4f(1.0f, 1.0f, 1.0f, 0.65f);
-		blit(sp, sp2, 0, 0, 180, 22, 256, 256);
 		if (s_useTouchUI) {
-			blit(sp + 180, sp2, 160, 0, 20, 22, 256, 256);
+			blit(sp, sp2, 0, 0, 181, 22, 256, 256);
+			blit(sp + 181, sp2, 161, 0, 20, 22, 256, 256);
+			blit(sp + 201, sp2, 181, 0, 1, 22, 256, 256);
+		} else {
+			blit(sp, sp2, 0, 0, 182, 22, 256, 256);
 		}
-		blit(sp + 20 * numSlots, sp2, 180, 0, 2, 22, 256, 256);
-		blit(sp - 1 + 20 * selectedSlot, sp2 - 1, 0, 22, 24, 22, 256, 256);
+		blit(sp - 1 + 20 * selectedSlot, sp2 - 1, 0, 22, 24, 24, 256, 256);
 		glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 	} else {
 		fill(sp, sp2, sp + 20 * numSlots + 2, sp2 + 22, 0xAA222222);
