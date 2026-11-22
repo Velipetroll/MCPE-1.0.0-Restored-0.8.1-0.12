@@ -4584,7 +4584,8 @@ void renderThreadStuff()
 				mobInFront = (targetMobIdx >= 0 && (!hasTargetHit || mobHitDist <= blockHitDist));
 
 				bool attackedMobThisClick = false;
-				if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
+				bool allowWorldInput = (gGuiContext.currentScreen == nullptr);
+				if (allowWorldInput && glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
 					c.triggerSwing();
 					if (mobInFront) {
 						ToolInfo ti = getToolInfo(held);
@@ -4723,7 +4724,7 @@ void renderThreadStuff()
 					}
 				};
 
-				if (!attackedMobThisClick && glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
+				if (allowWorldInput && !attackedMobThisClick && glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
 					int pIdx = PaintingSystem::raycastPainting(
 						Vec3(c.mPos.x, c.mPos.y, c.mPos.z),
 						Vec3(c.cameraFront.x, c.cameraFront.y, c.cameraFront.z),
@@ -4740,7 +4741,7 @@ void renderThreadStuff()
 					}
 				}
 
-				if (!attackedMobThisClick && !mobInFront && hasTargetHit && glinput.MouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
+				if (allowWorldInput && !attackedMobThisClick && !mobInFront && hasTargetHit && glinput.MouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
 					BlockPos hitPos = targetHit.getBlock();
 					FullBlock fb = region.getBlockAndData(hitPos);
 					const Block* block = fb.id > 0 ? Block::mBlocks[fb.id] : nullptr;
@@ -4762,7 +4763,8 @@ void renderThreadStuff()
 								c.triggerSwing();
 							}
 							if (mineInfo.breakTime <= 0.0f) {
-								if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
+								bool allowWorldInput = (gGuiContext.currentScreen == nullptr);
+				if (allowWorldInput && glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
 									performBreakBlock(hitPos, fb, block, mineInfo.canHarvest);
 									miningProgress = 0.0f;
 								}
@@ -4815,7 +4817,7 @@ void renderThreadStuff()
 				// Bow pull & release
 				{
 					bool holdingBow = (Item::mBow && !held.isNull() && held.getItem() == Item::mBow);
-					bool rightHeld = (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS);
+					bool rightHeld = allowWorldInput && (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS);
 					auto findArrowSlot = [&]() -> int {
 						if (!Item::mArrow) return -1;
 						for (size_t si = 0; si < gGuiContext.inventorySlots.size(); ++si) {
@@ -4863,7 +4865,7 @@ void renderThreadStuff()
 					}
 				}
 
-				if (glinput.NewMouseDown(GLFW_MOUSE_BUTTON_RIGHT)) {
+				if (allowWorldInput && glinput.NewMouseDown(GLFW_MOUSE_BUTTON_RIGHT)) {
 					bool handledRightClick = false;
 					if (mobInFront && !held.isNull() && held.getStackSize() > 0) {
 						if (Item::mShears && held.getItem() == Item::mShears) {
