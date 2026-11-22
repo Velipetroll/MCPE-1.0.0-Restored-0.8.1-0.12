@@ -340,6 +340,8 @@ public:
 	float mBodyYaw = 0.0f;
 	float mPrevBodyYaw = 0.0f;
 	float mCurrBodyYaw = 0.0f;
+	int mNextStepSound = 1;
+	bool mWasInWater = false;
 	bool mWasJumpHeld = false;
 	int mFlyToggleTicks = 0;
 
@@ -395,6 +397,10 @@ public:
 		mPrevWalkAnimPos = mCurrWalkAnimPos = mWalkAnimPos = 0.0f;
 		mPrevWalkAnimSpeed = mCurrWalkAnimSpeed = mWalkAnimSpeed = 0.0f;
 		mPrevBodyYaw = mCurrBodyYaw = mBodyYaw = static_cast<float>(yawIn);
+		mNextStepSound = 1;
+		mWasInWater = false;
+		mWasJumpHeld = false;
+		mFlyToggleTicks = 0;
 		mTickAccum = 0.0f;
 		mPosDelta = Vec3(0.0f, 0.0f, 0.0f);
 		mFallDistance = 0.0f;
@@ -432,6 +438,10 @@ public:
 		mPrevWalkAnimPos = mCurrWalkAnimPos = mWalkAnimPos = 0.0f;
 		mPrevWalkAnimSpeed = mCurrWalkAnimSpeed = mWalkAnimSpeed = 0.0f;
 		mPrevBodyYaw = mCurrBodyYaw = mBodyYaw = static_cast<float>(yaw);
+		mNextStepSound = 1;
+		mWasInWater = false;
+		mWasJumpHeld = false;
+		mFlyToggleTicks = 0;
 		mTickAccum = 0.0f;
 		mPosDelta = Vec3(0.0f, 0.0f, 0.0f);
 		mFallDistance = 0.0f;
@@ -447,35 +457,150 @@ public:
 		mPos = glm::vec3(x, eyeY, z);
 		mPrevPos = mCurrPos = mPos;
 		mPrevFeetY = mCurrFeetY = mRenderFeetY = feetY;
+		mSlideOffset = Vec3(0.0f, 0.0f, 0.0f);
 		mTickAccum = 0.0f;
 		mPosDelta = Vec3(0.0f, 0.0f, 0.0f);
 		mFallDistance = 0.0f;
 	}
 
-	bool isInWater()
+	// Exact 1:1 MCPE 0.8.1 Entity::isInWater() + Level::checkAndHandleWater() (Entity.cpp L1167-1189, Level.cpp L173-234)
+	bool isInWater(bool applyFlow = true)
 	{
-		int bx = Math::floor(mCurrPos.x);
-		int by = Math::floor(mBB.min.y + 0.3f);
-		int bz = Math::floor(mCurrPos.z);
-		return getRegion().getMaterial(bx, by, bz).isType(MaterialType::Water);
+		AABB v10(mBB.min.x, mBB.min.y + 0.4f, mBB.min.z,
+		         mBB.max.x, mBB.max.y - 0.4f, mBB.max.z);
+		BlockSource& reg = getRegion();
+		int v7 = Math::floor(v10.min.x);
+		int v21 = Math::floor(v10.max.x + 1.0f);
+		int v8 = Math::floor(v10.min.y);
+		int v20 = Math::floor(v10.max.y + 1.0f);
+		int v22 = Math::floor(v10.min.z);
+		int v23 = Math::floor(v10.max.z + 1.0f);
+		bool v9 = false;
+		Vec3 v25(0.0f, 0.0f, 0.0f);
+		for (int x = v7; x < v21; ++x) {
+			for (int i = v8; i < v20; ++i) {
+				for (int j = v22; j < v23; ++j) {
+					BlockID bid = reg.getBlockID(x, i, j);
+					const Block* blk = (bid > 0) ? Block::mBlocks[bid] : nullptr;
+					if (blk && blk->getMaterial().isType(MaterialType::Water)) {
+						int v11 = reg.getData(x, i, j);
+						if (v11 > 7) v11 = 0;
+						if (static_cast<float>(v20) >= (static_cast<float>(i + 1) - (static_cast<float>(v11 + 1) / 9.0f))) {
+							if (applyFlow) {
+								blk->handleEntityInside(reg, BlockPos(x, i, j), nullptr, v25);
+							}
+							v9 = true;
+						}
+					}
+				}
+			}
+		}
+		if (applyFlow) {
+			float v14 = std::sqrt(v25.x * v25.x + v25.y * v25.y + v25.z * v25.z);
+			if (v14 > 0.0f) {
+				float v15 = 0.004f / v14;
+				mPosDelta.x += v15 * v25.x;
+				mPosDelta.y += v15 * v25.y;
+				mPosDelta.z += v15 * v25.z;
+			}
+		}
+		return v9;
 	}
 
-	void checkFallDamage(float dy, bool onGround)
+	// Exact 1:1 MCPE 0.8.1 Entity::isInLava() + Level::containsMaterial() (Entity.cpp L1190-1214, Level.cpp L597-638)
+	bool isInLava()
 	{
-		if (mIsFlying || gGuiContext.isCreative || isInWater()) {
-			mFallDistance = 0.0f;
-			return;
-		}
-		if (onGround) {
-			if (mFallDistance > 0.0f) {
-				int damage = static_cast<int>(std::ceil(mFallDistance - 3.0f));
-				if (damage > 0) {
-					gGuiContext.applyDamage(damage, false);
+		AABB v11(mBB.min.x + 0.1f, mBB.min.y + 0.4f, mBB.min.z + 0.1f,
+		         mBB.max.x - 0.1f, mBB.max.y - 0.4f, mBB.max.z - 0.1f);
+		return getRegion().containsMaterial(v11, MaterialType::Lava);
+	}
+
+	// Exact 1:1 MCPE 0.8.1 Mob::onLadder() (Mob.cpp L835-844)
+	bool onLadder()
+	{
+		int v2 = Math::floor(mCurrPos.x);
+		int v3 = Math::floor(mBB.min.y);
+		int v4 = Math::floor(mCurrPos.z);
+		BlockSource& reg = getRegion();
+		BlockID ladderId = Block::mLadder ? Block::mLadder->mID : BlockID(65);
+		return reg.getBlockID(v2, v3, v4) == ladderId || reg.getBlockID(v2, v3 + 1, v4) == ladderId;
+	}
+
+	// Exact 1:1 MCPE 0.8.1 Entity::isFree(x, y, z) (Entity.cpp L1122-1150)
+	bool isFree(float dx, float dy, float dz)
+	{
+		AABB v17 = mBB.cloneMove(Vec3(dx, dy, dz));
+		BlockSource& reg = getRegion();
+		return reg.fetchCollisionShapes(reg, v17, nullptr, false, nullptr).empty() && !reg.containsAnyLiquid(v17);
+	}
+
+	// Exact 1:1 MCPE 0.8.1 Entity::checkTileCollisions() (Entity.cpp L111-146)
+	void checkTileCollisions()
+	{
+		int minX = Math::floor(mBB.min.x);
+		int minY = Math::floor(mBB.min.y);
+		int minZ = Math::floor(mBB.min.z);
+		int maxX = Math::floor(mBB.max.x);
+		int maxY = Math::floor(mBB.max.y);
+		int maxZ = Math::floor(mBB.max.z);
+		BlockSource& reg = getRegion();
+		BlockID webId = Block::mWeb ? Block::mWeb->mID : BlockID(30);
+		for (int x = minX; x <= maxX; ++x) {
+			for (int y = minY; y <= maxY; ++y) {
+				for (int z = minZ; z <= maxZ; ++z) {
+					BlockID bid = reg.getBlockID(x, y, z);
+					if (bid == webId) {
+						// WebTile::entityInside -> Entity::makeStuckInWeb() (Entity.cpp L1252-1255)
+						mIsStuckInWeb = true;
+						mFallDistance = 0.0f;
+					}
 				}
-				mFallDistance = 0.0f;
 			}
-		} else if (dy < 0.0f) {
-			mFallDistance -= dy;
+		}
+	}
+
+	// Exact 1:1 MCPE 0.8.1 Entity::checkFallDamage() + Mob::causeFallDamage() (Entity.cpp L1600-1634, Mob.cpp L749-776)
+	void checkFallDamage(float fdChange, bool onGroundNow)
+	{
+		if (onGroundNow) {
+			if (mFallDistance <= 0.0f) {
+				return;
+			}
+			BlockSource& reg = getRegion();
+			int x = Math::floor(mCurrPos.x);
+			int y = Math::floor(mCurrPos.y - 0.2f - mHeightOffset);
+			int z = Math::floor(mCurrPos.z);
+			BlockID tileID = reg.getBlockID(x, y, z);
+			BlockID fenceId = Block::mFence ? Block::mFence->mID : BlockID(85);
+			if (tileID == 0) {
+				if (reg.getBlockID(x, y - 1, z) == fenceId) {
+					tileID = reg.getBlockID(x, y - 1, z);
+				}
+			}
+			// FarmTile::fallOn(level, x, y, z, this, fallDistance) (FarmTile.cpp L86-90)
+			if (tileID > 0 && Block::mFarmland && tileID == Block::mFarmland->mID) {
+				if (reg.getLevel().getRandom().nextFloat() < (mFallDistance - 0.5f)) {
+					BlockID dirtId = Block::mDirt ? Block::mDirt->mID : BlockID(3);
+					reg.setBlock(x, y, z, dirtId, Block::UPDATE_ALL);
+				}
+			}
+			// Mob::causeFallDamage(fallDistance) (Mob.cpp L760-775)
+			int v3 = static_cast<int>(std::ceil(mFallDistance - 3.0f));
+			if (v3 > 0 && !gGuiContext.isCreative && !mIsFlying) {
+				SoundEngine::play(SoundEngine::SND_HURT, 0.75f, 1.0f);
+				int dealt = gGuiContext.applyDamage(v3, false);
+				if (dealt > 0) {
+					mHurtTime = 10;
+					mHurtDuration = 10;
+					mHurtDir = static_cast<float>((std::rand() % 2) * 180);
+				}
+				if (tileID > 0) {
+					SoundEngine::play(SoundEngine::SND_STEP, 0.5f, 0.75f);
+				}
+			}
+			mFallDistance = 0.0f;
+		} else if (fdChange < 0.0f) {
+			mFallDistance -= fdChange;
 		}
 	}
 
@@ -484,6 +609,7 @@ public:
 		return glinput.KeyDown(GLFW_KEY_LEFT_SHIFT) || glinput.KeyDown(GLFW_KEY_RIGHT_SHIFT);
 	}
 
+	// Exact 1:1 MCPE 0.8.1 Entity::moveRelative(fw, sf, speed) (Entity.cpp L791-814)
 	void moveRelative(float strafe, float forward, float speed)
 	{
 		float dist = std::sqrt(strafe * strafe + forward * forward);
@@ -511,21 +637,25 @@ public:
 		mPrevWalkAnimSpeed = mCurrWalkAnimSpeed;
 		mPrevBodyYaw = mCurrBodyYaw;
 
-		if (gGuiContext.isCreative) {
-			if (mOnGround && mIsFlying) {
-				mIsFlying = false;
-			}
+		// Entity::baseTick() (Entity.cpp L893-929): check water, reset fallDistance
+		if (isInWater(true)) {
+			mFallDistance = 0.0f;
+			mWasInWater = true;
 		} else {
-			mIsFlying = false;
+			mWasInWater = false;
 		}
-		mNoGravity = mIsFlying;
 
-		bool inWater = !mIsFlying && isInWater();
-		bool usingItemSlow = gBowPulling || (gItemUseSlowTimer > 0.0f);
-		bool sprinting = !usingItemSlow && (glinput.KeyDown(GLFW_KEY_LEFT_CONTROL) || glinput.KeyDown(GLFW_KEY_RIGHT_CONTROL));
-		bool sneaking = !mIsFlying && isSneaking();
+		// LocalPlayer::aiStep() (LocalPlayer.cpp L400-458)
+		if (mFlyToggleTicks > 0) --mFlyToggleTicks;
+		bool prevJumpHeld = mWasJumpHeld;
+		bool jumpHeld = glinput.KeyDown(GLFW_KEY_SPACE);
+		mWasJumpHeld = jumpHeld;
 
-		// LocalPlayer::aiStep + KeyboardInput::tick
+		bool sneaking = isSneaking();
+		if (sneaking && mSlideOffset.y < 0.2f) {
+			mSlideOffset.y = 0.2f;
+		}
+
 		float moveStrafe = 0.0f;
 		float moveForward = 0.0f;
 		if (glinput.KeyDown(GLFW_KEY_W)) moveForward += 1.0f;
@@ -533,34 +663,58 @@ public:
 		if (glinput.KeyDown(GLFW_KEY_A)) moveStrafe -= 1.0f;
 		if (glinput.KeyDown(GLFW_KEY_D)) moveStrafe += 1.0f;
 
+		// KeyboardInput::tick() (KeyboardInput.cpp L38-41): sneaking multiplies strafeInput & forwardInput by 0.3f
 		if (sneaking) {
 			moveStrafe *= 0.3f;
 			moveForward *= 0.3f;
 		}
+
+		// LocalPlayer::aiStep() L413-447: fly toggle & flying vertical velocity
+		float flyIdleMod = 1.0f;
+		if (gGuiContext.isCreative) {
+			if (!prevJumpHeld && jumpHeld) {
+				if (mFlyToggleTicks > 0) {
+					mIsFlying = !mIsFlying;
+					mFlyToggleTicks = 0;
+				} else {
+					mFlyToggleTicks = 7;
+				}
+			}
+			if (mIsFlying) {
+				float maxIn = std::max(std::abs(moveStrafe), std::abs(moveForward));
+				if (maxIn < 0.01f) {
+					flyIdleMod = 0.75f;
+				}
+				if (jumpHeld) {
+					mPosDelta.y += 0.15f;
+				}
+				if (sneaking) {
+					mPosDelta.y -= 0.15f;
+				}
+			}
+		} else {
+			mIsFlying = false;
+		}
+		mNoGravity = mIsFlying;
+
+		// LocalPlayer::aiStep() L448-451: using item multiplies strafeInput & forwardInput by 0.35f
+		bool usingItemSlow = gBowPulling || (gItemUseSlowTimer > 0.0f);
 		if (usingItemSlow) {
 			moveStrafe *= 0.35f;
 			moveForward *= 0.35f;
 		}
 
-		float flyIdleMod = 1.0f;
-		if (mIsFlying) {
-			float maxIn = std::max(std::abs(moveStrafe), std::abs(moveForward));
-			if (maxIn < 0.01f) {
-				flyIdleMod = 0.75f;
-			}
-			if (glinput.KeyDown(GLFW_KEY_SPACE)) mPosDelta.y += 0.15f;
-			if (isSneaking()) mPosDelta.y -= 0.15f;
-		}
-
-		// Mob::aiStep jump + input damping
-		if (glinput.KeyDown(GLFW_KEY_SPACE) && !mIsFlying) {
-			if (inWater) {
+		// Mob::aiStep() (Mob.cpp L1117-1133)
+		bool v7 = isInWater(true);
+		bool v8 = isInLava();
+		if (jumpHeld) {
+			if (v7 || v8) {
 				mPosDelta.y += 0.04f;
 			} else if (mOnGround) {
+				// Mob::jumpFromGround() (Mob.cpp L1355-1357)
 				mPosDelta.y = 0.42f;
-				mOnGround = false;
 				if (!gGuiContext.isCreative) {
-					gGuiContext.exhaustion += sprinting ? 0.6f : 0.25f;
+					gGuiContext.exhaustion += 0.2f;
 				}
 			}
 		}
@@ -570,77 +724,111 @@ public:
 		float prevX = mCurrPos.x;
 		float prevZ = mCurrPos.z;
 
-		// Player::travel / Mob::travel (1:1 MCPE 0.8.1)
-		if (inWater) {
-			float startY = mCurrFeetY;
-			moveRelative(moveStrafe, moveForward, 0.02f);
-			move(mPosDelta);
-			mPosDelta.x *= 0.8f;
-			mPosDelta.y = mPosDelta.y * 0.8f - 0.02f;
-			mPosDelta.z *= 0.8f;
-			mFallDistance = 0.0f;
-			if (mHorizontalCollision &&
-			    mRegion->fetchCollisionShapes(getRegion(),
-			        mBB.cloneMove(Vec3(mPosDelta.x, mPosDelta.y + 0.6f - (mCurrFeetY - startY), mPosDelta.z)),
-			        nullptr, false, nullptr).empty()) {
-				mPosDelta.y = 0.3f;
+		// Player::travel / Mob::travel (Player.cpp L789-800, Mob.cpp L930-1046)
+		auto runMobTravel = [&](float jumpMovFactor) {
+			if (isInWater(true)) {
+				float startPosY = mCurrPos.y;
+				moveRelative(moveStrafe, moveForward, 0.02f);
+				move(mPosDelta);
+				mPosDelta.y = (mPosDelta.y * 0.8f) - 0.02f;
+				mPosDelta.x *= 0.8f;
+				mPosDelta.z *= 0.8f;
+				if (mHorizontalCollision) {
+					if (isFree(mPosDelta.x, ((mPosDelta.y + 0.6f) - mCurrPos.y) + startPosY, mPosDelta.z)) {
+						mPosDelta.y = 0.3f;
+					}
+				}
+				return;
 			}
-		} else if (mIsFlying) {
-			float savedY = mPosDelta.y;
-			float airAcc = sprinting ? 0.075f : 0.05f;
-			moveRelative(moveStrafe, moveForward, airAcc);
-			move(mPosDelta);
-			mPosDelta.y = savedY * 0.6f;
-			float drag = 0.91f * flyIdleMod;
-			mPosDelta.x *= drag;
-			mPosDelta.z *= drag;
-		} else {
+			if (isInLava()) {
+				float startPosY = mCurrPos.y;
+				moveRelative(moveStrafe, moveForward, 0.02f);
+				move(mPosDelta);
+				mPosDelta.y = (mPosDelta.y * 0.5f) - 0.02f;
+				mPosDelta.x *= 0.5f;
+				mPosDelta.z *= 0.5f;
+				if (mHorizontalCollision) {
+					if (isFree(mPosDelta.x, ((mPosDelta.y + 0.6f) - mCurrPos.y) + startPosY, mPosDelta.z)) {
+						mPosDelta.y = 0.3f;
+					}
+				}
+				return;
+			}
+
 			float friction = 0.91f;
 			if (mOnGround) {
-				friction = 0.6f * 0.91f;
-				BlockID t = getRegion().getBlockID(
+				BlockID v21 = getRegion().getBlockID(
 					Math::floor(mCurrPos.x),
 					Math::floor(mBB.min.y - 0.5f),
 					Math::floor(mCurrPos.z)
 				);
-				if (t > 0 && Block::mBlocks[t]) {
-					friction = Block::mBlocks[t]->getFriction() * 0.91f;
+				if (v21 <= 0 || !Block::mBlocks[v21]) {
+					friction = 0.546f;
+				} else {
+					friction = Block::mBlocks[v21]->getFriction() * 0.91f;
 				}
 			}
-			float baseSpeed = 0.1f; // Player::getBaseSpeed() * Player::getWalkingSpeedModifier()
-			if (sprinting) baseSpeed *= 1.3f;
+
+			// Player::getBaseSpeed() = 0.1f, Player::getWalkingSpeedModifier() = 1.0f
+			float speed = 0.1f;
+			float modifier = 1.0f;
 			float acc = mOnGround
-				? (baseSpeed * (0.16277f / (friction * friction * friction)))
-				: (sprinting ? 0.026f : 0.02f);
+				? ((speed * modifier) * (0.16277f / (friction * friction * friction)))
+				: jumpMovFactor;
 			moveRelative(moveStrafe, moveForward, acc);
 
-			float postFriction = 0.91f;
+			float v32 = 0.91f;
 			if (mOnGround) {
-				postFriction = 0.6f * 0.91f;
-				BlockID t = getRegion().getBlockID(
+				BlockID v31 = getRegion().getBlockID(
 					Math::floor(mCurrPos.x),
 					Math::floor(mBB.min.y - 0.5f),
 					Math::floor(mCurrPos.z)
 				);
-				if (t > 0 && Block::mBlocks[t]) {
-					postFriction = Block::mBlocks[t]->getFriction() * 0.91f;
+				if (v31 <= 0 || !Block::mBlocks[v31]) {
+					v32 = 0.546f;
+				} else {
+					v32 = Block::mBlocks[v31]->getFriction() * 0.91f;
 				}
 			}
+
+			if (onLadder()) {
+				mFallDistance = 0.0f;
+				if (mPosDelta.y < -0.15f) {
+					mPosDelta.y = -0.15f;
+				}
+				if (isSneaking() && mPosDelta.y < 0.0f) {
+					mPosDelta.y = 0.0f;
+				}
+			}
+
 			move(mPosDelta);
+
+			if (mHorizontalCollision && onLadder()) {
+				mPosDelta.y = 0.2f;
+			}
+
 			mPosDelta.y = (mPosDelta.y - 0.08f) * 0.98f;
-			float horizDrag = postFriction * flyIdleMod;
-			mPosDelta.x *= horizDrag;
-			mPosDelta.z *= horizDrag;
+			float v34 = v32 * flyIdleMod;
+			mPosDelta.x *= v34;
+			mPosDelta.z *= v34;
+		};
+
+		if (mIsFlying) {
+			float savedMotionY = mPosDelta.y;
+			runMobTravel(0.05f);
+			mPosDelta.y = savedMotionY * 0.6f;
+		} else {
+			runMobTravel(0.02f);
 		}
 
 		float stepDx = mCurrPos.x - prevX;
 		float stepDz = mCurrPos.z - prevZ;
 		float horizStep = std::sqrt(stepDx * stepDx + stepDz * stepDz);
-		mCurrWalkDist += horizStep * 0.6f;
 		if (!gGuiContext.isCreative && !mIsFlying && horizStep > 0.0005f) {
-			float moveRate = sprinting ? 0.14f : (inWater ? 0.09f : 0.07f);
+			float moveRate = v7 ? 0.09f : 0.07f;
 			gGuiContext.exhaustion += horizStep * moveRate;
 		}
+		// Player::aiStep() (Player.cpp L821-848)
 		float v2 = std::sqrt(mPosDelta.x * mPosDelta.x + mPosDelta.z * mPosDelta.z);
 		if (v2 > 0.1f) v2 = 0.1f;
 		if (!mOnGround || gGuiContext.health <= 0) v2 = 0.0f;
@@ -657,7 +845,7 @@ public:
 		};
 		float headYawDeg = static_cast<float>(yaw);
 		float targetBodyYaw = mCurrBodyYaw;
-		if (horizStep > 0.02f) {
+		if (horizStep > 0.05f) {
 			targetBodyYaw = std::atan2(stepDz, stepDx) * (180.0f / 3.14159265f);
 		}
 		if (mSwingProgress > 0.0f || gBowPulling) {
@@ -676,7 +864,7 @@ public:
 		while (mCurrBodyYaw - mPrevBodyYaw < -180.0f) mPrevBodyYaw -= 360.0f;
 		while (mCurrBodyYaw - mPrevBodyYaw >= 180.0f) mPrevBodyYaw += 360.0f;
 
-		float walkMult = 1.0f;
+		float walkMult = (mHurtTime > 0) ? 1.5f : 1.0f;
 		if (!mOnGround && mPosDelta.y > 0.0f) {
 			walkMult *= 0.35f;
 		}
@@ -689,8 +877,9 @@ public:
 		mCurrWalkAnimSpeed += (v9 * walkMult - mCurrWalkAnimSpeed) * 0.4f;
 		mCurrWalkAnimPos += mCurrWalkAnimSpeed;
 
-		if (mBB.min.y < -16.0f && !gGuiContext.isCreative && gGuiContext.health > 0) {
-			gGuiContext.health = 0;
+		if (mCurrPos.y < 0.0f && !gGuiContext.isCreative && gGuiContext.health > 0) {
+			// Mob::outOfWorld() (Entity.cpp L956-958, Mob.cpp L742-748): 4 damage per tick below Y=0
+			gGuiContext.applyDamage(4, true);
 		}
 	}
 
@@ -744,18 +933,7 @@ public:
 		direction.z = sin(glm::radians(yaw));
 		cameraMoveFront = glm::normalize(direction);
 
-		if (gGuiContext.isCreative) {
-			if (glinput.NewKeyDown(GLFW_KEY_SPACE)) {
-				double now = glfwGetTime();
-				if (mLastSpacePressTime > 0.0 && (now - mLastSpacePressTime) < 0.32) {
-					mIsFlying = !mIsFlying;
-					mPosDelta.y = 0.0f;
-					mLastSpacePressTime = -1.0;
-				} else {
-					mLastSpacePressTime = now;
-				}
-			}
-		} else {
+		if (!gGuiContext.isCreative) {
 			mIsFlying = false;
 		}
 
@@ -800,297 +978,247 @@ void Camera::moveBBs(const Vec3& pos) {
 	}
 }
 
+// Exact 1:1 port of MCPE 0.8.1 Entity::move(dx, dy, dz) (Entity.cpp L425-771)
 void Camera::move(const Vec3& posIn) {
-	Vec3 speed(posIn);
-	// stupid check
-	if (std::abs(speed.x) > 500 || std::abs(speed.y) > 500 || std::abs(speed.z) > 500) {
-		ALOGE(LOG_AREA_ENTITY, "Entity moved WAAAY too fast!\n");
-		speed.x = speed.y = speed.z = 0;
+	float movX = posIn.x;
+	float movY = posIn.y;
+	float movZ = posIn.z;
+
+	if (std::abs(movX) > 500.0f || std::abs(movY) > 500.0f || std::abs(movZ) > 500.0f) {
+		movX = movY = movZ = 0.0f;
 	}
 
 	if (mNoPhysics) {
-		moveBBs(speed);
+		mBB.move(movX, movY, movZ);
 		mCurrFeetY = mBB.min.y;
-		mCurrPos.x = (mBB.min.x + mBB.max.x) / 2.0f;
-		mCurrPos.y = mBB.min.y + mHeightOffset - mSlideOffset.y;
-		mCurrPos.z = (mBB.min.z + mBB.max.z) / 2.0f;
+		mCurrPos.x = (mBB.min.x + mBB.max.x) * 0.5f;
+		mCurrPos.y = (mBB.min.y + mHeightOffset) - mSlideOffset.y;
+		mCurrPos.z = (mBB.min.z + mBB.max.z) * 0.5f;
 		mPos = mCurrPos;
 		mRenderFeetY = mCurrFeetY;
 		return;
 	}
 
-	//ScopedProfile("move");
+	float startPosX = mCurrPos.x;
+	float startPosZ = mCurrPos.z;
 
-	// add all intersecting aabb's to one box
-	std::vector<AABB>& preIntersectingAabbs = mRegion->fetchCollisionShapes(getRegion(), mBB, nullptr, false, nullptr);//&mTerrainSurfaceOffset
-	AABB allIntersects = AABB::EMPTY;
-	for(auto& it : preIntersectingAabbs) {
-		if(allIntersects.isEmpty()) {
-			allIntersects = it;
-		}
-		else {
-			allIntersects.merge(it);
-		}
-	}
-
+	// Entity.cpp L518-526: web slow-down
 	if (mIsStuckInWeb) {
 		mIsStuckInWeb = false;
-
-		speed.x *= .25f;
-		speed.y *= .05f;
-		speed.z *= .25f;
-		mPosDelta.x = .0f;
-		mPosDelta.y = .0f;
-		mPosDelta.z = .0f;
+		mPosDelta.x = 0.0f;
+		mPosDelta.y = 0.0f;
+		mPosDelta.z = 0.0f;
+		movX *= 0.25f;
+		movY *= 0.05f;
+		movZ *= 0.25f;
 	}
 
-	float xaOrg = speed.x;
-	float yaOrg = speed.y;
-	float zaOrg = speed.z;
+	AABB boundingBox = mBB;
+	BlockSource& reg = getRegion();
 
-	AABB bbOrg = mBB;
-
-	bool sneaking = !mIsFlying && mOnGround && isSneaking();
-
-	if (sneaking) {
-		float d = 0.05f;
-		
-		//bias the step size a bit to make sure we reach the bottom of the step
-		float maxUpStep = mMaxAutoStep * 1.01f;
-
-		while (speed.x != 0 && mRegion->fetchCollisionShapes(getRegion(), mBB.cloneMove(Vec3(speed.x, -maxUpStep, 0)), nullptr, false, nullptr).empty()) {
-			if (speed.x < d && speed.x >= -d) {
-				speed.x = 0;
+	// Entity.cpp L528-603: sneaking edge clamp (minY - 1.0f, maxY - 1.0f, step 0.05f)
+	bool v34 = false;
+	if (mOnGround && isSneaking() && !mIsFlying) {
+		while (movX != 0.0f) {
+			AABB testX(mBB.min.x + movX, mBB.min.y - 1.0f, mBB.min.z,
+			           mBB.max.x + movX, mBB.max.y - 1.0f, mBB.max.z);
+			if (!reg.fetchCollisionShapes(reg, testX, nullptr, false, nullptr).empty()) {
+				break;
 			}
-			else if (speed.x > 0) {
-				speed.x -= d;
+			if (movX < 0.05f && movX >= -0.05f) {
+				movX = 0.0f;
+				break;
 			}
-			else {
-				speed.x += d;
-			}
-
-			xaOrg = speed.x;
+			if (movX <= 0.0f) movX += 0.05f;
+			else movX -= 0.05f;
 		}
-
-		while (speed.z != 0 && mRegion->fetchCollisionShapes(getRegion(), mBB.cloneMove(Vec3(0, -maxUpStep, speed.z)), nullptr, false, nullptr).empty()) {
-			if (speed.z < d && speed.z >= -d) {
-				speed.z = 0;
+		while (movZ != 0.0f) {
+			AABB testZ(mBB.min.x, mBB.min.y - 1.0f, mBB.min.z + movZ,
+			           mBB.max.x, mBB.max.y - 1.0f, mBB.max.z + movZ);
+			if (!reg.fetchCollisionShapes(reg, testZ, nullptr, false, nullptr).empty()) {
+				break;
 			}
-			else if (speed.z > 0) {
-				speed.z -= d;
+			if (movZ < 0.05f && movZ >= -0.05f) {
+				movZ = 0.0f;
+				break;
 			}
-			else {
-				speed.z += d;
-			}
-
-			zaOrg = speed.z;
+			if (movZ <= 0.0f) movZ += 0.05f;
+			else movZ -= 0.05f;
 		}
+		while (movX != 0.0f && movZ != 0.0f) {
+			AABB testXZ(mBB.min.x + movX, mBB.min.y - 1.0f, mBB.min.z + movZ,
+			            mBB.max.x + movX, mBB.max.y - 1.0f, mBB.max.z + movZ);
+			if (!reg.fetchCollisionShapes(reg, testXZ, nullptr, false, nullptr).empty()) {
+				break;
+			}
+			if (movX < 0.05f && movX >= -0.05f) movX = 0.0f;
+			else if (movX <= 0.0f) movX += 0.05f;
+			else movX -= 0.05f;
 
-		while (speed.x != 0 && speed.z != 0 && mRegion->fetchCollisionShapes(getRegion(), mBB.cloneMove(Vec3(speed.x, -maxUpStep, speed.z)), nullptr, false, nullptr).empty()) {
-			if (speed.x < d && speed.x >= -d) {
-				speed.x = 0;
-			}
-			else if (speed.x > 0) {
-				speed.x -= d;
-			}
-			else {
-				speed.x += d;
-			}
-
-			if (speed.z < d && speed.z >= -d) {
-				speed.z = 0;
-			}
-			else if (speed.z > 0) {
-				speed.z -= d;
-			}
-			else {
-				speed.z += d;
-			}
-
-			xaOrg = speed.x;
-			zaOrg = speed.z;
+			if (movZ < 0.05f && movZ >= -0.05f) movZ = 0.0f;
+			else if (movZ <= 0.0f) movZ += 0.05f;
+			else movZ -= 0.05f;
 		}
-
-	}
-	Vec3 orgSpeed = speed;
-
-	AABB intersectTestBox = mBB.expanded(speed);
-	std::vector<AABB>& aABBs = mRegion->fetchCollisionShapes(getRegion(), intersectTestBox, nullptr, false, nullptr);
-
-	//LOGE(
-	//	"MOVE pos=(%f,%f,%f) speed=(%f,%f,%f) BB=(%f,%f,%f)->(%f,%f,%f) boxes=%zu\n",
-	//	mPos.x, mPos.y, mPos.z,
-	//	speed.x, speed.y, speed.z,
-	//	mBB.min.x, mBB.min.y, mBB.min.z,
-	//	mBB.max.x, mBB.max.y, mBB.max.z,
-	//	aABBs.size()
-	//);
-
-	bool collidableWasNear = mCollidableMobNear;
-
-	//	Because some entities can collide and interact differently with other entities (I.E. minecarts stacking) we want to go ahead and
-	//	have the entity do it's own test for collision so we're not unnecessarily testing for collisions.
-	/*if (isStackable()) {
-		testForEntityStacking(*mRegion, intersectTestBox, aABBs);
+		v34 = true;
 	}
 
-	else if (mCollidableMobNear) {
-		testForCollidableMobs(*mRegion, intersectTestBox, aABBs);
-		mCollidableMobNear = false;
-	}*/
-
-	// Use oneway collision for all blocks if the entity is within any oneway blocks, or they take advantage of one way physics intentionally,
-	// or if they're stuck, to prevent thrashing around trying to resolve
-	bool onewayCollide = false;//!mOnewayPhysicsBlocks.empty() || mUsesOneWayCollision || mStuckInCollider;
-
-	// This is broken into 3 passes for the sake of smooth movement. Neighboring blocks on a smooth surface align the movement vector with the surface if possible
-	// If all done at once, entities can catch on corners vertical edges while trying to move horizontally along a surface, or similarly when brushing up against walls
-	Vec3 steps[3] = { Vec3(0.0f, speed.y, 0.0f), Vec3(speed.x, 0.0f, 0.0f), Vec3(0.0f, 0.0f, speed.z) };
-	Vec3 penetration(0.0f);
-
-	for (int j = 0; j < 3; ++j) {
-		Vec3& step = steps[j];
-		float& pen = penetration[j];
-		for (auto& bb : aABBs) {
-			float tempPenetration;
-			step = bb.clipCollide(mBB, step, onewayCollide, &tempPenetration);
-			pen = std::max(pen, tempPenetration);
-		}
-		moveBBs(step);
-	}
-
-	float totalPenetration = penetration.x + penetration.y + penetration.z;
-	float epsilon = FLT_EPSILON;
-	// If there was no penetration, then we're not stuck anymore
-	if(mStuckInCollider && totalPenetration <= epsilon) {
-		mStuckInCollider = false;
-	}
-	// if there was penetration last frame we might have fixed an error, but if it's also this frame, then we're probably stuck between two objects
-	else if(!mStuckInCollider && mLastPenetration > epsilon && totalPenetration > epsilon) {
-		mStuckInCollider = true;
-	}
-	mLastPenetration = totalPenetration;
-
-	// Combine the collective move we just did back into here for later use
-	speed = steps[0] + steps[1] + steps[2];
-	bool og = mOnGround || (yaOrg != speed.y && yaOrg < 0);
-
-	// If we ran into a vertical wall and we're on the ground
-	if (mMaxAutoStep > 0 && og && ((xaOrg != speed.x) || (zaOrg != speed.z))) {
-		// Try stepping up onto what's in front of us using our foot size, storing old velocity in case we can't do it
-		// This is done by first trying to move up vertically, then over horizontally, in the hopes that the first move cleared the obstacle
-		float xaN = speed.x;
-		float yaN = speed.y;
-		float zaN = speed.z;
-
-		// Use the unadjusted speed before collision as we're trying again
-		Vec3 speedX(xaOrg, 0.0f, 0.0f);
-		Vec3 speedY(0.0f, mMaxAutoStep, 0.0f);
-		Vec3 speedZ(0.0f, 0.0f, zaOrg);
-
-		// Store original bounding box in case we want to revert
-		AABB normal = mBB;
-		std::vector<AABB> norm;
-		for (auto& bb : mSubBBs) {
-			norm.push_back(bb);
-		}
-		mBB.set(bbOrg);
-		// Fetch collision shapes using original speed, this will exclude colliders above head, we'll check those at the end
-		aABBs = mRegion->fetchCollisionShapes(getRegion(), mBB.expanded(orgSpeed), nullptr, false, nullptr);
-
-		if (collidableWasNear) {
-			//testForCollidableMobs(*mRegion, intersectTestBox, aABBs);
-		}
-
-		// Try to step up over the obstacle
-		// Even though the motion is only on y, we don't want to use clipYCollide because that will force penetration resolution along the y axis, which may not be the smallest penetrating axis
-		for (auto& bb : aABBs) {
-			speedY = bb.clipCollide(mBB, speedY, onewayCollide);
-		}
-		moveBBs(speedY);
-
-		// Now that we've attempted the vertical step, do the horizontal ones, which will hopefully not be impeded by the same obstacle as before
-		for (auto& bb : aABBs) {
-			speedX = bb.clipCollide(mBB, speedX, onewayCollide);
-		}
-		moveBBs(speedX);
-
-		for (auto& bb : aABBs) {
-			speedZ = bb.clipCollide(mBB, speedZ, onewayCollide);
-		}
-		moveBBs(speedZ);
-
-		// Undo as much y axis movement as possible, we're climping up, not jumping up
-		Vec3 reverseSpeedY = -speedY;
-		for (auto& bb : aABBs) {
-			reverseSpeedY = bb.clipCollide(mBB, reverseSpeedY, onewayCollide);
-		}
-		moveBBs(reverseSpeedY);
-		speedY += reverseSpeedY;
-
-		// Store the movement we just did in here for later use if we decide to keep it
-		speed = speedX + speedY + speedZ;
-		// See if we hit our head on the ceiling, meaning we shouldn't do step up.
-		// This makes getting head stuck in ceiling possible if moving into a block lower than footsize at a speed larger than you bounding box width. This shouldn't be achievable by standard means
-		// Not expanding bb by anything because we just want to see if we ended up in a good spot
-		bool hitCeiling = !mRegion->fetchCollisionShapes(getRegion(), mBB, nullptr, false, nullptr).empty();
-
-		// If our original horizontal square velocity was higher without trying to step over the obstacle, or our head ended up in the ceiling, revert back to that for the sake of smoother movement
-		if (hitCeiling || xaN * xaN + zaN * zaN >= speed.x * speed.x + speed.z * speed.z) {
-			speed.x = xaN;
-			speed.y = yaN;
-			speed.z = zaN;
-			mBB.set(normal);
-			for (size_t i = 0; i < mSubBBs.size(); ++i) {
-				mSubBBs[i] = norm[i];
+	// Exact 1:1 MCPE 0.8.1 AABB::clipYCollide / clipXCollide / clipZCollide (AABB.cpp L189-265)
+	auto clipYCollide081 = [](const AABB& cube, const AABB& ent, float dy) -> float {
+		if (ent.max.x > cube.min.x && ent.min.x < cube.max.x && ent.max.z > cube.min.z && ent.min.z < cube.max.z) {
+			float v4 = dy;
+			if (dy > 0.0f && ent.max.y <= cube.min.y) {
+				float d = cube.min.y - ent.max.y;
+				if (d < dy) v4 = d;
 			}
+			if (v4 < 0.0f && ent.min.y >= cube.max.y) {
+				float d = cube.max.y - ent.min.y;
+				if (d > v4) return d;
+			}
+			return v4;
 		}
-		// Else our vertical step cleared the obstacle and have more horizontal velocity than before, so keep the changes
-		// Don't do mSlideOffset on client side except for players because it can cause tunneling for entities
-		else if(true) {
-			// Add an artificial downward offset that will ease up over time to smooth out the sudden change in height caused by this step
-			mSlideOffset.y += speedY.y;
+		return dy;
+	};
+	auto clipXCollide081 = [](const AABB& cube, const AABB& ent, float dx) -> float {
+		if (ent.max.y > cube.min.y && ent.min.y < cube.max.y && ent.max.z > cube.min.z && ent.min.z < cube.max.z) {
+			float v4 = dx;
+			if (dx > 0.0f && ent.max.x <= cube.min.x) {
+				float d = cube.min.x - ent.max.x;
+				if (d < dx) v4 = d;
+			}
+			if (v4 < 0.0f && ent.min.x >= cube.max.x) {
+				float d = cube.max.x - ent.min.x;
+				if (d > v4) return d;
+			}
+			return v4;
+		}
+		return dx;
+	};
+	auto clipZCollide081 = [](const AABB& cube, const AABB& ent, float dz) -> float {
+		if (ent.max.x > cube.min.x && ent.min.x < cube.max.x && ent.max.y > cube.min.y && ent.min.y < cube.max.y) {
+			float v4 = dz;
+			if (dz > 0.0f && ent.max.z <= cube.min.z) {
+				float d = cube.min.z - ent.max.z;
+				if (d < dz) v4 = d;
+			}
+			if (v4 < 0.0f && ent.min.z >= cube.max.z) {
+				float d = cube.max.z - ent.min.z;
+				if (d > v4) return d;
+			}
+			return v4;
+		}
+		return dz;
+	};
+
+	// Entity.cpp L604-653: resolve Y, then X, then Z
+	float v36 = movY;
+	float v43 = movX;
+	float v42 = movZ;
+	std::vector<AABB>& v38 = reg.fetchCollisionShapes(reg, mBB.expanded(Vec3(movX, movY, movZ)), nullptr, false, nullptr);
+	for (const auto& cube : v38) {
+		v36 = clipYCollide081(cube, mBB, v36);
+	}
+	mBB.move(0.0f, v36, 0.0f);
+
+	bool fallingFlag = mOnGround || (movY != v36 && movY < 0.0f);
+
+	for (const auto& cube : v38) {
+		v43 = clipXCollide081(cube, mBB, v43);
+	}
+	mBB.move(v43, 0.0f, 0.0f);
+
+	for (const auto& cube : v38) {
+		v42 = clipZCollide081(cube, mBB, v42);
+	}
+	mBB.move(0.0f, 0.0f, v42);
+
+	// Entity.cpp L654-717: stepHeight (0.5f) when fallingFlag && ySize < 0.05f && (movX != v43 || movZ != v42)
+	float stepHeight = mMaxAutoStep;
+	if (stepHeight > 0.0f && fallingFlag && mSlideOffset.y < 0.05f && (movX != v43 || movZ != v42)) {
+		AABB v96 = mBB;
+		mBB = boundingBox;
+		std::vector<AABB>& stepCubes = reg.fetchCollisionShapes(reg, mBB.expanded(Vec3(movX, stepHeight, movZ)), nullptr, false, nullptr);
+		for (const auto& cube : stepCubes) {
+			stepHeight = clipYCollide081(cube, mBB, stepHeight);
+		}
+		mBB.move(0.0f, stepHeight, 0.0f);
+
+		float v64 = movX;
+		for (const auto& cube : stepCubes) {
+			v64 = clipXCollide081(cube, mBB, v64);
+		}
+		mBB.move(v64, 0.0f, 0.0f);
+
+		float v63 = movZ;
+		for (const auto& cube : stepCubes) {
+			v63 = clipZCollide081(cube, mBB, v63);
+		}
+		mBB.move(0.0f, 0.0f, v63);
+
+		if ((v42 * v42 + v43 * v43) < (v63 * v63 + v64 * v64)) {
+			v42 = v63;
+			v43 = v64;
+			v36 = stepHeight;
+			mSlideOffset.y += 0.5f;
+		} else {
+			mBB = v96;
 		}
 	}
 
-	{
-		//ScopedProfile("rest");
+	// Entity.cpp L718-770: update position, collision flags, fall damage, step sounds, ySize decay, tile collisions
+	mCurrFeetY = mBB.min.y;
+	mCurrPos.x = (mBB.min.x + mBB.max.x) * 0.5f;
+	mCurrPos.y = (mBB.min.y + mHeightOffset) - mSlideOffset.y;
+	mCurrPos.z = (mBB.min.z + mBB.max.z) * 0.5f;
+	mPos = mCurrPos;
+	mRenderFeetY = mCurrFeetY;
 
-		mCurrFeetY = mBB.min.y;
-		mCurrPos.x = (mBB.min.x + mBB.max.x) / 2.0f;
-		mCurrPos.y = mBB.min.y + mHeightOffset - mSlideOffset.y - ((!mIsFlying && isSneaking()) ? 0.08f : 0.0f);
-		mCurrPos.z = (mBB.min.z + mBB.max.z) / 2.0f;
-		mPos = mCurrPos;
-		mRenderFeetY = mCurrFeetY;
+	mHorizontalCollision = (movX != v43) || (movZ != v42);
+	mVerticalCollision = (movY != v36);
+	mOnGround = (movY != v36 && movY < 0.0f);
+	mCollision = mHorizontalCollision || mVerticalCollision;
 
-		mHorizontalCollision = (xaOrg != speed.x) || (zaOrg != speed.z);
-		mVerticalCollision = (yaOrg != speed.y);
+	checkFallDamage(v36, mOnGround);
 
-		mOnGround = (yaOrg != speed.y && yaOrg < 0) || (mOnGround && yaOrg == speed.y && yaOrg == 0);
-		mCollision = mHorizontalCollision || mVerticalCollision;
-
-		checkFallDamage(speed.y, mOnGround);
-
-		if (xaOrg != speed.x) {
-			mPosDelta.x = 0;
-			//onBlockCollision(0);
-		}
-
-		if (yaOrg != speed.y) {
-			mPosDelta.y = 0;
-		}
-
-		if (zaOrg != speed.z) {
-			mPosDelta.z = 0;
-			//onBlockCollision(2);
-		}
-
-		//_playMovementSound(mVerticalCollision);
-
-		mSlideOffset.y *= 0.4f;
-
-		//checkBlockCollisions();
+	if (movX != v43) {
+		mPosDelta.x = 0.0f;
 	}
+	if (movY != v36) {
+		mPosDelta.y = 0.0f;
+	}
+	if (movZ != v42) {
+		mPosDelta.z = 0.0f;
+	}
+
+	// Entity.cpp L744-767: walkDist (field_BC) accumulation & step sounds when !v34 (not sneaking on ground)
+	if (!v34 && !mIsFlying) {
+		float dxMoved = mCurrPos.x - startPosX;
+		float dzMoved = mCurrPos.z - startPosZ;
+		float v86 = std::sqrt(dxMoved * dxMoved + dzMoved * dzMoved);
+		mCurrWalkDist += v86 * 0.6f;
+		int v87 = Math::floor(mCurrPos.x);
+		int v88 = Math::floor((mCurrPos.y - 0.2f) - mHeightOffset);
+		int v89 = Math::floor(mCurrPos.z);
+		BlockID v90 = reg.getBlockID(v87, v88, v89);
+		if (v90 == 0) {
+			BlockID belowId = reg.getBlockID(v87, v88 - 1, v89);
+			BlockID fenceId = Block::mFence ? Block::mFence->mID : BlockID(85);
+			BlockID gateId = Block::mFenceGateOak ? Block::mFenceGateOak->mID : BlockID(107);
+			BlockID wallId = Block::mCobblestoneWall ? Block::mCobblestoneWall->mID : BlockID(139);
+			if (belowId == fenceId || belowId == gateId || belowId == wallId) {
+				v90 = belowId;
+			}
+		}
+		if (mCurrWalkDist > static_cast<float>(mNextStepSound) && v90 > 0) {
+			mNextStepSound = static_cast<int>(mCurrWalkDist) + 1;
+			const Block* stepBlk = Block::mBlocks[v90];
+			if (stepBlk && !stepBlk->getMaterial().isLiquid()) {
+				SoundEngine::play(SoundEngine::SND_STEP, 0.25f, 1.0f);
+			}
+		}
+	}
+
+	mSlideOffset.y *= 0.4f;
+	checkTileCollisions();
 }
 
 
@@ -3416,9 +3544,9 @@ void renderWorldSteve3D(const Camera& c,
 	float bobTicks = static_cast<float>(glfwGetTime()) * 20.0f;
 
 	// Exact MCPE 0.8.1 MobRenderer::render transform chain (L116-124):
-	// setupPosition -> setupRotations(180 - bodyYaw) -> glScalef(-1, -1, 1) -> glTranslatef(0, -24*0.0625 - 0.0078125, 0)
+	// setupPosition(a3, a4 - ridingHeight, a5) -> setupRotations(180 - bodyYaw) -> glScalef(-1, -1, 1) -> glTranslatef(0, -24*0.0625 - 0.0078125, 0)
 	glPushMatrix();
-	glTranslatef(c.mPos.x, c.mRenderFeetY - (sneaking ? 0.125f : 0.0f), c.mPos.z);
+	glTranslatef(c.mPos.x, c.mPos.y - c.mHeightOffset, c.mPos.z);
 	glRotatef(180.0f - bodyYawMcpe, 0.0f, 1.0f, 0.0f);
 	glScalef(-1.0f, -1.0f, 1.0f);
 	glTranslatef(0.0f, (kPxScale * -24.0f) - 0.0078125f, 0.0f);
@@ -4201,14 +4329,16 @@ void renderThreadStuff()
 					c.mHurtTime = 10;
 					c.mHurtDuration = 10;
 					float kLen = std::sqrt(knockDir.x * knockDir.x + knockDir.z * knockDir.z);
-					if (kLen > 0.001f) {
-						c.mPosDelta.x += (knockDir.x / kLen) * 0.34f;
-						c.mPosDelta.z += (knockDir.z / kLen) * 0.34f;
-						c.mHurtDir = (std::atan2(knockDir.z, knockDir.x) * (180.0f / 3.14159265f)) - static_cast<float>(c.yaw);
+					if (kLen > 0.0001f) {
+						// Exact MCPE 0.8.1 Mob::knockback (Mob.cpp L792-814):
+						// knockDir is toward player (posX - a2->posX), so +0.4f along knockDir/kLen
+						c.mPosDelta.x = (c.mPosDelta.x * 0.5f) + (knockDir.x / kLen) * 0.4f;
+						c.mPosDelta.y = std::min(0.4f, (c.mPosDelta.y * 0.5f) + 0.4f);
+						c.mPosDelta.z = (c.mPosDelta.z * 0.5f) + (knockDir.z / kLen) * 0.4f;
+						c.mHurtDir = (std::atan2(-knockDir.z, -knockDir.x) * (180.0f / 3.14159265f)) - static_cast<float>(c.yaw);
 					} else {
 						c.mHurtDir = static_cast<float>((std::rand() % 2) * 180);
 					}
-					c.mPosDelta.y = std::max(c.mPosDelta.y, 0.24f);
 				}
 				if (gGuiContext.health <= 0) {
 					triggerPlayerDeath();
@@ -5152,18 +5282,6 @@ void renderThreadStuff()
 				updateWorldItemEntities(worldItems, worldItemTickAccum, deltaTime, c.getRegion(), c.mBB, gGuiContext, allowPickup);
 				SoundEngine::setMasterVolume(gGuiOptions.soundVolume);
 				ParticleSystem::tick(clampedDt, &c.getRegion());
-				{
-					static float lastStepWalkDist = 0.0f;
-					if (c.mWalkDist < lastStepWalkDist) {
-						lastStepWalkDist = c.mWalkDist;
-					}
-					if (c.mOnGround && !c.mIsFlying && gGuiContext.state == GameState::InGame && !gGuiContext.currentScreen) {
-						if (c.mWalkDist - lastStepWalkDist >= 1.1f) {
-							lastStepWalkDist = c.mWalkDist;
-							SoundEngine::play(SoundEngine::SND_STEP, 0.35f, 0.9f + (std::rand() % 20) * 0.01f);
-						}
-					}
-				}
 
 				// Ambient torch / lit furnace particles near player (1:1 MCPE 0.8.1 TorchTile/FurnaceTile::animateTick)
 				static float ambientParticleAccum = 0.0f;
