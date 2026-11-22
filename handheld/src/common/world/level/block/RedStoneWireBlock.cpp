@@ -6,16 +6,35 @@
 
 #include "world/level/block/RedStoneWireBlock.h"
 #include "world/Direction.h"
+#include "world/Facing.h"
 // #include "world/entity/ParticleType.h"
 #include "world/level/BlockSource.h"
 #include "world/level/material/Material.h"
 #include "world/level/Level.h"
 #include "world/level/dimension/Dimension.h"
+#include "world/redstone/Redstone.h"
 #include "world/item/Item.h"
 #include "world/item/ItemInstance.h"
-// #include "world/redstone//circuit/CircuitSystem.h"
-// #include "world/redstone/circuit/components/TransporterComponent.h"
 #include "PistonBlock.h"
+#include <queue>
+#include <unordered_map>
+
+namespace {
+struct BlockPosHash {
+	size_t operator()(const BlockPos& p) const noexcept {
+		return (static_cast<size_t>(p.x) * 73856093u) ^ (static_cast<size_t>(p.y) * 19349663u) ^ (static_cast<size_t>(p.z) * 83492791u);
+	}
+};
+
+static thread_local bool sWireShouldSignal = true;
+static thread_local bool sUpdatingWirePower = false;
+
+struct WireSignalGuard {
+	bool prev;
+	explicit WireSignalGuard(bool val) : prev(sWireShouldSignal) { sWireShouldSignal = val; }
+	~WireSignalGuard() { sWireShouldSignal = prev; }
+};
+}
 
 RedStoneWireBlock::RedStoneWireBlock(const std::string& nameId, int id)
 	: Block(nameId, id, Material::getMaterial(MaterialType::RedstoneWire)) {
@@ -49,30 +68,210 @@ bool RedStoneWireBlock::mayPlace(BlockSource& region, const BlockPos& pos) const
 }
 
 void RedStoneWireBlock::onLoaded(BlockSource& region, const BlockPos& pos) const {
-// 	if (!region.getLevel().isClientSide()) {
-// 		auto &circuit = region.getDimension().getCircuitSystem();
-// 		circuit.create<TransporterComponent>(pos, &region, Facing::DOWN);
-// 	}
+	UNUSED_PARAMETER(region, pos);
 }
 
 void RedStoneWireBlock::onPlace(BlockSource& region, const BlockPos& pos) const {
-
 	Block::onPlace(region, pos);
-	onLoaded(region, pos);
+	if (!region.getLevel().isClientSide()) {
+		_updatePower(region, pos);
+		_notifyWireNeighbors(region, pos);
+	}
+}
 
+void RedStoneWireBlock::onRemove(BlockSource& region, const BlockPos& pos) const {
+	Block::onRemove(region, pos);
+	if (!region.getLevel().isClientSide()) {
+		_notifyWireNeighbors(region, pos);
+		static const BlockPos offsets[4] = { BlockPos(1,0,0), BlockPos(-1,0,0), BlockPos(0,0,1), BlockPos(0,0,-1) };
+		for (const auto& o : offsets) {
+			BlockPos np = pos + o;
+			if (region.getBlockID(np) == mID) _updatePower(region, np);
+			if (region.getBlockID(np.above()) == mID) _updatePower(region, np.above());
+			if (region.getBlockID(np.below()) == mID) _updatePower(region, np.below());
+		}
+	}
 }
 
 void RedStoneWireBlock::onRedstoneUpdate(BlockSource& region, const BlockPos& pos, int strength, bool isFirstTime) const {
-	if (region.getLevel().isClientSide() == false) {
+	UNUSED_PARAMETER(isFirstTime);
+	if (!region.getLevel().isClientSide()) {
 		FullBlock fullBlock = region.getBlockAndData(pos);
-		region.setBlockAndData(pos, fullBlock.id, strength, Block::UPDATE_ALL);
+		region.setBlockAndData(pos, fullBlock.id, static_cast<DataID>(strength & 0xF), Block::UPDATE_ALL);
 	}
 }
 
 void RedStoneWireBlock::neighborChanged(BlockSource& region, const BlockPos& pos, const BlockPos& neighborPos) const {
-	if (!region.getLevel().isClientSide() && !canSurvive(region, pos)) {
-		spawnResources(region, pos, 0, 1);
-		region.removeBlock(pos);
+	UNUSED_PARAMETER(neighborPos);
+	if (!region.getLevel().isClientSide()) {
+		if (!canSurvive(region, pos)) {
+			spawnResources(region, pos, 0, 1);
+			region.removeBlock(pos);
+		} else if (!sUpdatingWirePower) {
+			_updatePower(region, pos);
+		}
+	}
+}
+
+bool RedStoneWireBlock::isSignalSource() const {
+	return sWireShouldSignal;
+}
+
+void RedStoneWireBlock::_getWireConnectivity(BlockSource& region, const BlockPos& pos, bool& connN, bool& connS, bool& connW, bool& connE) {
+	BlockPos west = pos.west();
+	BlockPos east = pos.east();
+	BlockPos south = pos.south();
+	BlockPos north = pos.north();
+	connW = shouldConnectTo(region, west, Direction::WEST) || (!region.isSolidBlockingBlock(west) && region.getBlockID(west.below()) == Block::mRedStoneDust->mID);
+	connE = shouldConnectTo(region, east, Direction::EAST) || (!region.isSolidBlockingBlock(east) && region.getBlockID(east.below()) == Block::mRedStoneDust->mID);
+	connS = shouldConnectTo(region, south, Direction::SOUTH) || (!region.isSolidBlockingBlock(south) && region.getBlockID(south.below()) == Block::mRedStoneDust->mID);
+	connN = shouldConnectTo(region, north, Direction::NORTH) || (!region.isSolidBlockingBlock(north) && region.getBlockID(north.below()) == Block::mRedStoneDust->mID);
+	if (!region.isSolidBlockingBlock(pos.above())) {
+		if (region.getBlockID(west.above()) == Block::mRedStoneDust->mID) connW = true;
+		if (region.getBlockID(east.above()) == Block::mRedStoneDust->mID) connE = true;
+		if (region.getBlockID(north.above()) == Block::mRedStoneDust->mID) connN = true;
+		if (region.getBlockID(south.above()) == Block::mRedStoneDust->mID) connS = true;
+	}
+}
+
+int RedStoneWireBlock::getSignal(BlockSource& region, const BlockPos& pos, int dir) const {
+	if (!sWireShouldSignal) {
+		return Redstone::SIGNAL_NONE;
+	}
+	int signal = getBlockState(BlockState::RedstoneSignal).get<int>(region.getData(pos));
+	if (signal <= 0) {
+		return Redstone::SIGNAL_NONE;
+	}
+	if (dir == Facing::UP) {
+		return signal;
+	}
+	if (dir == Facing::DOWN) {
+		return Redstone::SIGNAL_NONE;
+	}
+	bool connN = false, connS = false, connW = false, connE = false;
+	_getWireConnectivity(region, pos, connN, connS, connW, connE);
+	int oppDir = Facing::OPPOSITE_FACING[dir];
+	if ((oppDir == Facing::NORTH && (connN || (!connW && !connE))) ||
+	    (oppDir == Facing::SOUTH && (connS || (!connW && !connE))) ||
+	    (oppDir == Facing::WEST && (connW || (!connN && !connS))) ||
+	    (oppDir == Facing::EAST && (connE || (!connN && !connS)))) {
+		return signal;
+	}
+	return Redstone::SIGNAL_NONE;
+}
+
+int RedStoneWireBlock::getDirectSignal(BlockSource& region, const BlockPos& pos, int dir) const {
+	return sWireShouldSignal ? getSignal(region, pos, dir) : Redstone::SIGNAL_NONE;
+}
+
+void RedStoneWireBlock::_notifyWireNeighbors(BlockSource& region, const BlockPos& pos) {
+	region.updateNeighborsAt(pos);
+	static const BlockPos dirs[6] = {
+		BlockPos(0, -1, 0), BlockPos(0, 1, 0),
+		BlockPos(0, 0, -1), BlockPos(0, 0, 1),
+		BlockPos(-1, 0, 0), BlockPos(1, 0, 0)
+	};
+	for (const auto& d : dirs) {
+		BlockPos np = pos + d;
+		if (region.isSolidBlockingBlock(np)) {
+			region.updateNeighborsAt(np);
+		}
+	}
+}
+
+void RedStoneWireBlock::_updatePower(BlockSource& region, const BlockPos& startPos) {
+	if (sUpdatingWirePower || region.getBlockID(startPos) != Block::mRedStoneDust->mID) {
+		return;
+	}
+	sUpdatingWirePower = true;
+
+	// Collect connected wire component
+	std::vector<BlockPos> nodes;
+	std::unordered_map<BlockPos, int, BlockPosHash> nodeIndex;
+	std::queue<BlockPos> q;
+	nodes.push_back(startPos);
+	nodeIndex[startPos] = 0;
+	q.push(startPos);
+
+	auto gatherWireNeighbors = [&](const BlockPos& cur, std::vector<BlockPos>& out) {
+		out.clear();
+		bool aboveBlocked = region.isSolidBlockingBlock(cur.above());
+		static const BlockPos horiz[4] = {
+			BlockPos(1, 0, 0), BlockPos(-1, 0, 0), BlockPos(0, 0, 1), BlockPos(0, 0, -1)
+		};
+		for (const auto& h : horiz) {
+			BlockPos np = cur + h;
+			if (region.getBlockID(np) == Block::mRedStoneDust->mID) {
+				out.push_back(np);
+			} else if (!region.isSolidBlockingBlock(np) && region.getBlockID(np.below()) == Block::mRedStoneDust->mID) {
+				out.push_back(np.below());
+			}
+			if (!aboveBlocked && region.isSolidBlockingBlock(np) && region.getBlockID(np.above()) == Block::mRedStoneDust->mID) {
+				out.push_back(np.above());
+			}
+		}
+	};
+
+	std::vector<BlockPos> adj;
+	while (!q.empty() && nodes.size() < 512) {
+		BlockPos cur = q.front();
+		q.pop();
+		gatherWireNeighbors(cur, adj);
+		for (const auto& np : adj) {
+			if (nodeIndex.find(np) == nodeIndex.end()) {
+				nodeIndex[np] = static_cast<int>(nodes.size());
+				nodes.push_back(np);
+				q.push(np);
+			}
+		}
+	}
+
+	std::vector<int> oldPower(nodes.size(), 0);
+	std::vector<int> newPower(nodes.size(), 0);
+	{
+		WireSignalGuard guard(false);
+		for (size_t i = 0; i < nodes.size(); ++i) {
+			oldPower[i] = Block::mRedStoneDust->getBlockState(BlockState::RedstoneSignal).get<int>(region.getData(nodes[i]));
+			newPower[i] = std::min(15, std::max(0, region.getBestNeighborSignal(nodes[i])));
+		}
+	}
+
+	// Propagate signal strength (max-first)
+	using PQItem = std::pair<int, int>;
+	std::priority_queue<PQItem> pq;
+	for (size_t i = 0; i < nodes.size(); ++i) {
+		if (newPower[i] > 1) {
+			pq.emplace(newPower[i], static_cast<int>(i));
+		}
+	}
+	while (!pq.empty()) {
+		auto [str, idx] = pq.top();
+		pq.pop();
+		if (str < newPower[idx] || str <= 1) continue;
+		gatherWireNeighbors(nodes[idx], adj);
+		for (const auto& np : adj) {
+			auto it = nodeIndex.find(np);
+			if (it == nodeIndex.end()) continue;
+			int nIdx = it->second;
+			if (str - 1 > newPower[nIdx]) {
+				newPower[nIdx] = str - 1;
+				pq.emplace(newPower[nIdx], nIdx);
+			}
+		}
+	}
+
+	std::vector<BlockPos> changed;
+	for (size_t i = 0; i < nodes.size(); ++i) {
+		if (newPower[i] != oldPower[i]) {
+			region.setBlockAndData(nodes[i], Block::mRedStoneDust->mID, static_cast<DataID>(newPower[i] & 0xF), Block::UPDATE_CLIENTS);
+			changed.push_back(nodes[i]);
+		}
+	}
+
+	sUpdatingWirePower = false;
+
+	for (const BlockPos& cp : changed) {
+		_notifyWireNeighbors(region, cp);
 	}
 }
 

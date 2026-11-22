@@ -444,7 +444,7 @@ void Block::initBlocks() {
 	mSign = &registerBlock<SignBlock>("standing_sign", 63, true).setDestroyTime(1.0f).setCategory(CreativeItemCategory::Decorations).addBlockState(BlockState::FacingDirection, 3);
 	mWoodenDoor = &registerBlock<DoorBlock>("wooden_door", 64, Material::getMaterial(MaterialType::Wood), DoorBlock::OAK).setDestroyTime(3.0f).setCategory(CreativeItemCategory::Decorations).addBlockState(BlockState::Direction, 2).addBlockState(BlockState::OpenBit, 1).addBlockState(BlockState::UpperBlockBit, 1).resetBitsUsed().addBlockState(BlockState::DoorHingeBit, 1);
 	mLadder = &registerBlock<LadderBlock>("ladder", 65).setDestroyTime(0.4f).setCategory(CreativeItemCategory::Decorations).addBlockState(BlockState::FacingDirection, 3);
-	mRail = &registerBlock<RailBlock>("rail", 66).setDestroyTime(0.7f).setCategory(CreativeItemCategory::Tools).addBlockState(BlockState::RailDirection, 3).addBlockState(BlockState::RailDataBit, 1);
+	mRail = &registerBlock<RailBlock>("rail", 66).setDestroyTime(0.7f).setCategory(CreativeItemCategory::Tools).addBlockState(BlockState::RailDirection, 4);
 	mStoneStairs = &registerBlock<StairBlock>("stone_stairs", 67, *mCobblestone).setCategory(CreativeItemCategory::BuildingBlocks).addBlockState(BlockState::Direction, 2).addBlockState(BlockState::UpsideDownBit, 1);
 	mWallSign = &registerBlock<SignBlock>("wall_sign", 68, false).setDestroyTime(1.0f).setCategory(CreativeItemCategory::Decorations).addBlockState(BlockState::FacingDirection, 3);
 	mLever = &registerBlock<LeverBlock>("lever", 69).setDestroyTime(0.5f).setCategory(CreativeItemCategory::Tools).addBlockState(BlockState::FacingDirection, 3).addBlockState(BlockState::OpenBit, 1);
@@ -1118,6 +1118,10 @@ bool Block::isSignalSource() const {
 }
 
 int Block::getDirectSignal(BlockSource& region, const BlockPos& pos, int dir) const {
+	return Redstone::SIGNAL_NONE;
+}
+
+int Block::getSignal(BlockSource& region, const BlockPos& pos, int dir) const {
 	return Redstone::SIGNAL_NONE;
 }
 

@@ -454,6 +454,7 @@ public:
 		return true;
 	}
 	virtual int getDirectSignal(BlockSource& region, const BlockPos& pos, int dir) const;
+	virtual int getSignal(BlockSource& region, const BlockPos& pos, int dir) const;
 	virtual bool waterSpreadCausesSpawn() const {
 		return true;
 	}

@@ -123,6 +123,13 @@ public:
 
 	virtual bool isSolidBlockingBlock(const BlockPos& p);
 
+	int getDirectSignal(const BlockPos& pos, int dir);
+	int getSignal(const BlockPos& pos, int dir);
+	int getBestDirectSignal(const BlockPos& pos);
+	int getBestNeighborSignal(const BlockPos& pos);
+	bool hasDirectSignal(const BlockPos& pos);
+	bool hasNeighborSignal(const BlockPos& pos);
+
 	bool mayPlace(BlockID blockId, const BlockPos& pos, FacingID face, Entity* placer, bool ignoreEntitites = false, Entity* ignoreEntity = nullptr);
 
 	const MobList& getMobsAt(EntityType category, const BlockPos& pos);

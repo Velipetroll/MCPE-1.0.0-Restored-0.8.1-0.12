@@ -4388,7 +4388,7 @@ bool BlockTessellator::tessellateRailInWorld(const BaseRailBlock& block, const B
 	}
 
 	if (block.isUsesDataBit()) {
-		data = Block::mRail->getBlockState(BlockState::RailDirection).get<int>(data);
+		data = block.getBlockState(BlockState::RailDirection).get<int>(data);
 	}
 
 	_tex1(toUV(getLightColor(p)));

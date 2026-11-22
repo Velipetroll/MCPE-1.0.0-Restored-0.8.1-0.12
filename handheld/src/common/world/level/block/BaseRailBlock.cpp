@@ -52,8 +52,8 @@ void BaseRailBlock::Rail::updateConnections(int direction) {
 		mConnections.push_back(east);
 	}
 	else if (direction == 2) {
-		mConnections.push_back(west.above());
-		mConnections.push_back(east);
+		mConnections.push_back(west);
+		mConnections.push_back(east.above());
 	}
 	else if (direction == 3) {
 		mConnections.push_back(west.above());
@@ -194,7 +194,7 @@ void BaseRailBlock::Rail::connectTo(Rail& rail) {
 		}
 	}
 
-	if (dir < 0) {
+	if (dir > 0xf) {
 		dir = DIR_FLAT_Z;
 	}
 
@@ -289,6 +289,21 @@ void BaseRailBlock::onRedstoneUpdate(BlockSource& region, const BlockPos& pos, i
 }
 
 
+
+bool BaseRailBlock::Rail::hasRail(const BlockPos& pos) {
+	return BaseRailBlock::isRail(mRegion, pos)
+		|| BaseRailBlock::isRail(mRegion, pos.above())
+		|| BaseRailBlock::isRail(mRegion, pos.below());
+}
+
+int BaseRailBlock::Rail::countPotentialConnections() {
+	int count = 0;
+	if (hasRail(mPos.north())) ++count;
+	if (hasRail(mPos.south())) ++count;
+	if (hasRail(mPos.west())) ++count;
+	if (hasRail(mPos.east())) ++count;
+	return count;
+}
 
 bool BaseRailBlock::Rail::hasNeighborRail(const BlockPos& pos) {
 	std::shared_ptr<BaseRailBlock::Rail> neighbor = getRail(pos);
@@ -474,7 +489,9 @@ const AABB& BaseRailBlock::getAABB(BlockSource& region, const BlockPos& pos, AAB
 }
 
 const AABB& BaseRailBlock::getVisualShape(DataID data, AABB& bufferAABB, bool isClipping) const {
-	if (data >= 2 && data <= 5) {
+	UNUSED_PARAMETER(isClipping);
+	int dir = mUsesDataBit ? (data & RAIL_DIRECTION_MASK) : (data & 0xF);
+	if (dir >= 2 && dir <= 5) {
 		bufferAABB.set(0, 0, 0, 1, 2 / 16.0f + 0.5f, 1);
 	}
 	else {
@@ -542,19 +559,34 @@ void BaseRailBlock::onPlace(BlockSource& region, const BlockPos& pos) const {
 	onLoaded(region, pos);
 }
 
+void BaseRailBlock::onRemove(BlockSource& region, const BlockPos& pos) const {
+	int dir = region.getData(pos);
+	if (mUsesDataBit) {
+		dir &= RAIL_DIRECTION_MASK;
+	}
+	if (dir >= 2 && dir <= 5) {
+		region.updateNeighborsAt(pos.above());
+	}
+	if (mUsesDataBit) {
+		region.updateNeighborsAt(pos);
+		region.updateNeighborsAt(pos.below());
+	}
+	Block::onRemove(region, pos);
+}
+
 void BaseRailBlock::neighborChanged(BlockSource& region, const BlockPos& pos, const BlockPos& neighborPos) const {
 	_updatePlacement(region, pos, region.getBlockID(neighborPos));
 }
 
 void BaseRailBlock::updateState(BlockSource& region, const BlockPos& pos, int data, int dir, int type) const {
+	UNUSED_PARAMETER(region, pos, data, dir, type);
 }
 
 void BaseRailBlock::updateDir(BlockSource& region, const BlockPos& pos, bool first) const {
-// 	if (region.getLevel().isClientSide() == false) {
-// 		auto& circuit = region.getDimension().getCircuitSystem();
-// 		Rail rail(region, pos);
-// 		rail.place(circuit.getStrength(pos) != 0, first);
-// 	}
+	if (!region.getLevel().isClientSide()) {
+		Rail rail(region, pos);
+		rail.place(region.hasNeighborSignal(pos), first);
+	}
 }
 
 ItemInstance BaseRailBlock::asItemInstance(BlockSource& region, const BlockPos& pos, int blockData) const {

@@ -462,6 +462,69 @@ bool BlockSource::isSolidBlockingBlock(const BlockPos& p){
 	return isSolidBlockingBlock(p.x, p.y, p.z);
 }
 
+int BlockSource::getDirectSignal(const BlockPos& pos, int dir) {
+	const Block& block = getBlock(pos);
+	if (!block.isType(Block::mAir)) {
+		return block.getDirectSignal(*this, pos, dir);
+	}
+	return 0;
+}
+
+int BlockSource::getBestDirectSignal(const BlockPos& pos) {
+	int best = 0;
+	best = std::max(best, getDirectSignal(pos.below(), 0));
+	best = std::max(best, getDirectSignal(pos.above(), 1));
+	best = std::max(best, getDirectSignal(pos.north(), 2));
+	best = std::max(best, getDirectSignal(pos.south(), 3));
+	best = std::max(best, getDirectSignal(pos.west(), 4));
+	best = std::max(best, getDirectSignal(pos.east(), 5));
+	return best;
+}
+
+int BlockSource::getSignal(const BlockPos& pos, int dir) {
+	const Block& block = getBlock(pos);
+	if (isSolidBlockingBlock(pos)) {
+		int direct = getBestDirectSignal(pos);
+		if (block.isSignalSource()) {
+			return std::max(direct, block.getSignal(*this, pos, dir));
+		}
+		return direct;
+	}
+	if (!block.isType(Block::mAir)) {
+		return block.getSignal(*this, pos, dir);
+	}
+	return 0;
+}
+
+int BlockSource::getBestNeighborSignal(const BlockPos& pos) {
+	int best = 0;
+	best = std::max(best, getSignal(pos.below(), 0));
+	best = std::max(best, getSignal(pos.above(), 1));
+	best = std::max(best, getSignal(pos.north(), 2));
+	best = std::max(best, getSignal(pos.south(), 3));
+	best = std::max(best, getSignal(pos.west(), 4));
+	best = std::max(best, getSignal(pos.east(), 5));
+	return best;
+}
+
+bool BlockSource::hasDirectSignal(const BlockPos& pos) {
+	return getDirectSignal(pos.below(), 0) > 0
+		|| getDirectSignal(pos.above(), 1) > 0
+		|| getDirectSignal(pos.north(), 2) > 0
+		|| getDirectSignal(pos.south(), 3) > 0
+		|| getDirectSignal(pos.west(), 4) > 0
+		|| getDirectSignal(pos.east(), 5) > 0;
+}
+
+bool BlockSource::hasNeighborSignal(const BlockPos& pos) {
+	return getSignal(pos.below(), 0) > 0
+		|| getSignal(pos.above(), 1) > 0
+		|| getSignal(pos.north(), 2) > 0
+		|| getSignal(pos.south(), 3) > 0
+		|| getSignal(pos.west(), 4) > 0
+		|| getSignal(pos.east(), 5) > 0;
+}
+
 bool BlockSource::isConsideredSolidBlock(int x, int y, int z) {
 	return getBlock({ x, y, z }).isSolid();
 }

@@ -216,6 +216,7 @@ bool LeverBlock::use(Player& player, const BlockPos& pos) const {
 	openState.set(data.data, !bOpen);
 
 	region.setBlockAndData(pos, data, Block::UPDATE_ALL, &player);
+	region.updateNeighborsAt(pos - Facing::DIRECTION[_getFacingFromData(data.data)]);
 
 // 	if (!region.getLevel().isClientSide()) {
 // 		region.getDimension().getCircuitSystem().setStrength(pos,getSignal(region, pos, data.data));
@@ -252,8 +253,21 @@ void LeverBlock::onRemove(BlockSource& region, const BlockPos& pos) const {
 	Block::onRemove(region, pos/*, oldTileID*/);
 }
 
+bool LeverBlock::isSignalSource() const {
+	return true;
+}
+
 int LeverBlock::getSignal(BlockSource& region, const BlockPos& pos, int dir) const {
+	UNUSED_PARAMETER(dir);
 	return (region.getData(pos) & 8) > 0 ? Redstone::SIGNAL_MAX : Redstone::SIGNAL_NONE;
+}
+
+int LeverBlock::getDirectSignal(BlockSource& region, const BlockPos& pos, int dir) const {
+	DataID data = region.getData(pos);
+	if ((data & 8) == 0) {
+		return Redstone::SIGNAL_NONE;
+	}
+	return (dir == _getFacingFromData(data)) ? Redstone::SIGNAL_MAX : Redstone::SIGNAL_NONE;
 }
 
  

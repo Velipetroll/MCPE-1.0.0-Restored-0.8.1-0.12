@@ -21,7 +21,7 @@ public:
 	bool shouldRenderFace(BlockSource& region, const BlockPos& pos, FacingID face, const AABB& shape) const override;
 
 	int getDirectSignal(BlockSource& region, const BlockPos& pos, int dir) const override;
-	virtual int getSignal(BlockSource& region, const BlockPos& pos, int dir) const;
+	int getSignal(BlockSource& region, const BlockPos& pos, int dir) const override;
 	bool isSignalSource() const override;
 
 	void neighborChanged(BlockSource& region, const BlockPos& pos, const BlockPos& neighborPos) const override;

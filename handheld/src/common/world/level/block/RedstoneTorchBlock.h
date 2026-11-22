@@ -13,14 +13,19 @@ public:
 
 	virtual void onLoaded(BlockSource& region, const BlockPos& pos) const override;
 
-
 	virtual void onPlace(BlockSource& region, const BlockPos& pos) const override;
+	virtual void onRemove(BlockSource& region, const BlockPos& pos) const override;
+	virtual void neighborChanged(BlockSource& region, const BlockPos& pos, const BlockPos& neighborPos) const override;
 	virtual void onRedstoneUpdate(BlockSource& region, const BlockPos& pos, int strength, bool isFirstTime) const override;
+
+	virtual bool isSignalSource() const override;
+	virtual int getSignal(BlockSource& region, const BlockPos& pos, int dir) const override;
+	virtual int getDirectSignal(BlockSource& region, const BlockPos& pos, int dir) const override;
 
 	virtual void tick(BlockSource& region, const BlockPos& pos, Random& random) const override;
 	virtual void animateTick(BlockSource& region, const BlockPos& pos, Random& random) const override;
 
-	virtual int getTickDelay() /*override*/;
+	virtual int getTickDelay() const /*override*/;
 
 	virtual bool shouldConnectToRedstone(BlockSource& region, const BlockPos& pos, int direction) const override;
 
@@ -30,7 +35,7 @@ public:
 
 	void installCircuit(BlockSource &source, const BlockPos& pos, bool bLoading) const;
 
-
 private:
+	bool _isAttachedPowered(BlockSource& region, const BlockPos& pos) const;
 	bool mOn = false;
 };

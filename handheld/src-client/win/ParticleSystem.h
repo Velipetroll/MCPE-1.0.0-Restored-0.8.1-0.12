@@ -359,6 +359,28 @@ inline void spawnTorchSmoke(float x, float y, float z, BlockSource* region = nul
     spawnFlame(x, y, z, 0.0f, 0.0f, 0.0f);
 }
 
+inline void spawnRedDust(float x, float y, float z, BlockSource* region = nullptr) {
+    auto& ps = getParticles();
+    if (ps.size() > 800) return;
+    Particle p;
+    initParticleBase(p, x, y, z, 0.0f, 0.0f, 0.0f);
+    p.type = ParticleType::Smoke;
+    p.noclip = false;
+    p.vx *= 0.1f;
+    p.vy *= 0.1f;
+    p.vz *= 0.1f;
+    p.r = rand01() * 0.4f + 0.6f;
+    p.g = rand01() * 0.05f;
+    p.b = rand01() * 0.05f;
+    p.a = 1.0f;
+    p.scale *= 0.75f;
+    p.initScale = p.scale;
+    p.maxAliveTime = static_cast<int>(8.0f / (rand01() * 0.8f + 0.2f));
+    if (stepParticle(p, region)) {
+        ps.push_back(p);
+    }
+}
+
 inline void spawnFurnaceSmoke(float x, float y, float z, BlockSource* region = nullptr) {
     spawnSmoke(x, y, z, 0.0f, 0.0f, 0.0f, 100, region);
     spawnFlame(x, y, z, 0.0f, 0.0f, 0.0f);

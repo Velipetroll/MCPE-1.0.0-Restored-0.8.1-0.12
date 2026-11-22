@@ -39,7 +39,9 @@ public:
 	virtual void onRemove(BlockSource& region, const BlockPos& pos) const override;
 
 	// Redstone Logic
-	int getSignal(BlockSource& region, const BlockPos& pos, int dir) const;
+	bool isSignalSource() const override;
+	int getSignal(BlockSource& region, const BlockPos& pos, int dir) const override;
+	int getDirectSignal(BlockSource& region, const BlockPos& pos, int dir) const override;
 
 	virtual ItemInstance asItemInstance(BlockSource& region, const BlockPos& pos, int blockData) const override;
 

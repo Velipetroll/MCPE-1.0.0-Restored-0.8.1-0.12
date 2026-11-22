@@ -39,6 +39,8 @@
 #include "ParticleSystem.h"
 #include "ProjectileTntSystem.h"
 #include "PaintingSystem.h"
+#include "MinecartSystem.h"
+#include "world/level/block/BaseRailBlock.h"
 #include "world/level/block/FireBlock.h"
 #include "world/level/BlockSourceListener.h"
 #include "world/level/block/Block.h"
@@ -383,6 +385,7 @@ public:
 	bool mWasInWater = false;
 	bool mWasJumpHeld = false;
 	int mFlyToggleTicks = 0;
+	int ridingMinecartId = 0;
 
 	void triggerSwing() {
 		mSwingProgress = 0.001f;
@@ -440,6 +443,7 @@ public:
 		mWasInWater = false;
 		mWasJumpHeld = false;
 		mFlyToggleTicks = 0;
+		ridingMinecartId = 0;
 		mTickAccum = 0.0f;
 		mPosDelta = Vec3(0.0f, 0.0f, 0.0f);
 		mFallDistance = 0.0f;
@@ -481,6 +485,7 @@ public:
 		mWasInWater = false;
 		mWasJumpHeld = false;
 		mFlyToggleTicks = 0;
+		ridingMinecartId = 0;
 		mTickAccum = 0.0f;
 		mPosDelta = Vec3(0.0f, 0.0f, 0.0f);
 		mFallDistance = 0.0f;
@@ -675,6 +680,44 @@ public:
 		mPrevWalkAnimPos = mCurrWalkAnimPos;
 		mPrevWalkAnimSpeed = mCurrWalkAnimSpeed;
 		mPrevBodyYaw = mCurrBodyYaw;
+
+		if (ridingMinecartId != 0) {
+			MinecartSystem::MinecartEntity* rmc = MinecartSystem::findById(ridingMinecartId);
+			if (!rmc) {
+				ridingMinecartId = 0;
+			} else {
+				bool prevJumpHeld = mWasJumpHeld;
+				bool jumpHeld = (gGuiContext.currentScreen == nullptr) && glinput.KeyDown(GLFW_KEY_SPACE);
+				mWasJumpHeld = jumpHeld;
+				bool sneaking = isSneaking();
+				if (sneaking || (!prevJumpHeld && jumpHeld)) {
+					rmc->riderIsPlayer = false;
+					rmc->riderForward = false;
+					ridingMinecartId = 0;
+					teleportTo(rmc->posX, (rmc->posY + 0.35f) + mHeightOffset, rmc->posZ);
+					return;
+				}
+				float moveForward = (gGuiContext.currentScreen == nullptr && glinput.KeyDown(GLFW_KEY_W)) ? 1.0f : 0.0f;
+				rmc->riderIsPlayer = true;
+				rmc->riderForward = (moveForward > 0.0f);
+				rmc->riderFwdX = cameraMoveFront.x;
+				rmc->riderFwdZ = cameraMoveFront.z;
+				mFallDistance = 0.0f;
+				mPosDelta = Vec3::ZERO;
+				mIsFlying = false;
+				mNoGravity = false;
+				mSlideOffset = Vec3::ZERO;
+				float eyeY = rmc->posY + rmc->getRideHeight() + (mHeightOffset - 0.5f);
+				float feetY = eyeY - mHeightOffset;
+				mBB.set(rmc->posX - 0.3f, feetY, rmc->posZ - 0.3f, rmc->posX + 0.3f, feetY + 1.8f, rmc->posZ + 0.3f);
+				mCurrFeetY = feetY;
+				mCurrPos = glm::vec3(rmc->posX, eyeY, rmc->posZ);
+				mCurrSmoothBob = 0.0f;
+				mCurrTilt = 0.0f;
+				mCurrWalkAnimSpeed = 0.0f;
+				return;
+			}
+		}
 
 		// Entity::baseTick() (Entity.cpp L893-929): check water, reset fallDistance
 		if (isInWater(true)) {
@@ -1986,6 +2029,23 @@ static void serializeChunkWorldItems(const ChunkPos& cp,
 		++i;
 	}
 
+	auto& minecarts = MinecartSystem::getMinecarts();
+	for (size_t i = 0; i < minecarts.size(); ) {
+		ChunkPos mCp(Math::floor(minecarts[i].posX) >> 4, Math::floor(minecarts[i].posZ) >> 4);
+		if (mCp == cp) {
+			if (auto mTag = MinecartSystem::saveMinecartTag(minecarts[i])) {
+				NbtIo::write(mTag.get(), stream);
+				anyWritten = true;
+			}
+			if (removeFromList) {
+				minecarts[i] = minecarts.back();
+				minecarts.pop_back();
+				continue;
+			}
+		}
+		++i;
+	}
+
 	if (anyWritten) {
 		lc.setSerializedEntitiesBuffer(std::move(encoded), true);
 		lc.setHadSerializedEntities(true);
@@ -2011,6 +2071,10 @@ static void deserializeChunkWorldItems(LevelChunk& lc, std::vector<WorldItemEnti
 		}
 		if (tag->getInt("id") == 83) {
 			PaintingSystem::loadPaintingTag(*tag);
+			continue;
+		}
+		if (tag->getInt("id") == 84) {
+			MinecartSystem::loadMinecartTag(*tag);
 			continue;
 		}
 		if (tag->getInt("id") != 64) {
@@ -4128,6 +4192,8 @@ void renderThreadStuff()
 		worldItemTickAccum = 0.0f;
 		mobManager.clear();
 		PaintingSystem::clear();
+		MinecartSystem::clear();
+		c.ridingMinecartId = 0;
 		sFallingBlocks.clear();
 		gPlayerFireTicks = 0;
 		lastLightmapSun = -1.0f;
@@ -4803,6 +4869,34 @@ void renderThreadStuff()
 				};
 
 				if (allowWorldInput && !attackedMobThisClick && glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
+					float mcHitDist = 999.0f;
+					int mcIdx = MinecartSystem::raycastMinecart(
+						Vec3(c.mPos.x, c.mPos.y, c.mPos.z),
+						Vec3(c.cameraFront.x, c.cameraFront.y, c.cameraFront.z),
+						hasTargetHit ? blockHitDist : 5.0f,
+						mcHitDist);
+					if (mcIdx >= 0) {
+						auto& carts = MinecartSystem::getMinecarts();
+						auto& mc = carts[static_cast<size_t>(mcIdx)];
+						int atkDmg = std::max(1, getToolInfo(held).attackDamage);
+						if (mc.hurt(atkDmg, gGuiContext.isCreative, region)) {
+							if (c.ridingMinecartId == mc.entityId) {
+								c.ridingMinecartId = 0;
+								c.teleportTo(mc.posX, mc.posY + 0.35f + c.mHeightOffset, mc.posZ);
+							}
+							if (!gGuiContext.isCreative && Item::mMinecart) {
+								spawnWorldItem(worldItems, ItemInstance(Item::mMinecart, 1, 0),
+								               Vec3(mc.posX, mc.posY, mc.posZ), Vec3(0, 2.0f, 0), 0.25f);
+							}
+							carts[static_cast<size_t>(mcIdx)] = carts.back();
+							carts.pop_back();
+						}
+						c.triggerSwing();
+						attackedMobThisClick = true;
+					}
+				}
+
+				if (allowWorldInput && !attackedMobThisClick && glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
 					int pIdx = PaintingSystem::raycastPainting(
 						Vec3(c.mPos.x, c.mPos.y, c.mPos.z),
 						Vec3(c.cameraFront.x, c.cameraFront.y, c.cameraFront.z),
@@ -4945,7 +5039,49 @@ void renderThreadStuff()
 
 				if (allowWorldInput && glinput.NewMouseDown(GLFW_MOUSE_BUTTON_RIGHT)) {
 					bool handledRightClick = false;
-					if (mobInFront && !held.isNull() && held.getStackSize() > 0) {
+					{
+						float mcHitDist = 999.0f;
+						int mcIdx = MinecartSystem::raycastMinecart(
+							rayStart,
+							Vec3(c.cameraFront.x, c.cameraFront.y, c.cameraFront.z),
+							hasTargetHit ? blockHitDist : reach,
+							mcHitDist);
+						if (mcIdx >= 0 && (!mobInFront || mcHitDist <= mobHitDist)) {
+							auto& carts = MinecartSystem::getMinecarts();
+							auto& mc = carts[static_cast<size_t>(mcIdx)];
+							if (c.ridingMinecartId == mc.entityId) {
+								mc.riderIsPlayer = false;
+								mc.riderForward = false;
+								c.ridingMinecartId = 0;
+								c.teleportTo(mc.posX, mc.posY + 0.35f + c.mHeightOffset, mc.posZ);
+								c.triggerSwing();
+								handledRightClick = true;
+							} else if (!mc.hasRider()) {
+								if (c.ridingMinecartId != 0) {
+									if (auto* prevMc = MinecartSystem::findById(c.ridingMinecartId)) {
+										prevMc->riderIsPlayer = false;
+										prevMc->riderForward = false;
+									}
+								}
+								c.ridingMinecartId = mc.entityId;
+								mc.riderIsPlayer = true;
+								float eyeY = mc.posY + mc.getRideHeight() + (c.mHeightOffset - 0.5f);
+								c.teleportTo(mc.posX, eyeY, mc.posZ);
+								c.triggerSwing();
+								handledRightClick = true;
+							}
+						} else if (c.ridingMinecartId != 0 && held.isNull() && !hasTargetHit && !mobInFront) {
+							if (auto* prevMc = MinecartSystem::findById(c.ridingMinecartId)) {
+								prevMc->riderIsPlayer = false;
+								prevMc->riderForward = false;
+								c.ridingMinecartId = 0;
+								c.teleportTo(prevMc->posX, prevMc->posY + 0.35f + c.mHeightOffset, prevMc->posZ);
+								c.triggerSwing();
+								handledRightClick = true;
+							}
+						}
+					}
+					if (!handledRightClick && mobInFront && !held.isNull() && held.getStackSize() > 0) {
 						if (Item::mShears && held.getItem() == Item::mShears) {
 							static Random shearRng;
 							if (mobManager.shearSheep(targetMobIdx, [&](const ItemInstance& dropItem, const Vec3& dropPos) {
@@ -5102,6 +5238,24 @@ void renderThreadStuff()
 							region.setBlockAndData(hitPos, FullBlock(fb.id, newData), Block::UPDATE_ALL);
 							rebuildChunksForBlock(hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
 							SoundEngine::play(SoundEngine::SND_DOOR, 0.75f);
+							c.triggerSwing();
+							handledRightClick = true;
+						} else if (Block::mLever && fb.id == Block::mLever->mID) {
+							DataID newData = fb.data;
+							auto& openState = hitBlk->getBlockState(BlockState::OpenBit);
+							bool bOpen = openState.getBool(newData);
+							openState.set(newData, !bOpen);
+							region.setBlockAndData(hitPos, FullBlock(fb.id, newData), Block::UPDATE_ALL);
+							int dirBits = hitBlk->getBlockState(BlockState::FacingDirection).get<int>(newData);
+							FacingID leverFacing = Facing::DOWN;
+							if (dirBits == 1) leverFacing = Facing::EAST;
+							else if (dirBits == 2) leverFacing = Facing::WEST;
+							else if (dirBits == 3) leverFacing = Facing::SOUTH;
+							else if (dirBits == 4) leverFacing = Facing::NORTH;
+							else if (dirBits == 5 || dirBits == 6) leverFacing = Facing::UP;
+							region.updateNeighborsAt(hitPos - Facing::DIRECTION[leverFacing]);
+							rebuildChunksForBlock(hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+							SoundEngine::play(SoundEngine::SND_CLICK, 0.75f, bOpen ? 0.5f : 0.6f);
 							c.triggerSwing();
 							handledRightClick = true;
 						} else if (openInteractiveBlockScreen(region, hitPos, fb.id, gGuiContext)) {
@@ -5384,6 +5538,16 @@ void renderThreadStuff()
 						} else if (Item::mPainting && hid == Item::mPainting->getId() && face < Facing::MAX) {
 							if (PaintingSystem::tryPlacePainting(region, hitPos, face)) {
 								SoundEngine::play(SoundEngine::SND_PLACE, 0.75f, 0.95f);
+								c.triggerSwing();
+								if (!gGuiContext.isCreative) {
+									held.remove(1);
+									if (held.getStackSize() <= 0) held.setNull();
+								}
+								handledRightClick = true;
+							}
+						} else if (Item::mMinecart && hid == Item::mMinecart->getId()) {
+							if (BaseRailBlock::isRail(region, hitPos)) {
+								MinecartSystem::spawnMinecart(hitPos.x + 0.5f, hitPos.y + 0.5f, hitPos.z + 0.5f);
 								c.triggerSwing();
 								if (!gGuiContext.isCreative) {
 									held.remove(1);
@@ -5685,6 +5849,7 @@ void renderThreadStuff()
 
 			syncFurnaceBlockStates(c.getRegion(), gGuiContext, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
 
+			float minecartAlpha = 0.0f;
 			if (!gGuiContext.loadingChunks) {
 				float clampedDt = std::min(std::max(deltaTime, 0.0001f), 0.1f);
 				tickFurnaces(gGuiContext, clampedDt);
@@ -5738,7 +5903,7 @@ void renderThreadStuff()
 					                                   static_cast<float>(sp.x), static_cast<float>(sp.z), gGuiContext.worldTime);
 				}
 
-				// 20 TPS world tick: random ticks, scheduled ticks, BlockEntities, FallingBlocks, Paintings, Fire, animateTick
+				// 20 TPS world tick: random ticks, scheduled ticks, BlockEntities, FallingBlocks, Paintings, Minecarts, Fire, animateTick
 				static float worldTickAccum = 0.0f;
 				static uint64_t worldTickCounter = 0;
 				worldTickAccum += clampedDt;
@@ -5748,6 +5913,9 @@ void renderThreadStuff()
 					BlockSource& reg = c.getRegion();
 					Level& lvl = c.getLevel();
 					sWorldTickChangedBlocks.clear();
+					MinecartSystem::tickAll(reg, mobManager.mobs, c.mBB,
+					                        Vec3(c.mPos.x, c.mPos.y, c.mPos.z),
+					                        c.mPosDelta, c.ridingMinecartId);
 					int pcx = Math::floor(c.mPos.x) >> 4;
 					int pcz = Math::floor(c.mPos.z) >> 4;
 					Tick curTick(worldTickCounter);
@@ -6002,6 +6170,7 @@ void renderThreadStuff()
 						}
 					}
 				}
+				minecartAlpha = worldTickAccum / 0.05f;
 
 				// Ambient torch / lit furnace particles near player (1:1 MCPE 0.8.1 TorchTile/FurnaceTile::animateTick)
 				static float ambientParticleAccum = 0.0f;
@@ -6019,7 +6188,8 @@ void renderThreadStuff()
 						if (ry < 1 || ry > 126) continue;
 						BlockPos bpos(rx, ry, rz);
 						FullBlock fb = reg.getBlockAndData(bpos);
-						if (Block::mTorch && fb.id == Block::mTorch->mID) {
+						if ((Block::mTorch && fb.id == Block::mTorch->mID) ||
+						    (Block::mLitRedStoneTorch && fb.id == Block::mLitRedStoneTorch->mID)) {
 							float tx = rx + 0.5f;
 							float ty = ry + 0.7f;
 							float tz = rz + 0.5f;
@@ -6030,7 +6200,11 @@ void renderThreadStuff()
 								case TorchBlock::TORCH_SOUTH: tz += 0.27f; ty += 0.22f; break;
 								default: break;
 							}
-							ParticleSystem::spawnTorchSmoke(tx, ty, tz, &reg);
+							if (Block::mLitRedStoneTorch && fb.id == Block::mLitRedStoneTorch->mID) {
+								ParticleSystem::spawnRedDust(tx, ty, tz, &reg);
+							} else {
+								ParticleSystem::spawnTorchSmoke(tx, ty, tz, &reg);
+							}
 						} else if (Block::mLitFurnace && fb.id == Block::mLitFurnace->mID) {
 							int dir = Block::mLitFurnace->getBlockState(BlockState::FacingDirection).get<int>(fb.data);
 							float fx = rx + 0.5f;
@@ -6115,6 +6289,7 @@ void renderThreadStuff()
 							                           &c.getRegion());
 						}
 					});
+				MinecartSystem::syncMobRiders(mobManager.mobs);
 
 				// Update arrows
 				{
@@ -6265,6 +6440,17 @@ void renderThreadStuff()
 				projection = glm::perspective(glm::radians(85.0f), aspect, 0.1f, 1000.0f);
 				for (mce::Shader* sh : uniqueTerrainShaders) {
 					sh->setMatrix4("PROJ", glm::value_ptr(projection));
+				}
+			}
+
+			if (c.ridingMinecartId != 0) {
+				if (const MinecartSystem::MinecartEntity* rmc = MinecartSystem::findById(c.ridingMinecartId)) {
+					float ix = rmc->prevPosX + (rmc->posX - rmc->prevPosX) * minecartAlpha;
+					float iy = rmc->prevPosY + (rmc->posY - rmc->prevPosY) * minecartAlpha;
+					float iz = rmc->prevPosZ + (rmc->posZ - rmc->prevPosZ) * minecartAlpha;
+					float eyeY = iy + rmc->getRideHeight() + (c.mHeightOffset - 0.5f);
+					c.mPos = glm::vec3(ix, eyeY, iz);
+					c.mRenderFeetY = eyeY - c.mHeightOffset;
 				}
 			}
 
@@ -6987,6 +7173,7 @@ void renderThreadStuff()
 			ProjectileTntSystem::renderArrows();
 			ProjectileTntSystem::renderTnts();
 			PaintingSystem::renderPaintings(c.getRegion());
+			MinecartSystem::renderAll(c.getRegion(), minecartAlpha, skyInfo.sunFactor);
 			for (const auto& fb : sFallingBlocks) {
 				glPushMatrix();
 				glTranslatef(fb.x, fb.y + 0.5f, fb.z);

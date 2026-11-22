@@ -13,20 +13,32 @@ RedstoneBlock::RedstoneBlock(const std::string& nameId, int id)
 	: Block(nameId, id, Material::getMaterial(MaterialType::Metal)) {
 }
 
+bool RedstoneBlock::isSignalSource() const {
+	return true;
+}
+
+int RedstoneBlock::getSignal(BlockSource& region, const BlockPos& pos, int dir) const {
+	return Redstone::SIGNAL_MAX;
+}
+
 bool RedstoneBlock::shouldConnectToRedstone(BlockSource& region, const BlockPos& pos, int direction) const
 {
 	return true;
 }
 
 void RedstoneBlock::onLoaded(BlockSource& region, const BlockPos& pos) const {
-// 	if (!region.getLevel().isClientSide()) {
-// 		auto producer = region.getDimension().getCircuitSystem().create<ProducerComponent>(pos, &region, Facing::NOT_DEFINED);
-// 		if (producer) {
-// 			producer->setStrength(Redstone::SIGNAL_MAX);
-// 		}
-// 	}
 }
 
 void RedstoneBlock::onPlace(BlockSource& region, const BlockPos& pos) const {
 	onLoaded(region, pos);
+	if (!region.getLevel().isClientSide()) {
+		region.updateNeighborsAt(pos);
+	}
+}
+
+void RedstoneBlock::onRemove(BlockSource& region, const BlockPos& pos) const {
+	Block::onRemove(region, pos);
+	if (!region.getLevel().isClientSide()) {
+		region.updateNeighborsAt(pos);
+	}
 }

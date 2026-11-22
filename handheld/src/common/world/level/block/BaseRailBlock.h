@@ -28,6 +28,7 @@ public:
 
 	virtual void onLoaded(BlockSource& region, const BlockPos& pos) const override;
 	virtual void onPlace(BlockSource& region, const BlockPos& pos) const override;
+	virtual void onRemove(BlockSource& region, const BlockPos& pos) const override;
 	virtual void onRedstoneUpdate(BlockSource& region, const BlockPos& pos, int strength, bool isFirstTime) const override;
 	virtual void neighborChanged(BlockSource& region, const BlockPos& pos, const BlockPos& neighborPos) const override;
 
@@ -40,6 +41,7 @@ public:
 		Rail(BlockSource& region, const BlockPos& pos);
 
 		void place(bool hasSignal, bool first);
+		int countPotentialConnections();
 
 	protected:
 		void updateConnections(int direction);
@@ -50,6 +52,7 @@ public:
 		bool canConnectTo(Rail& rail);
 		void connectTo(Rail& rail);
 		bool hasNeighborRail(const BlockPos& pos);
+		bool hasRail(const BlockPos& pos);
 
 		BlockSource& mRegion;
 		BlockPos mPos;
