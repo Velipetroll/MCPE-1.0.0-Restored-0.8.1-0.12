@@ -209,12 +209,21 @@ void DoorBlock::neighborChanged(BlockSource& region, const BlockPos& pos, const 
 			if (region.getBlockID(pos.above()) == mID) {
 				region.removeBlock(pos.above());
 			}
+			return;
 		}
 	}
 	else {
 		if (region.getBlockID(pos.below()) != mID) {
 			region.setBlockAndData(pos, FullBlock::AIR, Block::UPDATE_ALL);
 // 			region.getLevel().broadcastDimensionEvent(region, LevelEvent::ParticlesDestroyBlock, pos, mID + (data << Block::TILE_NUM_SHIFT));
+			return;
+		}
+	}
+
+	if (!region.getLevel().isClientSide()) {
+		bool powered = region.hasNeighborSignal(pos) || (isUpper(data) ? region.hasNeighborSignal(pos.below()) : region.hasNeighborSignal(pos.above()));
+		if (isOpen(region, pos) != powered) {
+			setOpen(region, pos, powered, nullptr);
 		}
 	}
 }

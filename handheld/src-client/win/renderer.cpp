@@ -5570,6 +5570,21 @@ void renderThreadStuff()
 								}
 								handledRightClick = true;
 							}
+						} else if (Item::mRedStone && hid == Item::mRedStone->getId() && face < Facing::MAX) {
+							BlockID eid = region.getBlockID(placePos);
+							const Block* eb = Block::mBlocks[eid];
+							if ((eid == BlockID::AIR || (eb && eb->getMaterial().isReplaceable())) &&
+								Block::mRedStoneDust && Block::mRedStoneDust->mayPlace(region, placePos)) {
+								region.setBlockAndData(placePos, FullBlock(Block::mRedStoneDust->mID, 0), Block::UPDATE_ALL);
+								SoundEngine::play(SoundEngine::SND_PLACE, 0.75f, 0.95f);
+								c.triggerSwing();
+								if (!gGuiContext.isCreative) {
+									held.remove(1);
+									if (held.getStackSize() <= 0) held.setNull();
+								}
+								updateLightingAndRebuildChunks(region, placePos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+								handledRightClick = true;
+							}
 						} else if (Item::mMinecart && hid == Item::mMinecart->getId()) {
 							if (BaseRailBlock::isRail(region, hitPos)) {
 								MinecartSystem::spawnMinecart(hitPos.x + 0.5f, hitPos.y + 0.5f, hitPos.z + 0.5f);
