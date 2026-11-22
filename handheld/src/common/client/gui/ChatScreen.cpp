@@ -204,9 +204,7 @@ void ChatScreen::buttonClicked(Button* button) {
 	}
 }
 
-bool ChatScreen::handleBackEvent(bool isDown) {
-	if (!isDown) {
-		closeWindow();
-	}
+bool ChatScreen::handleBackEvent(bool /*isDown*/) {
+	closeWindow();
 	return true;
 }
