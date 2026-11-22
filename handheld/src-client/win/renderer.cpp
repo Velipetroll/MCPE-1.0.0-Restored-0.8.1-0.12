@@ -4109,8 +4109,9 @@ void renderThreadStuff()
 			gGuiContext.statusBannerTimer = 2.0f;
 		}
 
+		bool isPausedByScreen = (gGuiContext.currentScreen && gGuiContext.currentScreen->isPauseScreen());
 		if (gGuiContext.state == GameState::InGame && !gGuiContext.loadingChunks &&
-		    !gGuiContext.currentScreen && commandContext.level) {
+		    !isPausedByScreen && commandContext.level) {
 			gGuiContext.worldTimeSubTick += clampedFrameDt * 20.0f;
 			if (gGuiContext.worldTimeSubTick >= 1.0f) {
 				int64_t addTicks = static_cast<int64_t>(gGuiContext.worldTimeSubTick);
@@ -4586,19 +4587,24 @@ void renderThreadStuff()
 						gBowPulling = true;
 						gBowPullTime += deltaTime;
 					} else if (gBowPulling) {
-						if (holdingBow && gBowPullTime >= 0.12f) {
+						float t = gBowPullTime;
+						float launchPower = std::min(1.0f, (t * t + t * 2.0f) / 3.0f);
+						if (holdingBow && launchPower >= 0.1f) {
 							int arrowSlot = findArrowSlot();
 							if (gGuiContext.isCreative || arrowSlot >= 0) {
-								float power = std::min(1.0f, gBowPullTime / 1.0f);
-								float speed = 12.0f + power * 26.0f;
-								int dmg = 2 + static_cast<int>(power * 7.0f);
+								float speedPerTick = launchPower * 3.0f; // MCPE 0.8.1: a4 * 1.5 where a4 = LaunchPower * 2.0
+								float speed = speedPerTick * 20.0f;
+								int dmg = static_cast<int>(std::ceil(speedPerTick * 2.0f));
+								if (launchPower == 1.0f) {
+									dmg += (std::rand() % (dmg / 2 + 2));
+								}
 								// Match MCPE 0.8.1 Arrow(Level*, Mob*, float) spawn at eye height - 0.10, right hand 0.16
 								glm::vec3 rightVec = glm::normalize(glm::cross(c.cameraFront, c.cameraUp));
 								Vec3 spawnPos(c.mPos.x + rightVec.x * 0.16f + c.cameraFront.x * 0.20f,
 								              c.mPos.y - 0.10f + c.cameraFront.y * 0.20f,
 								              c.mPos.z + rightVec.z * 0.16f + c.cameraFront.z * 0.20f);
 								ProjectileTntSystem::spawnArrow(spawnPos, Vec3(c.cameraFront.x, c.cameraFront.y, c.cameraFront.z), speed, dmg, true);
-								SoundEngine::play(SoundEngine::SND_BOW, 0.9f, 0.9f + power * 0.2f);
+								SoundEngine::play(SoundEngine::SND_BOW, 1.0f, (1.0f / (((std::rand() % 100) / 100.0f) * 0.4f + 1.2f)) + launchPower * 0.5f);
 								if (!gGuiContext.isCreative && arrowSlot >= 0) {
 									ItemInstance& aSlot = gGuiContext.inventorySlots[static_cast<size_t>(arrowSlot)];
 									aSlot.remove(1);
@@ -4897,6 +4903,29 @@ void renderThreadStuff()
 						BlockPos hitPos = targetHit.getBlock();
 						FacingID face = targetHit.getFacing();
 						if (face < Facing::MAX) {
+							if (!handledRightClick && Item::mMobPlacer && !held.isNull() && held.getItem() == Item::mMobPlacer) {
+								BlockPos spawnBlock = hitPos + Facing::DIRECTION[face];
+								float yOff = (face == Facing::UP && Block::mFence && region.getBlockID(hitPos) == Block::mFence->mID) ? 0.5f : 0.0f;
+								MobType eggType = MobType::Pig;
+								bool validEgg = true;
+								switch (held.getAuxValue()) {
+									case 10: eggType = MobType::Chicken; break;
+									case 11: eggType = MobType::Cow; break;
+									case 12: eggType = MobType::Pig; break;
+									case 13: eggType = MobType::Sheep; break;
+									case 32: eggType = MobType::Zombie; break;
+									case 33: eggType = MobType::Creeper; break;
+									case 34: eggType = MobType::Skeleton; break;
+									default: validEgg = false; break;
+								}
+								if (validEgg && mobManager.spawnMobAt(eggType, spawnBlock.x + 0.5f, spawnBlock.y + yOff, spawnBlock.z + 0.5f)) {
+									if (!gGuiContext.isCreative) {
+										held.remove(1);
+										if (held.getStackSize() <= 0) held.setNull();
+									}
+									handledRightClick = true;
+								}
+							}
 							const Block* placeBlock = held.getBlock();
 							BlockPos placePos = hitPos + Facing::DIRECTION[face];
 
@@ -5257,9 +5286,13 @@ void renderThreadStuff()
 							continue;
 						}
 						if (!a.inGround) {
-							a.vy -= 18.0f * clampedDt;
-							a.vx *= 0.995f;
-							a.vz *= 0.995f;
+							BlockID curBid = reg.getBlockID(BlockPos(Math::floor(a.x), Math::floor(a.y), Math::floor(a.z)));
+							bool inWater = (curBid == 8 || curBid == 9);
+							float dragPerTick = inWater ? 0.80f : 0.99f;
+							float drag = std::pow(dragPerTick, clampedDt * 20.0f);
+							a.vx *= drag;
+							a.vz *= drag;
+							a.vy = a.vy * drag - 20.0f * clampedDt;
 							ProjectileTntSystem::updateArrowOrientation(a);
 							float nx = a.x + a.vx * clampedDt;
 							float ny = a.y + a.vy * clampedDt;

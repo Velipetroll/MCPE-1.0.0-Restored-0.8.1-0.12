@@ -129,6 +129,8 @@ public:
 
 	bool milkCow(int index);
 
+	bool spawnMobAt(MobType type, float x, float y, float z);
+
 	void render(BlockSource& region,
 	            const glm::mat4& projection,
 	            const glm::mat4& view,

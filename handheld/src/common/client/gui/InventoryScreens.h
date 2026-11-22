@@ -18,6 +18,7 @@ public:
 	void keyPressed(int key) override;
 	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override;
+	bool isPauseScreen() const override { return false; }
 
 private:
 	void updateCraftingResult();
@@ -65,6 +66,7 @@ public:
 	void keyPressed(int key) override;
 	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override;
+	bool isPauseScreen() const override { return false; }
 
 private:
 	void rebuildArmorList();
@@ -101,6 +103,7 @@ public:
 	void keyPressed(int key) override;
 	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override;
+	bool isPauseScreen() const override { return false; }
 
 private:
 	void ensureCreativeItems();
@@ -162,6 +165,7 @@ public:
 	void keyPressed(int key) override;
 	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override;
+	bool isPauseScreen() const override { return false; }
 
 protected:
 	void closeScreen();
@@ -218,6 +222,7 @@ public:
 	void keyPressed(int key) override;
 	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override;
+	bool isPauseScreen() const override { return false; }
 
 private:
 	void closeScreen();
@@ -254,6 +259,7 @@ public:
 	void keyPressed(int key) override;
 	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override { return true; }
+	bool isPauseScreen() const override { return false; }
 
 private:
 	void closeScreen();
@@ -276,6 +282,7 @@ public:
 	void keyPressed(int key) override;
 	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override { return true; }
+	bool isPauseScreen() const override { return false; }
 
 private:
 	std::string mLines[4];

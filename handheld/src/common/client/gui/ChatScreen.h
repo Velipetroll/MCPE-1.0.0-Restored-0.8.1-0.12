@@ -15,6 +15,7 @@ public:
 	void charTyped(unsigned int codepoint) override;
 	bool handleBackEvent(bool isDown = false) override;
 	bool renderGameBehind() const override { return true; }
+	bool isPauseScreen() const override { return false; }
 
 private:
 	std::string mInputText;

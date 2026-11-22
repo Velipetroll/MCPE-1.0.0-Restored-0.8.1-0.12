@@ -2204,3 +2204,17 @@ void MobManager::render(BlockSource& region,
 	glPopMatrix();
 	glMatrixMode(GL_MODELVIEW);
 }
+
+bool MobManager::spawnMobAt(MobType type, float x, float y, float z) {
+	static Random eggRng;
+	WorldMobEntity m;
+	m.id = mNextId++;
+	m.type = type;
+	m.pos = Vec3(x, y, z);
+	m.yaw = eggRng.nextFloat() * 360.0f;
+	m.headYaw = m.yaw;
+	m.headPitch = 0.0f;
+	m.health = m.maxHealth;
+	mobs.push_back(std::move(m));
+	return true;
+}

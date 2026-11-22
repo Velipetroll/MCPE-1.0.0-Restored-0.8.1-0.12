@@ -32,6 +32,7 @@ public:
 	virtual void charTyped(unsigned int codepoint) {}
 	virtual bool handleBackEvent(bool isDown = false) { return false; }
 	virtual bool renderGameBehind() const { return false; }
+	virtual bool isPauseScreen() const { return true; }
 
 	void renderMenuBackground(float partialTicks);
 	void renderDirtBackground();
