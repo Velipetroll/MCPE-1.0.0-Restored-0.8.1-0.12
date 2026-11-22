@@ -68,11 +68,17 @@ void RedstoneTorchBlock::onPlace(BlockSource& region, const BlockPos& pos) const
 }
 
 void RedstoneTorchBlock::onRemove(BlockSource& region, const BlockPos& pos) const {
+	static thread_local std::vector<BlockPos> sRemoving;
+	for (const auto& p : sRemoving) {
+		if (p == pos) return;
+	}
+	sRemoving.push_back(pos);
 	if (!region.getLevel().isClientSide() && mOn) {
 		region.updateNeighborsAt(pos);
 		region.updateNeighborsAt(pos.above());
 	}
 	TorchBlock::onRemove(region, pos);
+	sRemoving.pop_back();
 }
 
 bool RedstoneTorchBlock::_isAttachedPowered(BlockSource& region, const BlockPos& pos) const {

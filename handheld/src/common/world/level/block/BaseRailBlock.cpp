@@ -560,6 +560,11 @@ void BaseRailBlock::onPlace(BlockSource& region, const BlockPos& pos) const {
 }
 
 void BaseRailBlock::onRemove(BlockSource& region, const BlockPos& pos) const {
+	static thread_local std::vector<BlockPos> sRemoving;
+	for (const auto& p : sRemoving) {
+		if (p == pos) return;
+	}
+	sRemoving.push_back(pos);
 	int dir = region.getData(pos);
 	if (mUsesDataBit) {
 		dir &= RAIL_DIRECTION_MASK;
@@ -572,6 +577,7 @@ void BaseRailBlock::onRemove(BlockSource& region, const BlockPos& pos) const {
 		region.updateNeighborsAt(pos.below());
 	}
 	Block::onRemove(region, pos);
+	sRemoving.pop_back();
 }
 
 void BaseRailBlock::neighborChanged(BlockSource& region, const BlockPos& pos, const BlockPos& neighborPos) const {
