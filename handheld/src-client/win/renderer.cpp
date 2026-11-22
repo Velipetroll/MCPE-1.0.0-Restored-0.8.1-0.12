@@ -4069,6 +4069,9 @@ void renderThreadStuff()
 		worldItems.clear();
 		worldItemTickAccum = 0.0f;
 		mobManager.clear();
+		PaintingSystem::clear();
+		sFallingBlocks.clear();
+		gPlayerFireTicks = 0;
 		lastLightmapSun = -1.0f;
 		isMining = false;
 		miningProgress = 0.0f;
@@ -4724,7 +4727,7 @@ void renderThreadStuff()
 					int pIdx = PaintingSystem::raycastPainting(
 						Vec3(c.mPos.x, c.mPos.y, c.mPos.z),
 						Vec3(c.cameraFront.x, c.cameraFront.y, c.cameraFront.z),
-						5.0f);
+						hasTargetHit ? blockHitDist : 5.0f);
 					if (pIdx >= 0) {
 						auto& paintings = PaintingSystem::getPaintings();
 						if (!gGuiContext.isCreative && Item::mPainting) {
@@ -5682,10 +5685,136 @@ void renderThreadStuff()
 						}
 					}
 					if (!sWorldTickChangedBlocks.empty()) {
-						for (size_t ci = 0; ci < std::min<size_t>(sWorldTickChangedBlocks.size(), 32); ++ci) {
-							updateLightingAndRebuildChunks(reg, sWorldTickChangedBlocks[ci], rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+						std::vector<ChunkPos> rebuiltChunks;
+						for (const BlockPos& bp : sWorldTickChangedBlocks) {
+							ChunkPos cp(bp.x >> 4, bp.z >> 4);
+							bool already = false;
+							for (const ChunkPos& r : rebuiltChunks) {
+								if (r == cp) { already = true; break; }
+							}
+							if (!already) {
+								rebuiltChunks.push_back(cp);
+								updateLightingAndRebuildChunks(reg, bp, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+							}
 						}
 						sWorldTickChangedBlocks.clear();
+					}
+
+					// Animated flipbook textures (fire_0, fire_1, still_water, flowing_water, still_lava, flowing_lava, portal)
+					{
+						struct FlipbookEntry {
+							int dstX = 0, dstY = 0, tileW = 16, tileH = 16;
+							int frameW = 16, numStripFrames = 1;
+							int ticksPerFrame = 1;
+							int tickAcc = 0;
+							size_t seqIdx = 0;
+							std::vector<int> frameSeq;
+							std::vector<uint8_t> rgba;
+						};
+						static std::vector<FlipbookEntry> sFlipbooks;
+						static bool sFlipbooksLoaded = false;
+						if (!sFlipbooksLoaded) {
+							sFlipbooksLoaded = true;
+							mce::TexturePtr atTex = texgroup.getTexture(ResourceLocation("atlas.terrain"));
+							int atlasW = atTex.get() ? static_cast<int>(atTex->getDescription().mWidth) : 0;
+							int atlasH = atTex.get() ? static_cast<int>(atTex->getDescription().mHeight) : 0;
+							if (atlas && atlasW > 0 && atlasH > 0) {
+								std::string jsonPath = GuiComponent::resolveAssetPath("textures/flipbook_textures.json");
+								std::ifstream ifs(jsonPath);
+								if (ifs.good()) {
+									std::string jsonStr((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+									Json::Value root;
+									Json::Reader reader;
+									if (reader.parse(jsonStr, root) && root.isArray()) {
+										for (Json::ArrayIndex idx = 0; idx < root.size(); ++idx) {
+											const Json::Value& item = root[idx];
+											std::string texRel = item["flipbook_texture"].asString();
+											std::string tileName = item["atlas_tile"].asString();
+											if (texRel.empty() || tileName.empty()) continue;
+											const TextureAtlasItem& ti = atlas->getTextureItem(tileName);
+											if (ti.uvCount() <= 0) continue;
+											const TextureUVCoordinateSet& uv = ti[0];
+											int dstX = static_cast<int>(std::round(uv._u0 * atlasW));
+											int dstY = static_cast<int>(std::round(uv._v0 * atlasH));
+											int tileW = std::max(1, static_cast<int>(std::round((uv._u1 - uv._u0) * atlasW)));
+											int tileH = std::max(1, static_cast<int>(std::round((uv._v1 - uv._v0) * atlasH)));
+											std::string pngPath = GuiComponent::resolveAssetPath(texRel + ".png");
+											int pw = 0, ph = 0, comp = 0;
+											unsigned char* px = stbi_load(pngPath.c_str(), &pw, &ph, &comp, 4);
+											if (!px || pw <= 0 || ph < pw) {
+												if (px) stbi_image_free(px);
+												continue;
+											}
+											FlipbookEntry fe;
+											fe.dstX = dstX;
+											fe.dstY = dstY;
+											fe.tileW = tileW;
+											fe.tileH = tileH;
+											fe.frameW = pw;
+											fe.numStripFrames = std::max(1, ph / pw);
+											fe.ticksPerFrame = std::max(1, item["ticks_per_frame"].asInt(1));
+											if (item.isMember("frames") && item["frames"].isArray()) {
+												for (Json::ArrayIndex fi = 0; fi < item["frames"].size(); ++fi) {
+													fe.frameSeq.push_back(item["frames"][fi].asInt() % fe.numStripFrames);
+												}
+											} else {
+												for (int fi = 0; fi < fe.numStripFrames; ++fi) {
+													fe.frameSeq.push_back(fi);
+												}
+											}
+											fe.rgba.assign(px, px + static_cast<size_t>(pw * ph * 4));
+											stbi_image_free(px);
+											if (!fe.frameSeq.empty()) {
+												sFlipbooks.push_back(std::move(fe));
+											}
+										}
+									}
+								}
+							}
+						}
+						mce::TexturePtr atTex = texgroup.getTexture(ResourceLocation("atlas.terrain"));
+						if (atTex.get() && !sFlipbooks.empty()) {
+							int mipCount = std::max(1, static_cast<int>(atTex->getDescription().mMipMapCount));
+							auto& rctx = mce::RenderContextImmediate::get();
+							for (auto& fe : sFlipbooks) {
+								if (++fe.tickAcc < fe.ticksPerFrame) continue;
+								fe.tickAcc = 0;
+								fe.seqIdx = (fe.seqIdx + 1) % fe.frameSeq.size();
+								int f = fe.frameSeq[fe.seqIdx];
+								const uint8_t* srcFrame = fe.rgba.data() + static_cast<size_t>(f * fe.frameW * fe.frameW * 4);
+								std::vector<uint8_t> scaled(static_cast<size_t>(fe.tileW * fe.tileH * 4));
+								for (int y = 0; y < fe.tileH; ++y) {
+									int sy = (y * fe.frameW) / fe.tileH;
+									for (int x = 0; x < fe.tileW; ++x) {
+										int sx = (x * fe.frameW) / fe.tileW;
+										const uint8_t* sp = srcFrame + (sy * fe.frameW + sx) * 4;
+										uint8_t* dp = scaled.data() + (y * fe.tileW + x) * 4;
+										dp[0] = sp[0]; dp[1] = sp[1]; dp[2] = sp[2]; dp[3] = sp[3];
+									}
+								}
+								for (int mip = 0; mip < mipCount; ++mip) {
+									int mw = std::max(1, fe.tileW >> mip);
+									int mh = std::max(1, fe.tileH >> mip);
+									int mx = fe.dstX >> mip;
+									int my = fe.dstY >> mip;
+									if (mip == 0) {
+										atTex->subBuffer(rctx, scaled.data(), mx, my, mw, mh, 0);
+									} else {
+										std::vector<uint8_t> mscaled(static_cast<size_t>(mw * mh * 4));
+										for (int y = 0; y < mh; ++y) {
+											int sy = (y * fe.tileH) / mh;
+											for (int x = 0; x < mw; ++x) {
+												int sx = (x * fe.tileW) / mw;
+												const uint8_t* sp = scaled.data() + (sy * fe.tileW + sx) * 4;
+												uint8_t* dp = mscaled.data() + (y * mw + x) * 4;
+												dp[0] = sp[0]; dp[1] = sp[1]; dp[2] = sp[2]; dp[3] = sp[3];
+											}
+										}
+										atTex->subBuffer(rctx, mscaled.data(), mx, my, mw, mh, mip);
+									}
+								}
+							}
+						}
 					}
 
 					// Player persistent fire ticks (1 dmg every 20 ticks)
@@ -5726,7 +5855,10 @@ void renderThreadStuff()
 							continue;
 						}
 						if (Block::mSand && !static_cast<const HeavyBlock*>(Block::mSand)->isFree(reg, belowPos)) {
-							BlockPos landPos(Math::floor(fb.x), Math::floor(fb.y + 0.5f), Math::floor(fb.z));
+							BlockPos landPos = belowPos.above();
+							while (landPos.y < 127 && !static_cast<const HeavyBlock*>(Block::mSand)->isFree(reg, landPos)) {
+								++landPos.y;
+							}
 							float fallDist = fb.startY - fb.y;
 							bool isAnvil = (Block::mAnvil && fb.id == Block::mAnvil->mID);
 							bool brokenAnvil = false;

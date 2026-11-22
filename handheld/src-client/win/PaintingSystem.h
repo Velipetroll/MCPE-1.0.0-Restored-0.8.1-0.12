@@ -333,6 +333,7 @@ inline Unique<CompoundTag> savePaintingTag(const PaintingEntity& p) {
 	tag->putInt("id", 83);
 	tag->putString("Motive", getMotives()[static_cast<size_t>(p.motiveIdx)].name);
 	tag->putByte("Direction", static_cast<char>(p.dir));
+	tag->putByte("Dir", static_cast<char>(p.dir));
 	tag->putInt("TileX", p.tileX);
 	tag->putInt("TileY", p.tileY);
 	tag->putInt("TileZ", p.tileZ);
@@ -346,7 +347,8 @@ inline bool loadPaintingTag(const CompoundTag& tag) {
 	p.tileX = tag.getInt("TileX");
 	p.tileY = tag.getInt("TileY");
 	p.tileZ = tag.getInt("TileZ");
-	p.setDir(tag.getByte("Direction") & 3);
+	int dir = tag.contains("Direction") ? tag.getByte("Direction") : tag.getByte("Dir");
+	p.setDir(dir & 3);
 	getPaintings().push_back(p);
 	return true;
 }
