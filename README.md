@@ -73,6 +73,8 @@ The Dungeons codebase contained part of Pocket Edition 1.0.2.0 (dating to 2016-2
 ---
 
 ## Optimizations & Performance
+- **Greedy Meshing System:** Lossless per-subchunk greedy meshing across opaque blocks, leaves, and still water at all LODs (`RenderChunkBuilder`), with a 1D `GL_TEXTURE_BUFFER` (`TEXTURE_3`) smooth-lighting cell buffer + 0-fetch uniform fast-path, exact per-cell isotropic/directional texture rotation in shaders, and live toggle via Touch/PC UI or the `O` key.
+- **Rendering & FPS Pipeline:** Underground un-skylit cave subchunk culling, static GPU cloud VBO (`sCloudVbo`), VAO/texture/material state caching (`Mesh`, `RenderChunk`), entity/item frustum culling, and branchless shader fast-paths.
 - **Chunk Builder Pipeline:** Re-engineered `RenderChunkBuilder` and `RenderChunk` to optimize vertex generation, meshing, and prioritize chunk updates around the player.
 - **World Lighting:** Refactored light propagation (`WorldLighting`) to eliminate redundant calculations and reduce lag spikes during world generation and block updates.
 - **Block Tessellator Cache:** Expanded `BlockTessellatorCache` to reuse geometry data and avoid recalculating identical block faces.
