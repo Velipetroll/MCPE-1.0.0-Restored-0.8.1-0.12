@@ -1,6 +1,6 @@
 # Minecraft Pocket Edition 1.0.2.0 Code Restoration
 
-![In-game gameplay](images/ingame.png)
+![In-game gameplay](docs/images/ingame.png)
 
 This project aims to restore leaked MCPE 1.0.2.0 code from Minecraft Dungeons to working condition and make it playable on desktop platforms (Linux and Windows).
 
@@ -10,15 +10,15 @@ This project aims to restore leaked MCPE 1.0.2.0 code from Minecraft Dungeons to
 
 | In-Game View (Post-implementation of 0.8.1-0.12 code) | Main Menu / UI (Post-implementation of 0.8.1-0.12 code) |
 | :---: | :---: |
-| ![In-game gameplay](images/ingame.png) | ![Main Menu UI](images/menu.png) |
+| ![In-game gameplay](docs/images/ingame.png) | ![Main Menu UI](docs/images/menu.png) |
 
 | First Person View | Top-Down Renderer |
 | :---: | :---: |
-| ![First person view](images/theworld.png) | ![Seen from above](images/screenshot-renderer.png) |
+| ![First person view](docs/images/theworld.png) | ![Seen from above](docs/images/screenshot-renderer.png) |
 
 | Chunk Side Layer | The End |
 | :---: | :---: |
-| ![Side view of a chunk](images/SideLayer0.bmp) | ![The end](images/screenshot-end.png) |
+| ![Side view of a chunk](docs/images/SideLayer0.bmp) | ![The end](docs/images/screenshot-end.png) |
 
 ---
 
