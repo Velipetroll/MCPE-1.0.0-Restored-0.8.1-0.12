@@ -584,6 +584,16 @@ void DBStorage::resumeStorage() {
 // 	mDb->ResumeCompaction();
 }
 
+void DBStorage::flush() {
+	if (!mDb) {
+		return;
+	}
+	leveldb::WriteBatch emptyBatch;
+	leveldb::WriteOptions syncOpts;
+	syncOpts.sync = true;
+	_checkStatusValid(mDb->Write(syncOpts, &emptyBatch));
+}
+
 void DBStorage::onLowMemory() {
 	if (mDb) {
 		mCache->Prune();

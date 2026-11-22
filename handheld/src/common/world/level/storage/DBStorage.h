@@ -87,6 +87,7 @@ public:
 	virtual void compactStorage() override;
 	virtual void suspendStorage() override;
 	virtual void resumeStorage() override;
+	virtual void flush() override;
 	virtual void onLowMemory() /*override*/;
 
 protected:

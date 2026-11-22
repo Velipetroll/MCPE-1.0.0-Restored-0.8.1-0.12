@@ -63,6 +63,7 @@ public:
 	virtual void compactStorage() = 0;
 	virtual void suspendStorage() = 0;
 	virtual void resumeStorage() = 0;
+	virtual void flush() {}
 
 	Unique<CompoundTag> loadServerPlayerData(const Player& client);
 

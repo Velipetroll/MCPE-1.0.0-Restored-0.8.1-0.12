@@ -1198,7 +1198,7 @@ void Level::_loadDimensionStructures(int dimensionId) {
 //	}
 //}
 //
-void Level::saveDirtyChunks() {
+void Level::saveDirtyChunks(bool sync) {
 
 	for (auto& dimension : mDimensions) {
 		ChunkSource& cs = dimension.second->getChunkSource();
@@ -1207,9 +1207,16 @@ void Level::saveDirtyChunks() {
 			auto& lc = chunkRef.second.getChunk();
 
 			if (lc.shouldSave() && lc.getState() == ChunkState::Loaded) {
-				cs.saveLiveChunk(lc);
+				if (sync) {
+					cs.saveLiveChunkSync(lc);
+				} else {
+					cs.saveLiveChunk(lc);
+				}
 			}
 		}
+	}
+	if (sync && mLevelStorage) {
+		mLevelStorage->flush();
 	}
 }
 //

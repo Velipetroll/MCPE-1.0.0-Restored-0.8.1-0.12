@@ -320,7 +320,7 @@ public:
 	void saveAutonomousEntities();
 	void loadAutonomousEntities();
 	void saveBiomeData();
-	void saveDirtyChunks();
+	void saveDirtyChunks(bool sync = false);
 
 	//Particle* addParticle(ParticleType id, const Vec3& pos, const Vec3& dir, int data = 0);
 

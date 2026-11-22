@@ -577,6 +577,10 @@ bool ChunkSource::saveLiveChunk(LevelChunk& lc) {
 	return mParent ? mParent->saveLiveChunk(lc) : false;
 }
 
+bool ChunkSource::saveLiveChunkSync(LevelChunk& lc) {
+	return mParent ? mParent->saveLiveChunkSync(lc) : false;
+}
+
 void ChunkSource::compact() {
 	if (mParent) {
 		mParent->compact();

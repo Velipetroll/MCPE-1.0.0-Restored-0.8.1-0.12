@@ -37,6 +37,7 @@ public:
 
 	///save a chunk that is still owned by the main thread
 	virtual bool saveLiveChunk(LevelChunk& lc) override;
+	virtual bool saveLiveChunkSync(LevelChunk& lc) override;
 
 	virtual void acquireDiscarded(ChunkPtr&& lc) override;
 

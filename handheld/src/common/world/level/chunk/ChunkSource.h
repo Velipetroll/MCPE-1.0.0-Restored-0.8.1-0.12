@@ -73,6 +73,7 @@ public:
 
 	///save a chunk that is still being used on the main thread (do something to sync!
 	virtual bool saveLiveChunk(LevelChunk& lc);
+	virtual bool saveLiveChunkSync(LevelChunk& lc);
 
 	virtual void hintDiscardBatchBegin();
 	virtual void hintDiscardBatchEnd();

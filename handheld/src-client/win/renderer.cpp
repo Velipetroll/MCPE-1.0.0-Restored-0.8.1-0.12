@@ -2,6 +2,8 @@
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#include <atomic>
+#include <csignal>
 #include <world/level/Level.h>
 #include <renderer/chunks/RenderChunkBuilder.h>
 #include "world/level/dimension/Dimension.h"
@@ -211,8 +213,28 @@ void char_callback(GLFWwindow* window, unsigned int codepoint)
 	}
 }
 
+static std::atomic<bool> gSignalQuitRequested{false};
+
+static void handleTerminationSignal(int) {
+	gSignalQuitRequested.store(true, std::memory_order_relaxed);
+}
+
+static void window_close_callback(GLFWwindow* win) {
+	gGuiContext.shouldQuit = true;
+	if (win) {
+		glfwSetWindowShouldClose(win, GLFW_TRUE);
+	}
+}
+
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
+	if (key == GLFW_KEY_F4 && action == GLFW_PRESS && (mods & GLFW_MOD_ALT)) {
+		gGuiContext.shouldQuit = true;
+		if (window) {
+			glfwSetWindowShouldClose(window, GLFW_TRUE);
+		}
+		return;
+	}
 	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
 		if (gGuiContext.currentScreen) {
 			if (!gGuiContext.currentScreen->handleBackEvent(true)) {
@@ -1378,6 +1400,9 @@ GLFWwindow* renderThreadInit()
 
 	glfwSetCursorPosCallback(window, mouse_callback);
 	glfwSetKeyCallback(window, key_callback);
+	glfwSetWindowCloseCallback(window, window_close_callback);
+	std::signal(SIGINT, handleTerminationSignal);
+	std::signal(SIGTERM, handleTerminationSignal);
 	glfwSetCharCallback(window, char_callback);
 	glfwSetMouseButtonCallback(window, mouse_button_callback);
 	glfwSetScrollCallback(window, scroll_callback);
@@ -4002,26 +4027,51 @@ void renderThreadStuff()
 
 	auto saveActiveWorld = [&]() {
 		if (!gGuiContext.hasWorldLoaded) return;
-		gGuiContext.hasPlayerTransform = true;
-		gGuiContext.playerX = c.mPos.x;
-		gGuiContext.playerY = c.mBB.min.y;
-		gGuiContext.playerZ = c.mPos.z;
-		gGuiContext.playerYaw = c.yaw;
-		gGuiContext.playerPitch = c.pitch;
+		if (hasInitialSpawn) {
+			gGuiContext.hasPlayerTransform = true;
+			gGuiContext.playerX = c.mPos.x;
+			gGuiContext.playerY = c.mBB.min.y;
+			gGuiContext.playerZ = c.mPos.z;
+			gGuiContext.playerYaw = c.yaw;
+			gGuiContext.playerPitch = c.pitch;
+		}
+		gGuiContext.selectedHotbarSlot = std::max(0, std::min(8, gGuiHud.selectedSlot));
+		gGuiContext.ensureInventoryInitialized();
 
 		WorldMetadata meta;
 		captureMetadataFromContext(gGuiContext, meta);
 		saveWorldMetadata(gGuiContext.activeWorldDir, meta);
 
 		if (commandContext.level) {
+			LevelData& ld = commandContext.level->getLevelData();
+			ld.setLevelName(meta.name);
+			ld.setSeed(static_cast<RandomSeed>(meta.seed));
+			ld.setGameType(meta.isCreative ? GameType::Creative : GameType::Survival);
+			ld.setTime(static_cast<int>(gGuiContext.worldTime));
+			if (gGuiContext.hasBedSpawn) {
+				ld.setSpawn(BlockPos(gGuiContext.bedSpawnX, gGuiContext.bedSpawnY, gGuiContext.bedSpawnZ));
+			}
+			commandContext.level->getLevelStorage().saveLevelData(ld);
+
 			for (auto& kv : heldChunks) {
 				LevelChunk* lc = kv.second;
 				if (lc && lc->getState() == ChunkState::Loaded) {
 					serializeChunkWorldItems(kv.first, worldItems, *lc, false);
 				}
 			}
-			commandContext.level->saveDirtyChunks();
 			WorkerPool::drainWorkerPool(WorkerRole::Disk);
+			WorkerPool::drainWorkerPool(WorkerRole::MainThread);
+			commandContext.level->saveDirtyChunks(true);
+			if (commandContext.dim != nullptr) {
+				ChunkSource& chunkSrc = commandContext.dim->getChunkSource();
+				for (auto& kv : heldChunks) {
+					LevelChunk* lc = kv.second;
+					if (lc && lc->getState() == ChunkState::Loaded && lc->shouldSave()) {
+						chunkSrc.saveLiveChunkSync(*lc);
+					}
+				}
+			}
+			commandContext.level->getLevelStorage().flush();
 		}
 	};
 
@@ -4042,13 +4092,21 @@ void renderThreadStuff()
 				LevelChunk* lc = kv.second;
 				if (lc) {
 					serializeChunkWorldItems(kv.first, worldItems, *lc, true);
+					if (lc->getState() == ChunkState::Loaded && lc->shouldSave()) {
+						chunkSrc.saveLiveChunkSync(*lc);
+					}
 					chunkSrc.releaseChunk(*lc);
 				}
 			}
 			chunkSrc.hintDiscardBatchEnd();
+			chunkSrc.waitDiscardFinished();
 		}
 		heldChunks.clear();
+		if (commandContext.level) {
+			commandContext.level->saveDirtyChunks(true);
+		}
 		WorkerPool::drainWorkerPool(WorkerRole::Disk);
+		WorkerPool::drainWorkerPool(WorkerRole::MainThread);
 		for (auto& kv : rc) {
 			for (int i = 0; i < 8; ++i) {
 				delete kv.second[i];
@@ -4220,12 +4278,32 @@ void renderThreadStuff()
 		benchInitStart = std::chrono::high_resolution_clock::now();
 	}
 
+	double lastAutosaveTime = glfwGetTime();
+	GameState prevGameState = gGuiContext.state;
+
 	while (!glfwWindowShouldClose(window)) 
 	{
+		if (gSignalQuitRequested.load(std::memory_order_relaxed)) {
+			gGuiContext.shouldQuit = true;
+			glfwSetWindowShouldClose(window, GLFW_TRUE);
+		}
 		auto frameStartTP = std::chrono::high_resolution_clock::now();
 		WorkerPool::pumpMainThreadCallbacks();
 		lastFrame = currentFrame;
 		currentFrame = glfwGetTime();
+
+		if (gGuiContext.hasWorldLoaded && !gGuiContext.loadingChunks) {
+			if (gGuiContext.state == GameState::Paused && prevGameState == GameState::InGame) {
+				saveActiveWorld();
+				lastAutosaveTime = currentFrame;
+			} else if (gGuiContext.state == GameState::InGame && (currentFrame - lastAutosaveTime) >= 30.0) {
+				saveActiveWorld();
+				lastAutosaveTime = currentFrame;
+			}
+		} else {
+			lastAutosaveTime = currentFrame;
+		}
+		prevGameState = gGuiContext.state;
 
 		deltaTime = currentFrame - lastFrame;
 		gGuiContext.deltaTime = deltaTime;

@@ -122,14 +122,21 @@ void DBChunkStorage::_waitForPendingSave(const ChunkPos& pos, int radius) {
 }
 
 void DBChunkStorage::waitDiscardFinished() {
-	//flush out all batched chunks
-	if(mDiscardBatch.size() > 0) {
-		_writeBatch();
+	for (;;) {
+		//flush out all batched chunks
+		if (!mDiscardBatch.empty()) {
+			_writeBatch();
+		}
+
+		WorkerPool::drainWorkerPool(WorkerRole::Disk);
+		WorkerPool::drainWorkerPool(WorkerRole::MainThread);
+
+		if (mDiscardBatch.empty() && mLiveChunksBeingSaved.empty() && mDiscardedWhileLiveSaved.empty()) {
+			break;
+		}
 	}
 
-	WorkerPool::drainWorkerPool(WorkerRole::Disk);
-
- 	ALOGI(LOG_AREA_STORAGE, "Saved pending chunks\n");
+	ALOGI(LOG_AREA_STORAGE, "Saved pending chunks\n");
 }
 
 std::string join(string_span prefix, LevelChunk::Tag tag) {
@@ -407,7 +414,18 @@ void DBChunkStorage::_serializeChunk(const LevelChunk& lc, leveldb::WriteBatch& 
  		++scIndex;
  	}
  
- 	if (anyTerrainSaved) {
+ 	bool anyPrunedDirty = false;
+ 	if (alreadySavedWithSubChunks) {
+ 		const auto& subs = lc.getSubChunks();
+ 		for (size_t i = subChunkCount; i < subs.size(); ++i) {
+ 			if (subs[i] && subs[i]->mDirtyTicksCounter.isDirty()) {
+ 				anyPrunedDirty = true;
+ 				break;
+ 			}
+ 		}
+ 	}
+
+ 	if (anyTerrainSaved || anyPrunedDirty) {
  		buffer.clear();
  		lc.serialize2DMaps(stream);
  		batch.Put(join(prefix, LevelChunk::Tag::Data2D), buffer);
@@ -651,6 +669,25 @@ bool DBChunkStorage::saveLiveChunk(LevelChunk& lc){
  	}
 
 	return false;
+}
+
+bool DBChunkStorage::saveLiveChunkSync(LevelChunk& lc) {
+#if DISABLE_SAVING > 0
+	return true;
+#endif
+	const ChunkPos savedPos = lc.getPosition();
+	while (mLiveChunksBeingSaved.count(savedPos) > 0) {
+		WorkerPool::drainWorkerPool(WorkerRole::Disk);
+		WorkerPool::drainWorkerPool(WorkerRole::MainThread);
+	}
+
+	std::shared_ptr<leveldb::WriteBatch> batch = _getBuffer();
+	_serializeChunk(lc, *batch);
+	mStorage->_write(*batch);
+	lc.setDebugDisplaySavedState(true);
+	lc.setSaved();
+	mBufferPool.emplace_back(std::move(batch));
+	return true;
 }
 
 void DBChunkStorage::onLowMemory() {

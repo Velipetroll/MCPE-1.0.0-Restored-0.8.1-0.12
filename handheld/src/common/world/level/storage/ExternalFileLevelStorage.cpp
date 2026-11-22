@@ -23,6 +23,8 @@
 #include "world/level/storage/LevelData.h"
 #include "world/level/storage/LevelStorageSource.h"
 #include "world/level/storage/RegionFile.h"
+#include <filesystem>
+#include <fstream>
 
 static const char* const fnLevelDatOld = "level.dat_old";
 static const char* const fnLevelDatNew = "level.dat_new";
@@ -58,44 +60,39 @@ namespace ExternalFileLevelStorage {
 		fwrite(&size, sizeof(size), 1, file);
 
 		fwrite(data.GetData(), 1, size, file);
+		fflush(file);
 		fclose(file);
 
 		return true;
 	}
 
 	void saveLevelData(const std::string& levelPath, const LevelData& levelData) {
-		//std::string directory = levelPath + "/";
-		//std::string tmpFile = directory + fnLevelDatNew;
-		//std::string datFile = directory + fnLevelDat;
-		//std::string oldFile = directory + fnLevelDatOld;
+		namespace fs = std::filesystem;
+		std::error_code ec;
+		fs::create_directories(levelPath, ec);
 
-		//if (!_writeLevelDat(tmpFile, levelData)) {
-		//	return;
-		//}
+		std::string directory = levelPath + "/";
+		std::string tmpFile = directory + fnLevelDatNew;
+		std::string datFile = directory + fnLevelDat;
+		std::string oldFile = directory + fnLevelDatOld;
 
-		//// Remove old backup
-		//remove(oldFile.c_str());
+		if (!_writeLevelDat(tmpFile, levelData)) {
+			return;
+		}
 
-		//// If it exists, move the previous save to backup (and possibly delete it)
-		//if (File::exists(datFile.c_str())) {
-		//	if (!File::rename(datFile, oldFile)) {
-		//		LOGE("Error@saveLevelData: Couldn't move savefile to level.dat_old\n");
-		//		return;
-		//	}
-		//	remove(datFile.c_str());
-		//}
-		//// Move the new save to level.dat
-		//if (!File::rename(tmpFile, datFile)) {
-		//	LOGE("Error@saveLevelData: Couldn't move new file to level.dat\n");
-		//	return;
-		//}
-		//// Remove the temporary save, if the rename didn't do it
-		//remove(tmpFile.c_str());
+		if (fs::exists(datFile, ec)) {
+			fs::remove(oldFile, ec);
+			fs::rename(datFile, oldFile, ec);
+		}
+		fs::rename(tmpFile, datFile, ec);
+		if (ec) {
+			fs::remove(tmpFile, ec);
+		}
 
-		//auto levelnameFilePath = directory + "/levelname.txt";
-		//if (!File::exists(levelnameFilePath)) {
-		//	makeReadableLevelnameFile(levelnameFilePath, levelData.getLevelName());
-		//}
+		auto levelnameFilePath = directory + "levelname.txt";
+		if (!fs::exists(levelnameFilePath, ec)) {
+			makeReadableLevelnameFile(levelnameFilePath, levelData.getLevelName());
+		}
 	}
 
 	bool readLevelDataFromData(const std::string& dataStr, LevelData& levelData) {
