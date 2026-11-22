@@ -153,6 +153,12 @@ bool TorchBlock::canBeSilkTouched() const {
 }
 
 bool TorchBlock::_checkDoPop(BlockSource& region, const BlockPos& pos) const {
+	static thread_local std::vector<BlockPos> sTorchPopping;
+	for (const auto& p : sTorchPopping) {
+		if (p == pos) return false;
+	}
+	sTorchPopping.push_back(pos);
+	bool result = true;
 	if (_checkCanSurvive(region, pos)) {
 		int dir = getDirection(region.getData(pos));
 		FacingID facing = FACING_FROM_DATA[dir];
@@ -161,11 +167,11 @@ bool TorchBlock::_checkDoPop(BlockSource& region, const BlockPos& pos) const {
 		if (replace) {
 			spawnResources(region, pos, region.getData(pos), 1.0f);
 			region.setBlock(pos, BlockID::AIR, Block::UPDATE_ALL);
-			return true;
+			result = true;
 		}
 	}
-
-	return true;
+	sTorchPopping.pop_back();
+	return result;
 }
 
 bool TorchBlock::_checkCanSurvive(BlockSource& region, const BlockPos& pos) const {

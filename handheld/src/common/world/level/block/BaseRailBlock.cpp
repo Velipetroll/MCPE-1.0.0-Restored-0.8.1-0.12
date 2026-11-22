@@ -509,8 +509,16 @@ bool BaseRailBlock::mayPlace(BlockSource& region, const BlockPos& pos) const {
 	return region.canProvideSupport(pos.below(), Facing::UP, BlockSupportType::Edge);
 }
 
+static thread_local std::vector<BlockPos> sRailRemoving;
+static bool isRailRemoving(const BlockPos& pos) {
+	for (const auto& p : sRailRemoving) {
+		if (p == pos) return true;
+	}
+	return false;
+}
+
 void BaseRailBlock::_updatePlacement(BlockSource& region, const BlockPos& pos, int type) const {
-	if (region.getLevel().isClientSide()) {
+	if (region.getLevel().isClientSide() || isRailRemoving(pos)) {
 		return;
 	}
 
@@ -560,11 +568,8 @@ void BaseRailBlock::onPlace(BlockSource& region, const BlockPos& pos) const {
 }
 
 void BaseRailBlock::onRemove(BlockSource& region, const BlockPos& pos) const {
-	static thread_local std::vector<BlockPos> sRemoving;
-	for (const auto& p : sRemoving) {
-		if (p == pos) return;
-	}
-	sRemoving.push_back(pos);
+	if (isRailRemoving(pos)) return;
+	sRailRemoving.push_back(pos);
 	int dir = region.getData(pos);
 	if (mUsesDataBit) {
 		dir &= RAIL_DIRECTION_MASK;
@@ -577,7 +582,7 @@ void BaseRailBlock::onRemove(BlockSource& region, const BlockPos& pos) const {
 		region.updateNeighborsAt(pos.below());
 	}
 	Block::onRemove(region, pos);
-	sRemoving.pop_back();
+	sRailRemoving.pop_back();
 }
 
 void BaseRailBlock::neighborChanged(BlockSource& region, const BlockPos& pos, const BlockPos& neighborPos) const {
