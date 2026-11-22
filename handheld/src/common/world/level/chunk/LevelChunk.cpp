@@ -388,17 +388,15 @@ FullBlock LevelChunk::setBlockAndData(const ChunkBlockPos& pos, FullBlock block,
 		auto& sc = mSubChunks[subChunkIndex];
 
 		if (old.id != block.id) {
-			// TODO: rherlitz
-// 			_removeCallbacks(pos, old.id, block.id, issuingSource);
+			_removeCallbacks(pos, old.id, block.id, issuingSource);
 			sc->mBlocks[blockIndex] = block.id;
 		}
 
 		sc->mData.set(blockIndex, block.data);
 
-		// TODO: rherlitz
-		//if (old.id != block.id) {
-		//	_placeCallbacks(pos, old.id, block.id, issuingSource, std::move(blockEntity));
-		//}
+		if (old.id != block.id) {
+			_placeCallbacks(pos, old.id, block.id, issuingSource, std::move(blockEntity));
+		}
 
 		if (issuingSource) {
 			sc->mDirtyTicksCounter.touch();

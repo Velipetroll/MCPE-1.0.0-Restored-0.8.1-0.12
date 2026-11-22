@@ -30,6 +30,7 @@ public:
 
 	bool isInstaticking() const { return mInstatick; }
 	void setInstaticking(bool v) { mInstatick = v; }
+	void setCurrentTick(Tick t) { mCurrentTick = t; }
 
 	bool isEmpty() const { return mQueue.empty(); }
 

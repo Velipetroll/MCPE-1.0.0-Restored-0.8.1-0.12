@@ -5675,6 +5675,7 @@ void renderThreadStuff()
 						for (int dz = -3; dz <= 3; ++dz) {
 							LevelChunk* lc = reg.getChunk(ChunkPos(pcx + dx, pcz + dz));
 							if (!lc || lc->getState() != ChunkState::Loaded) continue;
+							lc->getTickQueue().setCurrentTick(curTick);
 							lc->tickBlocks(reg, lvl);
 							lc->getTickQueue().tickPendingTicks(reg, curTick, 100, false);
 							for (auto& bePair : lc->getBlockEntities()) {

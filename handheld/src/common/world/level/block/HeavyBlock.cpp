@@ -104,14 +104,13 @@ bool HeavyBlock::isFree(BlockSource& region, const BlockPos& pos) const {
 }
 
 void HeavyBlock::checkSlide(BlockSource& region, const BlockPos& pos) const {
-	BlockPos bottom = _findBottomSlidingBlock(region, pos);
-	if (bottom.y <= 0) {
+	if (pos.y <= 0) {
 		return;
 	}
 
-	if (isFree(region, bottom.below())) {
+	if (isFree(region, pos.below())) {
 		bool isCreative = region.getLevel().getLevelData().getGameType() == GameType::Creative;
-		startFalling(region, bottom, &region.getBlock(bottom), isCreative);
+		startFalling(region, pos, &region.getBlock(pos), isCreative);
 	}
 }
 
