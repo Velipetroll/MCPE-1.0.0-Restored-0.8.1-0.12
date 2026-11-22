@@ -606,7 +606,7 @@ public:
 
 	bool isSneaking()
 	{
-		return glinput.KeyDown(GLFW_KEY_LEFT_SHIFT) || glinput.KeyDown(GLFW_KEY_RIGHT_SHIFT);
+		return gGuiContext.currentScreen == nullptr && (glinput.KeyDown(GLFW_KEY_LEFT_SHIFT) || glinput.KeyDown(GLFW_KEY_RIGHT_SHIFT));
 	}
 
 	// Exact 1:1 MCPE 0.8.1 Entity::moveRelative(fw, sf, speed) (Entity.cpp L791-814)
@@ -648,7 +648,7 @@ public:
 		// LocalPlayer::aiStep() (LocalPlayer.cpp L400-458)
 		if (mFlyToggleTicks > 0) --mFlyToggleTicks;
 		bool prevJumpHeld = mWasJumpHeld;
-		bool jumpHeld = glinput.KeyDown(GLFW_KEY_SPACE);
+		bool jumpHeld = (gGuiContext.currentScreen == nullptr) && glinput.KeyDown(GLFW_KEY_SPACE);
 		mWasJumpHeld = jumpHeld;
 
 		bool sneaking = isSneaking();
@@ -658,10 +658,12 @@ public:
 
 		float moveStrafe = 0.0f;
 		float moveForward = 0.0f;
-		if (glinput.KeyDown(GLFW_KEY_W)) moveForward += 1.0f;
-		if (glinput.KeyDown(GLFW_KEY_S)) moveForward -= 1.0f;
-		if (glinput.KeyDown(GLFW_KEY_A)) moveStrafe -= 1.0f;
-		if (glinput.KeyDown(GLFW_KEY_D)) moveStrafe += 1.0f;
+		if (gGuiContext.currentScreen == nullptr) {
+			if (glinput.KeyDown(GLFW_KEY_W)) moveForward += 1.0f;
+			if (glinput.KeyDown(GLFW_KEY_S)) moveForward -= 1.0f;
+			if (glinput.KeyDown(GLFW_KEY_A)) moveStrafe -= 1.0f;
+			if (glinput.KeyDown(GLFW_KEY_D)) moveStrafe += 1.0f;
+		}
 
 		// KeyboardInput::tick() (KeyboardInput.cpp L38-41): sneaking multiplies strafeInput & forwardInput by 0.3f
 		if (sneaking) {
