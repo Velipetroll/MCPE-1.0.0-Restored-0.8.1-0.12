@@ -131,7 +131,7 @@ void Gui::renderHotbar(int guiW, int guiH, Font* font, GuiContext* ctx) {
 		for (int i = 0; i < 9; ++i) {
 			const ItemInstance& item = ctx->inventorySlots[static_cast<size_t>(i)];
 			if (!item.isNull()) {
-				drawItemInSlot(font, item, sp + 4 + i * 20, sp2 + 2);
+				drawItemInSlot(font, item, sp + 3 + i * 20, sp2 + 3);
 			}
 		}
 	}
