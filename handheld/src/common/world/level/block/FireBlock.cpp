@@ -184,59 +184,45 @@ void FireBlock::tick(BlockSource& region, const BlockPos& pos, Random& random) c
 	}
 }
 
+static FireBlock::SmokeCallback gFireSmokeCb;
+
+void FireBlock::setSmokeCallback(SmokeCallback cb) {
+	gFireSmokeCb = std::move(cb);
+}
+
 void FireBlock::animateTick(BlockSource& region, const BlockPos& pos, Random& random) const {
-	auto& level = region.getLevel();
-// 	level.playSound(LevelSoundEvent::Fire, Vec3(pos));
-// 
-// 	if (region.isSolidBlockingBlock(pos.below()) || canBurn(region, pos.below())) {
-// 		for (int i = 0; i < 3; i++) {
-// 			float particlex = pos.x + random.nextFloat();
-// 			float particley = pos.y + random.nextFloat() * 0.5f + 0.5f;
-// 			float particlez = pos.z + random.nextFloat();
-// 			level.addParticle(ParticleType::Smoke, Vec3(particlex, particley, particlez), Vec3::ZERO, 250);
-// 		}
-// 	} else {
-// 		if (canBurn(region, pos.west())) {
-// 			for (int i = 0; i < 2; i++) {
-// 				float particlex = pos.x + random.nextFloat() * 0.1f;
-// 				float particley = pos.y + random.nextFloat();
-// 				float particlez = pos.z + random.nextFloat();
-// 				level.addParticle(ParticleType::Smoke, Vec3(particlex, particley, particlez), Vec3(0.0f), 250);
-// 			}
-// 		}
-// 		if (canBurn(region, pos.east())) {
-// 			for (int i = 0; i < 2; i++) {
-// 				float particlex = pos.x + 1 - random.nextFloat() * 0.1f;
-// 				float particley = pos.y + random.nextFloat();
-// 				float particlez = pos.z + random.nextFloat();
-// 				level.addParticle(ParticleType::Smoke, Vec3(particlex, particley, particlez), Vec3(0.0f), 250);
-// 			}
-// 		}
-// 		if (canBurn(region, pos.north())) {
-// 			for (int i = 0; i < 2; i++) {
-// 				float particlex = pos.x + random.nextFloat();
-// 				float particley = pos.y + random.nextFloat();
-// 				float particlez = pos.z + random.nextFloat() * 0.1f;
-// 				level.addParticle(ParticleType::Smoke, Vec3(particlex, particley, particlez), Vec3(0.0f), 250);
-// 			}
-// 		}
-// 		if (canBurn(region, pos.south())) {
-// 			for (int i = 0; i < 2; i++) {
-// 				float particlex = pos.x + random.nextFloat();
-// 				float particley = pos.y + random.nextFloat();
-// 				float particlez = pos.z + 1 - random.nextFloat() * 0.1f;
-// 				level.addParticle(ParticleType::Smoke, Vec3(particlex, particley, particlez), Vec3(0.0f), 250);
-// 			}
-// 		}
-// 		if (canBurn(region, pos.above())) {
-// 			for (int i = 0; i < 2; i++) {
-// 				float particlex = pos.x + random.nextFloat();
-// 				float particley = pos.y + 1 - random.nextFloat() * 0.1f;
-// 				float particlez = pos.z + random.nextFloat();
-// 				level.addParticle(ParticleType::Smoke, Vec3(particlex, particley, particlez), Vec3(0.0f), 250);
-// 			}
-// 		}
-// 	}
+	if (!gFireSmokeCb) return;
+	if (region.isSolidBlockingBlock(pos.below()) || canBurn(region, pos.below())) {
+		for (int i = 0; i < 3; i++) {
+			gFireSmokeCb(Vec3(pos.x + random.nextFloat(), pos.y + random.nextFloat() * 0.5f + 0.5f, pos.z + random.nextFloat()));
+		}
+	} else {
+		if (canBurn(region, pos.west())) {
+			for (int i = 0; i < 2; i++) {
+				gFireSmokeCb(Vec3(pos.x + random.nextFloat() * 0.1f, pos.y + random.nextFloat(), pos.z + random.nextFloat()));
+			}
+		}
+		if (canBurn(region, pos.east())) {
+			for (int i = 0; i < 2; i++) {
+				gFireSmokeCb(Vec3(pos.x + 1 - random.nextFloat() * 0.1f, pos.y + random.nextFloat(), pos.z + random.nextFloat()));
+			}
+		}
+		if (canBurn(region, pos.north())) {
+			for (int i = 0; i < 2; i++) {
+				gFireSmokeCb(Vec3(pos.x + random.nextFloat(), pos.y + random.nextFloat(), pos.z + random.nextFloat() * 0.1f));
+			}
+		}
+		if (canBurn(region, pos.south())) {
+			for (int i = 0; i < 2; i++) {
+				gFireSmokeCb(Vec3(pos.x + random.nextFloat(), pos.y + random.nextFloat(), pos.z + 1 - random.nextFloat() * 0.1f));
+			}
+		}
+		if (canBurn(region, pos.above())) {
+			for (int i = 0; i < 2; i++) {
+				gFireSmokeCb(Vec3(pos.x + random.nextFloat(), pos.y + 1 - random.nextFloat() * 0.1f, pos.z + random.nextFloat()));
+			}
+		}
+	}
 }
 
 bool FireBlock::mayPick() const {

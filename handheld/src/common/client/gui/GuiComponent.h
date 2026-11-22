@@ -36,4 +36,7 @@ public:
 	static bool isBlock3D(const ItemInstance& item);
 	static void drawBlock3DModel(const ItemInstance& item, float shade = 1.0f, bool isGui = true);
 	static void getItemSpritePathAndTint(const ItemInstance& item, std::string& outTex, uint32_t& outTint);
+	static void setCompassClockState(float playerX, float playerZ, float playerYaw, float spawnX, float spawnZ, double worldTime);
+	static int getCompassFrame();
+	static int getClockFrame();
 };

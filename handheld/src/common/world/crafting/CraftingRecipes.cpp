@@ -682,6 +682,10 @@ void Recipes::init() {
 	if (Item::mCompass && Item::mRedStone) addShaped081(3, 3, { empty, iron, empty, iron, ItemInstance(Item::mRedStone, 1, 0), iron, empty, iron, empty }, ItemInstance(Item::mCompass, 1, 0), ItemCategory::Tools);
 	addShaped081(3, 2, { iron, iron, iron, iron, iron, iron }, ItemInstance(Block::mIronFence, 16, 0), ItemCategory::Structures);
 	if (Block::mNetherReactor) addShaped081(3, 3, { iron, diamond, iron, iron, diamond, iron, iron, diamond, iron }, ItemInstance(Block::mNetherReactor, 1, 0), ItemCategory::Structures);
+	if (Block::mAnvil && Block::mIronBlock) {
+		ItemInstance ib(Block::mIronBlock, 1, 0);
+		addShaped081(3, 3, { ib, ib, ib, empty, iron, empty, iron, iron, iron }, ItemInstance(Block::mAnvil, 1, 0), ItemCategory::Structures);
+	}
 	if (Block::mWoolCarpet) addShaped081(2, 1, { ItemInstance(Block::mWool, 1, 14), ItemInstance(Block::mWool, 1, 14) }, ItemInstance(Block::mWoolCarpet, 3, 14), ItemCategory::Decorations);
 }
 

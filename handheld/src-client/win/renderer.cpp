@@ -36,6 +36,9 @@
 #include "SoundEngine.h"
 #include "ParticleSystem.h"
 #include "ProjectileTntSystem.h"
+#include "PaintingSystem.h"
+#include "world/level/block/FireBlock.h"
+#include "world/level/BlockSourceListener.h"
 #include "world/level/block/Block.h"
 #include "world/level/block/BedBlock.h"
 #include "world/level/block/DoorBlock.h"
@@ -278,6 +281,15 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 
 static float gBowPullTime = 0.0f;
 static bool gBowPulling = false;
+static int gPlayerFireTicks = 0;
+
+struct FallingBlockEnt {
+	float x, y, z, vy, startY;
+	BlockID id;
+	DataID data;
+	bool creative;
+};
+static std::vector<FallingBlockEnt> sFallingBlocks;
 static float gItemUseSlowTimer = 0.0f;
 
 mce::TextureGroup texgroup;
@@ -1932,6 +1944,23 @@ static void serializeChunkWorldItems(const ChunkPos& cp,
 		++i;
 	}
 
+	auto& paintings = PaintingSystem::getPaintings();
+	for (size_t i = 0; i < paintings.size(); ) {
+		ChunkPos pCp(paintings[i].tileX >> 4, paintings[i].tileZ >> 4);
+		if (pCp == cp) {
+			if (auto pTag = PaintingSystem::savePaintingTag(paintings[i])) {
+				NbtIo::write(pTag.get(), stream);
+				anyWritten = true;
+			}
+			if (removeFromList) {
+				paintings[i] = paintings.back();
+				paintings.pop_back();
+				continue;
+			}
+		}
+		++i;
+	}
+
 	if (anyWritten) {
 		lc.setSerializedEntitiesBuffer(std::move(encoded), true);
 		lc.setHadSerializedEntities(true);
@@ -1954,6 +1983,10 @@ static void deserializeChunkWorldItems(LevelChunk& lc, std::vector<WorldItemEnti
 		auto tag = NbtIo::read(input);
 		if (!tag) {
 			break;
+		}
+		if (tag->getInt("id") == 83) {
+			PaintingSystem::loadPaintingTag(*tag);
+			continue;
 		}
 		if (tag->getInt("id") != 64) {
 			continue;
@@ -2987,14 +3020,28 @@ const std::vector<ExtrudedEdgeQuad>& getExtrudedEdges(const std::string& texPath
 
 void drawTexturedSprite3D(const std::string& tex, float shade = 1.0f, uint32_t rgbColor = 0xFFFFFFu) {
 	if (tex.empty()) return;
-	GuiTextureInfo info = GuiComponent::loadTexture(tex);
+	std::string useTex = tex;
+	int frameIdx = 0;
+	int frameCount = 1;
+	if (tex == "textures/items/compass_item.png" || tex == "textures/items/compass_atlas.png") {
+		useTex = "textures/items/compass_atlas.png";
+		frameIdx = GuiComponent::getCompassFrame();
+		frameCount = 32;
+	} else if (tex == "textures/items/clock_item.png" || tex == "textures/items/watch_atlas.png") {
+		useTex = "textures/items/watch_atlas.png";
+		frameIdx = GuiComponent::getClockFrame();
+		frameCount = 64;
+	}
+	GuiTextureInfo info = GuiComponent::loadTexture(useTex);
 	if (info.id == 0) return;
 	glEnable(GL_TEXTURE_2D);
 	glBindTexture(GL_TEXTURE_2D, info.id);
 
-	float vMax = (info.width > 0 && info.height > info.width)
+	float frameFrac = (info.width > 0 && info.height > info.width)
 		? (static_cast<float>(info.width) / static_cast<float>(info.height))
 		: 1.0f;
+	float vMin = (frameCount > 1) ? (static_cast<float>(frameIdx) * frameFrac) : 0.0f;
+	float vMax = (frameCount > 1) ? (static_cast<float>(frameIdx + 1) * frameFrac) : frameFrac;
 	float tr = static_cast<float>((rgbColor >> 16) & 0xFF) / 255.0f;
 	float tg = static_cast<float>((rgbColor >> 8) & 0xFF) / 255.0f;
 	float tb = static_cast<float>(rgbColor & 0xFF) / 255.0f;
@@ -3005,14 +3052,14 @@ void drawTexturedSprite3D(const std::string& tex, float shade = 1.0f, uint32_t r
 	glColor4f(shade * tr, shade * tg, shade * tb, 1.0f);
 	glTexCoord2f(0.0f, vMax); glVertex3f(-0.5f, -0.5f, halfZ);
 	glTexCoord2f(1.0f, vMax); glVertex3f(0.5f, -0.5f, halfZ);
-	glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, 0.5f, halfZ);
-	glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, halfZ);
+	glTexCoord2f(1.0f, vMin); glVertex3f(0.5f, 0.5f, halfZ);
+	glTexCoord2f(0.0f, vMin); glVertex3f(-0.5f, 0.5f, halfZ);
 
 	// Back face (-Z)
 	glColor4f(shade * 0.85f * tr, shade * 0.85f * tg, shade * 0.85f * tb, 1.0f);
 	glTexCoord2f(0.0f, vMax); glVertex3f(-0.5f, -0.5f, -halfZ);
-	glTexCoord2f(0.0f, 0.0f); glVertex3f(-0.5f, 0.5f, -halfZ);
-	glTexCoord2f(1.0f, 0.0f); glVertex3f(0.5f, 0.5f, -halfZ);
+	glTexCoord2f(0.0f, vMin); glVertex3f(-0.5f, 0.5f, -halfZ);
+	glTexCoord2f(1.0f, vMin); glVertex3f(0.5f, 0.5f, -halfZ);
 	glTexCoord2f(1.0f, vMax); glVertex3f(0.5f, -0.5f, -halfZ);
 
 	// Extruded pixel edges
@@ -4424,13 +4471,16 @@ void renderThreadStuff()
 						gGuiContext.starveTimer = 0.0f;
 					}
 
-					if (hazardDamageCooldown <= 0.0f) {
+					{
 						BlockSource& region = c.getRegion();
 						int fx = Math::floor(c.mPos.x);
 						int fy0 = Math::floor(c.mBB.min.y + 0.1f);
 						int fy1 = Math::floor(c.mBB.min.y + 1.0f);
 						int fz = Math::floor(c.mPos.z);
 						int hazDmg = 0;
+						bool touchingFire = false;
+						bool touchingLava = false;
+						bool touchingWater = false;
 						for (int fy = fy0; fy <= fy1; ++fy) {
 							for (int ox = -1; ox <= 1; ++ox) {
 								for (int oz = -1; oz <= 1; ++oz) {
@@ -4440,15 +4490,28 @@ void renderThreadStuff()
 									if (!b) continue;
 									AABB blkBB(static_cast<float>(bp.x), static_cast<float>(bp.y), static_cast<float>(bp.z),
 									           static_cast<float>(bp.x + 1), static_cast<float>(bp.y + 1), static_cast<float>(bp.z + 1));
-									if (b->getMaterial().isType(MaterialType::Lava) && blkBB.intersects(c.mBB)) {
+									if (b->getMaterial().isType(MaterialType::Water) && blkBB.intersects(c.mBB)) {
+										touchingWater = true;
+									} else if (b->getMaterial().isType(MaterialType::Lava) && blkBB.intersects(c.mBB)) {
+										touchingLava = true;
 										hazDmg = std::max(hazDmg, 4);
-									} else if ((b == Block::mFire || b == Block::mCactus) && blkBB.expanded(Vec3(0.05f, 0.05f, 0.05f)).intersects(c.mBB)) {
+									} else if (b == Block::mFire && blkBB.expanded(Vec3(0.05f, 0.05f, 0.05f)).intersects(c.mBB)) {
+										touchingFire = true;
+										hazDmg = std::max(hazDmg, 1);
+									} else if (b == Block::mCactus && blkBB.expanded(Vec3(0.05f, 0.05f, 0.05f)).intersects(c.mBB)) {
 										hazDmg = std::max(hazDmg, 1);
 									}
 								}
 							}
 						}
-						if (hazDmg > 0) {
+						if (touchingFire) gPlayerFireTicks = std::max(gPlayerFireTicks, 300);
+						if (touchingLava) gPlayerFireTicks = std::max(gPlayerFireTicks, 600);
+						if (touchingWater && gPlayerFireTicks > 0) {
+							gPlayerFireTicks = 0;
+							SoundEngine::play(SoundEngine::SND_EXPLODE, 0.25f, 1.8f);
+							ParticleSystem::spawnSmoke(c.mPos.x, c.mBB.min.y + 0.8f, c.mPos.z, 0.0f, 0.05f, 0.0f, 100, &region);
+						}
+						if (hazardDamageCooldown <= 0.0f && hazDmg > 0) {
 							damagePlayer(hazDmg, Vec3::ZERO);
 							hazardDamageCooldown = 0.5f;
 						}
@@ -4656,6 +4719,23 @@ void renderThreadStuff()
 						hasTargetHit = targetHit.isHit() && targetHit.isTile();
 					}
 				};
+
+				if (!attackedMobThisClick && glinput.NewMouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
+					int pIdx = PaintingSystem::raycastPainting(
+						Vec3(c.mPos.x, c.mPos.y, c.mPos.z),
+						Vec3(c.cameraFront.x, c.cameraFront.y, c.cameraFront.z),
+						5.0f);
+					if (pIdx >= 0) {
+						auto& paintings = PaintingSystem::getPaintings();
+						if (!gGuiContext.isCreative && Item::mPainting) {
+							const auto& pe = paintings[static_cast<size_t>(pIdx)];
+							spawnWorldItem(worldItems, ItemInstance(Item::mPainting, 1, 0), Vec3(pe.x, pe.y, pe.z), Vec3(0, 2.0f, 0), 0.25f);
+						}
+						paintings.erase(paintings.begin() + pIdx);
+						c.triggerSwing();
+						attackedMobThisClick = true;
+					}
+				}
 
 				if (!attackedMobThisClick && !mobInFront && hasTargetHit && glinput.MouseDown(GLFW_MOUSE_BUTTON_LEFT)) {
 					BlockPos hitPos = targetHit.getBlock();
@@ -5218,6 +5298,16 @@ void renderThreadStuff()
 								updateLightingAndRebuildChunks(region, hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
 								handledRightClick = true;
 							}
+						} else if (Item::mPainting && hid == Item::mPainting->getId() && face < Facing::MAX) {
+							if (PaintingSystem::tryPlacePainting(region, hitPos, face)) {
+								SoundEngine::play(SoundEngine::SND_PLACE, 0.75f, 0.95f);
+								c.triggerSwing();
+								if (!gGuiContext.isCreative) {
+									held.remove(1);
+									if (held.getStackSize() <= 0) held.setNull();
+								}
+								handledRightClick = true;
+							}
 						} else if ((Item::mHoe_wood && hid == Item::mHoe_wood->getId()) ||
 						           (Item::mHoe_stone && hid == Item::mHoe_stone->getId()) ||
 						           (Item::mHoe_iron && hid == Item::mHoe_iron->getId()) ||
@@ -5520,14 +5610,22 @@ void renderThreadStuff()
 				SoundEngine::setMasterVolume(gGuiOptions.soundVolume);
 				ParticleSystem::tick(clampedDt, &c.getRegion());
 
-				// Wire 1:1 0.8.1 world callbacks (popResource, FallingBlock, NetherReactor)
-				struct FallingBlockEnt {
-					float x, y, z, vy;
-					BlockID id;
-					DataID data;
-					bool creative;
+				// Wire 1:1 0.8.1 world callbacks (popResource, FallingBlock, NetherReactor, FireSmoke, BlockSourceListener)
+				static std::vector<BlockPos> sWorldTickChangedBlocks;
+				struct WorldTickBlockListener : public BlockSourceListener {
+					void onBlockChanged(BlockSource& source, const BlockPos& pos, FullBlock block, FullBlock oldBlock, int updateFlags, Entity* changer) override {
+						if (!gGuiContext.loadingChunks && (updateFlags & Block::UPDATE_CLIENTS)) {
+							sWorldTickChangedBlocks.push_back(pos);
+						}
+					}
 				};
-				static std::vector<FallingBlockEnt> sFallingBlocks;
+				static WorldTickBlockListener sWorldTickListener;
+				static BlockSource* sListenerRegion = nullptr;
+				if (sListenerRegion != &c.getRegion()) {
+					sListenerRegion = &c.getRegion();
+					sListenerRegion->addListener(sWorldTickListener);
+				}
+
 				static bool sCallbacksWired = false;
 				if (!sCallbacksWired) {
 					sCallbacksWired = true;
@@ -5538,7 +5636,10 @@ void renderThreadStuff()
 						spawnWorldItem(worldItems, item, dpos, dvel, 0.35f);
 					});
 					HeavyBlock::setStartFallingCallback([](BlockSource&, const BlockPos& pos, const Block* blk, DataID data, bool creative) {
-						sFallingBlocks.push_back({ pos.x + 0.5f, static_cast<float>(pos.y), pos.z + 0.5f, 0.0f, blk->mID, data, creative });
+						sFallingBlocks.push_back({ pos.x + 0.5f, static_cast<float>(pos.y), pos.z + 0.5f, 0.0f, static_cast<float>(pos.y), blk->mID, data, creative });
+					});
+					FireBlock::setSmokeCallback([&](const Vec3& p) {
+						ParticleSystem::spawnSmoke(p.x, p.y, p.z, 0.0f, 0.03f, 0.0f, 250, &c.getRegion());
 					});
 					NetherReactorBlockEntity::setCallbacks(
 						[&](const Vec3& sp) { mobManager.spawnMobAt(MobType::PigZombie, sp.x, sp.y, sp.z); },
@@ -5548,7 +5649,13 @@ void renderThreadStuff()
 						});
 				}
 
-				// 20 TPS world tick: random ticks, scheduled ticks, BlockEntities, FallingBlocks, animateTick
+				{
+					BlockPos sp = c.getLevel().getSharedSpawnPos();
+					GuiComponent::setCompassClockState(c.mPos.x, c.mPos.z, static_cast<float>(c.yaw),
+					                                   static_cast<float>(sp.x), static_cast<float>(sp.z), gGuiContext.worldTime);
+				}
+
+				// 20 TPS world tick: random ticks, scheduled ticks, BlockEntities, FallingBlocks, Paintings, Fire, animateTick
 				static float worldTickAccum = 0.0f;
 				static uint64_t worldTickCounter = 0;
 				worldTickAccum += clampedDt;
@@ -5557,6 +5664,7 @@ void renderThreadStuff()
 					++worldTickCounter;
 					BlockSource& reg = c.getRegion();
 					Level& lvl = c.getLevel();
+					sWorldTickChangedBlocks.clear();
 					int pcx = Math::floor(c.mPos.x) >> 4;
 					int pcz = Math::floor(c.mPos.z) >> 4;
 					Tick curTick(worldTickCounter);
@@ -5573,8 +5681,41 @@ void renderThreadStuff()
 							}
 						}
 					}
+					if (!sWorldTickChangedBlocks.empty()) {
+						for (size_t ci = 0; ci < std::min<size_t>(sWorldTickChangedBlocks.size(), 32); ++ci) {
+							updateLightingAndRebuildChunks(reg, sWorldTickChangedBlocks[ci], rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+						}
+						sWorldTickChangedBlocks.clear();
+					}
 
-					// Falling blocks tick (gravity -0.04/tick, drag 0.98)
+					// Player persistent fire ticks (1 dmg every 20 ticks)
+					if (gPlayerFireTicks > 0) {
+						--gPlayerFireTicks;
+						if (!gGuiContext.isCreative && (gPlayerFireTicks % 20) == 0) {
+							damagePlayer(1, Vec3::ZERO);
+						}
+					}
+
+					// Paintings 100-tick survives() check
+					{
+						auto& paintings = PaintingSystem::getPaintings();
+						for (size_t pi = 0; pi < paintings.size(); ) {
+							if (++paintings[pi].tickCounter >= 100) {
+								paintings[pi].tickCounter = 0;
+								if (!paintings[pi].survives(reg, paintings, static_cast<int>(pi))) {
+									if (!gGuiContext.isCreative && Item::mPainting) {
+										spawnWorldItem(worldItems, ItemInstance(Item::mPainting, 1, 0),
+										               Vec3(paintings[pi].x, paintings[pi].y, paintings[pi].z), Vec3(0, 2.0f, 0), 0.25f);
+									}
+									paintings.erase(paintings.begin() + pi);
+									continue;
+								}
+							}
+							++pi;
+						}
+					}
+
+					// Falling blocks tick (gravity -0.04/tick, drag 0.98) + Anvil fall damage & degrade
 					for (size_t fi = 0; fi < sFallingBlocks.size();) {
 						FallingBlockEnt& fb = sFallingBlocks[fi];
 						fb.vy = (fb.vy - 0.04f) * 0.98f;
@@ -5586,11 +5727,37 @@ void renderThreadStuff()
 						}
 						if (Block::mSand && !static_cast<const HeavyBlock*>(Block::mSand)->isFree(reg, belowPos)) {
 							BlockPos landPos(Math::floor(fb.x), Math::floor(fb.y + 0.5f), Math::floor(fb.z));
-							if (reg.getBlockID(landPos) == BlockID::AIR || reg.getMaterial(landPos).isReplaceable()) {
-								reg.setBlockAndData(landPos, FullBlock(fb.id, fb.data), Block::UPDATE_ALL);
-								updateLightingAndRebuildChunks(reg, landPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
-							} else if (!fb.creative && Block::mBlocks[fb.id]) {
-								Block::mBlocks[fb.id]->popResource(reg, landPos, ItemInstance(fb.id, 1, fb.data));
+							float fallDist = fb.startY - fb.y;
+							bool isAnvil = (Block::mAnvil && fb.id == Block::mAnvil->mID);
+							bool brokenAnvil = false;
+							DataID placeData = fb.data;
+							if (isAnvil) {
+								SoundEngine::play(SoundEngine::SND_DIG, 0.9f, 0.6f);
+								if (fallDist > 1.0f) {
+									int dmg = std::min(40, std::max(0, static_cast<int>(std::floor(fallDist - 1.0f)) * 2));
+									if (dmg > 0) {
+										AABB landBB(static_cast<float>(landPos.x), static_cast<float>(landPos.y), static_cast<float>(landPos.z),
+										            static_cast<float>(landPos.x + 1), static_cast<float>(landPos.y + 1), static_cast<float>(landPos.z + 1));
+										if (!gGuiContext.isCreative && landBB.intersects(c.mBB)) {
+											damagePlayer(dmg, Vec3::ZERO);
+										}
+									}
+									int curDmg = Block::mAnvil->getBlockState(BlockState::Damage).get<int>(placeData);
+									++curDmg;
+									if (curDmg > 2) {
+										brokenAnvil = true;
+									} else {
+										Block::mAnvil->getBlockState(BlockState::Damage).set(placeData, curDmg);
+									}
+								}
+							}
+							if (!brokenAnvil) {
+								if (reg.getBlockID(landPos) == BlockID::AIR || reg.getMaterial(landPos).isReplaceable()) {
+									reg.setBlockAndData(landPos, FullBlock(fb.id, placeData), Block::UPDATE_ALL);
+									updateLightingAndRebuildChunks(reg, landPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
+								} else if (!fb.creative && Block::mBlocks[fb.id]) {
+									Block::mBlocks[fb.id]->popResource(reg, landPos, ItemInstance(fb.id, 1, placeData));
+								}
 							}
 							sFallingBlocks.erase(sFallingBlocks.begin() + fi);
 						} else {
@@ -6594,6 +6761,13 @@ void renderThreadStuff()
 			ParticleSystem::render(c.yaw, c.pitch, &texgroup);
 			ProjectileTntSystem::renderArrows();
 			ProjectileTntSystem::renderTnts();
+			PaintingSystem::renderPaintings(c.getRegion());
+			for (const auto& fb : sFallingBlocks) {
+				glPushMatrix();
+				glTranslatef(fb.x, fb.y + 0.5f, fb.z);
+				GuiComponent::drawBlock3DModel(ItemInstance(fb.id, 1, fb.data), 0.95f, false);
+				glPopMatrix();
+			}
 			glPopMatrix();
 			glMatrixMode(GL_PROJECTION);
 			glPopMatrix();
@@ -6632,6 +6806,50 @@ void renderThreadStuff()
 					BlockPos(Math::floor(c.mPos.x), Math::floor(c.mPos.y), Math::floor(c.mPos.z)),
 					skyInfo.sunFactor);
 				renderFirstPersonHand(c, gGuiContext.inventorySlots[static_cast<size_t>(slotIdx)], aspect, gGuiOptions.viewBobbing, handLight);
+			}
+			// 1:1 ItemInHandRenderer::renderFire (first-person fire overlay)
+			if (!gGuiOptions.thirdPerson && gGuiContext.state == GameState::InGame && gPlayerFireTicks > 0) {
+				GuiTextureInfo fireTex = GuiComponent::loadTexture("textures/blocks/fire_0.png");
+				if (fireTex.id != 0) {
+					glMatrixMode(GL_PROJECTION);
+					glPushMatrix();
+					glLoadIdentity();
+					glm::mat4 fireProj = glm::perspective(glm::radians(70.0f), aspect, 0.05f, 10.0f);
+					glLoadMatrixf(&fireProj[0][0]);
+					glMatrixMode(GL_MODELVIEW);
+					glPushMatrix();
+					glLoadIdentity();
+					glEnable(GL_TEXTURE_2D);
+					glBindTexture(GL_TEXTURE_2D, fireTex.id);
+					glEnable(GL_BLEND);
+					glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+					glDisable(GL_DEPTH_TEST);
+					glDisable(GL_CULL_FACE);
+					glColor4f(1.0f, 1.0f, 1.0f, 0.9f);
+					int frame = (static_cast<int>(glfwGetTime() * 20.0) & 31);
+					float v0 = static_cast<float>(frame) / 32.0f;
+					float v1 = static_cast<float>(frame + 1) / 32.0f;
+					for (int i = 0; i < 2; ++i) {
+						float v = (i == 0) ? 1.0f : -1.0f;
+						glPushMatrix();
+						glTranslatef(v * 0.24f, -0.3f, 0.0f);
+						glRotatef(-v * 10.0f, 0.0f, 1.0f, 0.0f);
+						glBegin(GL_QUADS);
+						glTexCoord2f(1.0f, v1); glVertex3f(-0.5f, -0.5f, -0.5f);
+						glTexCoord2f(0.0f, v1); glVertex3f( 0.5f, -0.5f, -0.5f);
+						glTexCoord2f(0.0f, v0); glVertex3f( 0.5f,  0.5f, -0.5f);
+						glTexCoord2f(1.0f, v0); glVertex3f(-0.5f,  0.5f, -0.5f);
+						glEnd();
+						glPopMatrix();
+					}
+					glEnable(GL_CULL_FACE);
+					glEnable(GL_DEPTH_TEST);
+					glDisable(GL_BLEND);
+					glPopMatrix();
+					glMatrixMode(GL_PROJECTION);
+					glPopMatrix();
+					glMatrixMode(GL_MODELVIEW);
+				}
 			}
 		} // end if (renderWorld || gGuiContext.loadingChunks)
 

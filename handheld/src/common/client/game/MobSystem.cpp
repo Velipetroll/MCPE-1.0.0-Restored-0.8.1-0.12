@@ -1318,28 +1318,64 @@ void MobManager::update(float dt,
 			continue;
 		}
 
-		// Sunlight burn for Zombie & Skeleton
+		// Fire / Lava / Sunlight burn
 		m.isBurning = false;
-		if ((m.type == MobType::Zombie || m.type == MobType::Skeleton) && sunFactor > 0.68f && !m.inWater) {
-			BlockPos headPos(Math::floor(m.pos.x), Math::floor(m.pos.y + 1.5f), Math::floor(m.pos.z));
-			if (region.canSeeSky(headPos)) {
-				m.isBurning = true;
-				m.burnTimer += dt;
-				if (m.burnTimer >= 1.0f) {
-					m.burnTimer -= 1.0f;
-					m.health -= 2;
-					m.hurtTimer = 0.50f;
-					m.walkSpeedVis = 1.5f;
-					if (m.health <= 0) {
-						m.isDying = true;
-						m.deathTimer = 0.0f;
-						m.desiredSpeed = 0.0f;
-						spawnDropsForMob(m, onDropItem);
-						++i;
-						continue;
+		if (m.lavaHurtCooldown > 0.0f) m.lavaHurtCooldown = std::max(0.0f, m.lavaHurtCooldown - dt);
+		bool inLava = false;
+		bool inFire = false;
+		if (m.type != MobType::PigZombie) {
+			AABB mbb = m.getAABB();
+			int x0 = Math::floor(mbb.min.x);
+			int x1 = Math::floor(mbb.max.x);
+			int y0 = Math::floor(mbb.min.y);
+			int y1 = Math::floor(mbb.max.y);
+			int z0 = Math::floor(mbb.min.z);
+			int z1 = Math::floor(mbb.max.z);
+			for (int bx = x0; bx <= x1; ++bx) {
+				for (int by = y0; by <= y1; ++by) {
+					for (int bz = z0; bz <= z1; ++bz) {
+						BlockID bid = region.getBlockID(BlockPos(bx, by, bz));
+						if (Block::mFire && bid == Block::mFire->mID) inFire = true;
+						else if (bid != BlockID::AIR && Block::mBlocks[bid] && Block::mBlocks[bid]->getMaterial().isType(MaterialType::Lava)) inLava = true;
 					}
 				}
 			}
+		}
+		if (inFire) m.onFireTicks = std::max(m.onFireTicks, 300);
+		if (inLava) {
+			m.onFireTicks = std::max(m.onFireTicks, 600);
+			if (m.lavaHurtCooldown <= 0.0f) {
+				m.lavaHurtCooldown = 0.5f;
+				m.health -= 4;
+				m.hurtTimer = 0.50f;
+			}
+		}
+		if (m.inWater) {
+			m.onFireTicks = 0;
+		}
+		if ((m.type == MobType::Zombie || m.type == MobType::Skeleton) && sunFactor > 0.68f && !m.inWater) {
+			BlockPos headPos(Math::floor(m.pos.x), Math::floor(m.pos.y + 1.5f), Math::floor(m.pos.z));
+			if (region.canSeeSky(headPos)) {
+				m.onFireTicks = std::max(m.onFireTicks, 160);
+			}
+		}
+		if (m.onFireTicks > 0) {
+			m.isBurning = true;
+			m.burnTimer += dt;
+			while (m.burnTimer >= 1.0f && m.onFireTicks > 0) {
+				m.burnTimer -= 1.0f;
+				m.onFireTicks = std::max(0, m.onFireTicks - 20);
+				m.health -= 1;
+				m.hurtTimer = 0.50f;
+			}
+		}
+		if (m.health <= 0) {
+			m.isDying = true;
+			m.deathTimer = 0.0f;
+			m.desiredSpeed = 0.0f;
+			spawnDropsForMob(m, onDropItem);
+			++i;
+			continue;
 		}
 
 		// Soft mob-to-mob & mob-to-player separation push (MCPE Mob::pushEntities L184-214)
@@ -2201,6 +2237,40 @@ void MobManager::render(BlockSource& region,
 			glEnable(GL_ALPHA_TEST);
 			glEnable(GL_TEXTURE_2D);
 			glDisable(GL_BLEND);
+		}
+
+		// EntityRenderer::renderFlame 1:1
+		if (m.isBurning) {
+			GuiTextureInfo fireTex = GuiComponent::loadTexture("textures/blocks/fire_0.png");
+			if (fireTex.id != 0) {
+				glPushMatrix();
+				glTranslatef(m.pos.x, m.pos.y, m.pos.z);
+				float s = m.halfWidth() * 2.0f * 1.4f;
+				glScalef(s, s, s);
+				glEnable(GL_TEXTURE_2D);
+				glBindTexture(GL_TEXTURE_2D, fireTex.id);
+				glEnable(GL_ALPHA_TEST);
+				glAlphaFunc(GL_GREATER, 0.1f);
+				glDisable(GL_CULL_FACE);
+				glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+				int frame = (static_cast<int>(m.age * 20.0f) & 31);
+				float v0 = static_cast<float>(frame) / 32.0f;
+				float v1 = static_cast<float>(frame + 1) / 32.0f;
+				float h = (m.height() / std::max(0.1f, s));
+				for (int k = 0; k < 2; ++k) {
+					glPushMatrix();
+					glRotatef(k * 90.0f, 0.0f, 1.0f, 0.0f);
+					glBegin(GL_QUADS);
+					glTexCoord2f(0.0f, v1); glVertex3f(-0.5f, 0.0f, 0.0f);
+					glTexCoord2f(1.0f, v1); glVertex3f( 0.5f, 0.0f, 0.0f);
+					glTexCoord2f(1.0f, v0); glVertex3f( 0.5f, h,    0.0f);
+					glTexCoord2f(0.0f, v0); glVertex3f(-0.5f, h,    0.0f);
+					glEnd();
+					glPopMatrix();
+				}
+				glEnable(GL_CULL_FACE);
+				glPopMatrix();
+			}
 		}
 
 		glPopMatrix();

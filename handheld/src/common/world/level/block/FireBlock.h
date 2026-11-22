@@ -29,6 +29,8 @@ public:
 
 	void tick(BlockSource& region, const BlockPos& pos, Random& random) const override;
 	void animateTick(BlockSource& region, const BlockPos& pos, Random& random) const override;
+	using SmokeCallback = std::function<void(const Vec3&)>;
+	static void setSmokeCallback(SmokeCallback cb);
 
 	bool mayPick() const override;
 

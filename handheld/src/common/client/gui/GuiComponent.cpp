@@ -374,6 +374,41 @@ bool GuiComponent::isBlock3D(const ItemInstance& item) {
 	return canRenderGuiBlockShape(shape);
 }
 
+namespace {
+	float gCompPlayerX = 0.0f, gCompPlayerZ = 0.0f, gCompPlayerYaw = 0.0f;
+	float gCompSpawnX = 0.0f, gCompSpawnZ = 0.0f;
+	double gClockWorldTime = 0.0;
+}
+
+void GuiComponent::setCompassClockState(float playerX, float playerZ, float playerYaw, float spawnX, float spawnZ, double worldTime) {
+	gCompPlayerX = playerX;
+	gCompPlayerZ = playerZ;
+	gCompPlayerYaw = playerYaw;
+	gCompSpawnX = spawnX;
+	gCompSpawnZ = spawnZ;
+	gClockWorldTime = worldTime;
+}
+
+int GuiComponent::getCompassFrame() {
+	float dx = gCompSpawnX - gCompPlayerX;
+	float dz = gCompSpawnZ - gCompPlayerZ;
+	float deg = std::atan2(dz, dx) * 57.2957795f - gCompPlayerYaw + 90.0f;
+	deg = std::fmod(deg, 360.0f);
+	if (deg < 0.0f) deg += 360.0f;
+	return static_cast<int>((deg / 360.0f) * 32.0f) & 31;
+}
+
+int GuiComponent::getClockFrame() {
+	long long wt = static_cast<long long>(gClockWorldTime) % 24000;
+	if (wt < 0) wt += 24000;
+	float v3 = static_cast<float>(wt) / 24000.0f - 0.25f;
+	if (v3 < 0.0f) v3 += 1.0f;
+	if (v3 > 1.0f) v3 -= 1.0f;
+	float v4 = 1.0f - (std::cos(v3 * 3.14159265f) + 1.0f) * 0.5f;
+	float timeOfDay = v3 + (v4 - v3) / 3.0f;
+	return static_cast<int>(timeOfDay * 64.0f) & 63;
+}
+
 void GuiComponent::getItemSpritePathAndTint(const ItemInstance& item, std::string& outTex, uint32_t& outTint) {
 	outTex = getItemTexturePath(item);
 	outTint = getGuiItemTintColor(item);
@@ -530,6 +565,14 @@ void GuiComponent::drawItemInSlot(Font* font, const ItemInstance& item, int x, i
 		std::string tex;
 		uint32_t tint = 0xFFFFFFu;
 		getItemSpritePathAndTint(item, tex, tint);
+		int srcFrame = 0;
+		if (Item::mCompass && item.getId() == Item::mCompass->getId()) {
+			tex = "textures/items/compass_atlas.png";
+			srcFrame = getCompassFrame();
+		} else if (Item::mClock && item.getId() == Item::mClock->getId()) {
+			tex = "textures/items/watch_atlas.png";
+			srcFrame = getClockFrame();
+		}
 
 		GuiTextureInfo info = !tex.empty() ? loadTexture(tex) : GuiTextureInfo{};
 		if (info.id != 0) {
@@ -539,7 +582,9 @@ void GuiComponent::drawItemInSlot(Font* font, const ItemInstance& item, int x, i
 			int frameH = (info.width > 0 && info.height > info.width) ? info.width : (info.height > 0 ? info.height : 16);
 			int texW = info.width > 0 ? info.width : 16;
 			int texH = info.height > 0 ? info.height : 16;
-			blitScaledTinted(x, y, 16, 16, 0, 0, frameW, frameH, texW, texH, tint);
+			int srcY = srcFrame * frameH;
+			if (srcY + frameH > texH) srcY = 0;
+			blitScaledTinted(x, y, 16, 16, 0, srcY, frameW, frameH, texW, texH, tint);
 		} else {
 			fill(x + 1, y + 1, x + 15, y + 15, 0xFF7FA87F);
 			drawRect(x + 1, y + 1, x + 15, y + 15, 0xFF2B402B);

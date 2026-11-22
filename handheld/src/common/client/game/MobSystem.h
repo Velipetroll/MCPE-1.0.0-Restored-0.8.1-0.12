@@ -69,6 +69,8 @@ struct WorldMobEntity {
 	float babyTimer = 0.0f;
 	float milkCooldown = 0.0f;
 	bool isBurning = false;
+	int onFireTicks = 0;
+	float lavaHurtCooldown = 0.0f;
 	bool onGround = false;
 	bool inWater = false;
 	bool isSheared = false;
