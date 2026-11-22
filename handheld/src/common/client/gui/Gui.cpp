@@ -83,14 +83,43 @@ void Gui::renderTouchButtons(int guiW, int guiH, Font* font) {
 	}
 }
 
-void Gui::renderChat(int guiW, int guiH, Font* font, GuiContext* ctx) {
-	if (!ctx || !font || ctx->chatHistory.empty()) return;
-	int y = guiH - 48;
-	int count = 0;
-	for (int i = static_cast<int>(ctx->chatHistory.size()) - 1; i >= 0 && count < 5; --i, ++count) {
-		fill(4, y - 1, 220, y + 9, 0x60000000);
-		drawString(font, ctx->chatHistory[i], 6, y, 0xFFFFFFFF);
-		y -= 10;
+void Gui::renderChat(int guiW, int /*guiH*/, Font* font, GuiContext* ctx) {
+	if (!ctx || !font) return;
+	ctx->tickChatMessages();
+	if (dynamic_cast<ChatScreen*>(ctx->currentScreen) != nullptr) return;
+	if (ctx->chatMessages.empty()) return;
+
+	int activeCount = 0;
+	for (int i = static_cast<int>(ctx->chatMessages.size()) - 1; i >= 0; --i) {
+		if (ctx->chatMessages[i].age < ctx->chatMessages[i].maxAge) {
+			++activeCount;
+		}
+	}
+
+	int lineIdx = 0;
+	for (int i = static_cast<int>(ctx->chatMessages.size()) - 1; i >= 0; --i) {
+		const auto& msg = ctx->chatMessages[i];
+		if (msg.age >= msg.maxAge) continue;
+
+		float t = (1.0f - static_cast<float>(msg.age) / static_cast<float>(msg.maxAge)) * 10.0f;
+		if (t < 0.0f) t = 0.0f;
+		else if (t > 1.0f) t = 1.0f;
+
+		int alpha = static_cast<int>(t * t * 255.0f);
+		if (alpha <= 0) continue;
+
+		if (activeCount <= 10) {
+			++lineIdx;
+			int y = 9 * lineIdx + 18;
+			uint32_t bgColor = static_cast<uint32_t>((alpha >> 1) << 24);
+			fill(2, y - 1, guiW / 2 + 2, y + 8, bgColor);
+
+			uint32_t baseRgb = (!msg.rawText.empty() && msg.rawText[0] == '/') ? 0x00A0A0A0u : 0x00FFFFFFu;
+			uint32_t textColor = (static_cast<uint32_t>(alpha) << 24) | baseRgb;
+			font->drawShadow(msg.formattedText, 2, y, textColor);
+		} else {
+			--activeCount;
+		}
 	}
 }
 

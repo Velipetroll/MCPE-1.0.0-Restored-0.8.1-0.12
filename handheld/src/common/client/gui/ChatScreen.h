@@ -2,6 +2,7 @@
 
 #include "Screen.h"
 #include <string>
+#include <vector>
 
 class ChatScreen : public Screen {
 public:
@@ -19,8 +20,12 @@ public:
 
 private:
 	std::string mInputText;
+	std::vector<std::string> mSentHistory;
+	int mHistoryIndex = 0;
 	Button* mSendButton = nullptr;
-	Button* mBackButton = nullptr;
+	Button* mCloseButton = nullptr;
 
-	void sendMessage();
+	void sendChatMessage();
+	void closeWindow();
+	void drawChatMessages(int bottomY);
 };

@@ -259,7 +259,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 			if (!gGuiContext.isCreative && gGuiContext.health <= 0) {
 				gGuiContext.resetSurvivalStats();
 			}
-			gGuiContext.chatHistory.push_back(gGuiContext.isCreative ? "Mode: Creative (Double-Space to Fly)" : "Mode: Survival");
+			gGuiContext.addChatMessage(gGuiContext.isCreative ? "Mode: Creative (Double-Space to Fly)" : "Mode: Survival");
 			return;
 		} else if (key == GLFW_KEY_T) {
 			gGuiContext.setScreen(new ChatScreen(""));
@@ -279,7 +279,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 			return;
 		} else if (key == GLFW_KEY_O) {
 			gGuiOptions.greedyMeshing = !gGuiOptions.greedyMeshing;
-			gGuiContext.chatHistory.push_back(gGuiOptions.greedyMeshing ? "Greedy Meshing: ON" : "Greedy Meshing: OFF");
+			gGuiContext.addChatMessage(gGuiOptions.greedyMeshing ? "Greedy Meshing: ON" : "Greedy Meshing: OFF");
 			return;
 		}
 	}

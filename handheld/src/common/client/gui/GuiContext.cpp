@@ -154,9 +154,30 @@ void GuiContext::requestQuit() {
 }
 
 void GuiContext::addChatMessage(const std::string& msg) {
+	ChatMessage entry;
+	entry.rawText = msg;
+	entry.formattedText = msg;
+	entry.age = 0;
+	entry.maxAge = 200;
+	chatMessages.insert(chatMessages.begin(), entry);
+	while (chatMessages.size() > 30) {
+		chatMessages.pop_back();
+	}
+
 	chatHistory.push_back(msg);
-	while (chatHistory.size() > 12) {
+	while (chatHistory.size() > 30) {
 		chatHistory.erase(chatHistory.begin());
+	}
+}
+
+void GuiContext::tickChatMessages() {
+	static float accum = 0.0f;
+	accum += deltaTime;
+	while (accum >= 0.05f) {
+		accum -= 0.05f;
+		for (auto& m : chatMessages) {
+			++m.age;
+		}
 	}
 }
 

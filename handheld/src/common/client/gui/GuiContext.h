@@ -54,7 +54,16 @@ struct GuiContext {
 	bool shouldQuit = false;
 	bool loadingChunks = false;
 	float loadingProgress = 0.0f;
+	struct ChatMessage {
+		std::string sender;
+		std::string rawText;
+		std::string formattedText;
+		int age = 0;
+		int maxAge = 200;
+	};
+	std::vector<ChatMessage> chatMessages;
 	std::vector<std::string> chatHistory;
+	void tickChatMessages();
 	int windowWidth = 854;
 	int windowHeight = 480;
 	int guiWidth = 427;
