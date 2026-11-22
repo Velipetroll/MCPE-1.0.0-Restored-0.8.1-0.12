@@ -715,6 +715,29 @@ public:
 				mCurrSmoothBob = 0.0f;
 				mCurrTilt = 0.0f;
 				mCurrWalkAnimSpeed = 0.0f;
+
+				auto wrapDeg = [](float d) {
+					while (d < -180.0f) d += 360.0f;
+					while (d >= 180.0f) d -= 360.0f;
+					return d;
+				};
+				float headYawDeg = static_cast<float>(yaw);
+				float targetBodyYaw = mCurrBodyYaw;
+				if (mSwingProgress > 0.0f || gBowPulling) {
+					targetBodyYaw = headYawDeg;
+				}
+				float j = wrapDeg(targetBodyYaw - mCurrBodyYaw);
+				float newBodyYaw = mCurrBodyYaw + j * 0.3f;
+				float k = wrapDeg(headYawDeg - newBodyYaw);
+				if (k < -75.0f) k = -75.0f;
+				if (k >= 75.0f) k = 75.0f;
+				newBodyYaw = headYawDeg - k;
+				if (k * k > 2500.0f) {
+					newBodyYaw += k * 0.2f;
+				}
+				mCurrBodyYaw = newBodyYaw;
+				while (mCurrBodyYaw - mPrevBodyYaw < -180.0f) mPrevBodyYaw -= 360.0f;
+				while (mCurrBodyYaw - mPrevBodyYaw >= 180.0f) mPrevBodyYaw += 360.0f;
 				return;
 			}
 		}
