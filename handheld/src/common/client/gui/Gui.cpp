@@ -8,8 +8,11 @@
 #include "world/crafting/CraftingRecipes.h"
 #include <glad/glad.h>
 
+static bool s_useTouchUI = true;
+
 void Gui::render(float partialTicks, int guiW, int guiH, Options* options, Font* font, GuiContext* ctx) {
 	if (options && options->hideGUI) return;
+	s_useTouchUI = (!options || options->useTouchUI);
 	if (ctx) {
 		ctx->ensureInventoryInitialized();
 		selectedSlot = ctx->selectedHotbarSlot;
@@ -43,6 +46,7 @@ void Gui::render(float partialTicks, int guiW, int guiH, Options* options, Font*
 
 bool Gui::handleHudClick(int guiX, int guiY, int guiW, int guiH, GuiContext* ctx) {
 	if (!ctx) return false;
+	if (!ctx->options || !ctx->options->useTouchUI) return false;
 	// [...] slot at the end of the hotbar (MCPE 0.8.1: numSlots = 10 -> sp = guiW/2 - 100)
 	int dotX = guiW / 2 - 100 + 180;
 	int dotY = guiH - 22;
@@ -54,7 +58,6 @@ bool Gui::handleHudClick(int guiX, int guiY, int guiW, int guiH, GuiContext* ctx
 		}
 		return true;
 	}
-	if (!ctx->options || !ctx->options->useTouchUI) return false;
 	// Chat icon (guiW - 42, 4, 18, 18)
 	if (guiX >= guiW - 42 && guiX < guiW - 24 && guiY >= 4 && guiY < 22) {
 		ctx->setScreen(new ChatScreen());
@@ -105,15 +108,17 @@ void Gui::renderCrosshair(int guiW, int guiH) {
 }
 
 void Gui::renderHotbar(int guiW, int guiH, Font* font, GuiContext* ctx) {
-	// MCPE 0.8.1 Gui::renderToolBar: 9 item slots + 1 [...] slot = 10 slots
-	const int numSlots = 10;
+	// MCPE 0.8.1 Gui::renderToolBar: 9 item slots + 1 [...] slot in Touch UI, 9 slots in PC UI
+	const int numSlots = s_useTouchUI ? 10 : 9;
 	int sp = guiW / 2 - 10 * numSlots;
 	int sp2 = guiH - 22;
 
 	if (bindTexture("textures/gui/gui.png")) {
 		glColor4f(1.0f, 1.0f, 1.0f, 0.65f);
 		blit(sp, sp2, 0, 0, 180, 22, 256, 256);
-		blit(sp + 180, sp2, 160, 0, 20, 22, 256, 256);
+		if (s_useTouchUI) {
+			blit(sp + 180, sp2, 160, 0, 20, 22, 256, 256);
+		}
 		blit(sp + 20 * numSlots, sp2, 180, 0, 2, 22, 256, 256);
 		blit(sp - 1 + 20 * selectedSlot, sp2 - 1, 0, 22, 24, 22, 256, 256);
 		glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
@@ -123,7 +128,7 @@ void Gui::renderHotbar(int guiW, int guiH, Font* font, GuiContext* ctx) {
 	}
 
 	if (ctx) {
-		for (int i = 0; i < numSlots - 1; ++i) {
+		for (int i = 0; i < 9; ++i) {
 			const ItemInstance& item = ctx->inventorySlots[static_cast<size_t>(i)];
 			if (!item.isNull()) {
 				drawItemInSlot(font, item, sp + 4 + i * 20, sp2 + 2);
@@ -131,18 +136,21 @@ void Gui::renderHotbar(int guiW, int guiH, Font* font, GuiContext* ctx) {
 		}
 	}
 
-	// [...] icon in the last slot (MCPE 0.8.1: 10*NumSlots + v7/2 - 16, v8 - 13, 228, 248, 14, 4, 28, 8)
-	int dotIconX = 10 * numSlots + guiW / 2 - 16;
-	int dotIconY = guiH - 13;
-	if (bindTexture("textures/gui/gui.png")) {
-		blitScaled(dotIconX, dotIconY, 14, 4, 228, 248, 28, 8, 256, 256);
-	} else if (font) {
-		drawCenteredString(font, "...", dotIconX + 7, dotIconY - 2, 0xFFE0E0E0);
+	if (s_useTouchUI) {
+		// [...] icon in the last slot (MCPE 0.8.1: 10*NumSlots + v7/2 - 16, v8 - 13, 228, 248, 14, 4, 28, 8)
+		int dotIconX = 10 * numSlots + guiW / 2 - 16;
+		int dotIconY = guiH - 13;
+		if (bindTexture("textures/gui/gui.png")) {
+			blitScaled(dotIconX, dotIconY, 14, 4, 228, 248, 28, 8, 256, 256);
+		} else if (font) {
+			drawCenteredString(font, "...", dotIconX + 7, dotIconY - 2, 0xFFE0E0E0);
+		}
 	}
 }
 
 void Gui::renderHearts(int guiW, int guiH) {
-	int startX = guiW / 2 - 91;
+	const int numSlots = s_useTouchUI ? 10 : 9;
+	int startX = guiW / 2 - 10 * numSlots;
 	int y = guiH - 32;
 
 	if (bindTexture("textures/gui/icons.png")) {
@@ -164,7 +172,8 @@ void Gui::renderHearts(int guiW, int guiH) {
 }
 
 void Gui::renderHunger(int guiW, int guiH) {
-	int rightEdge = guiW / 2 + 91;
+	const int numSlots = s_useTouchUI ? 10 : 9;
+	int rightEdge = guiW / 2 + 10 * numSlots + 2;
 	int y = guiH - 32;
 
 	if (bindTexture("textures/gui/icons.png")) {
@@ -186,7 +195,8 @@ void Gui::renderHunger(int guiW, int guiH) {
 }
 
 void Gui::renderArmor(int guiW, int guiH) {
-	int startX = guiW / 2 - 91;
+	const int numSlots = s_useTouchUI ? 10 : 9;
+	int startX = guiW / 2 - 10 * numSlots;
 	int y = guiH - 42;
 
 	if (bindTexture("textures/gui/icons.png")) {
