@@ -1,0 +1,5 @@
+build/
+assets/
+reference/
+**/src-deps/
+docs/images/

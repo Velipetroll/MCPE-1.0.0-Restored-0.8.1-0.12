@@ -1140,3 +1140,12 @@ if(UNIX AND NOT ANDROID)
         target_compile_definitions(minecraftpe PRIVATE HAS_OPENAL=1)
     endif()
 endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../assets")
+    add_custom_command(TARGET minecraftpe POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../assets"
+            "$<TARGET_FILE_DIR:minecraftpe>"
+        COMMENT "Copying assets to build directory..."
+    )
+endif()

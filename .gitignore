@@ -5,5 +5,5 @@ handheld/data/*
 
 build/
 assets/
-mcpe-engine/
-MCPE-0.8.1/
+reference/
+restore/Debug_Log.txt
