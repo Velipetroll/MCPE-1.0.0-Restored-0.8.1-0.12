@@ -323,6 +323,14 @@ public:
 	float mCurrWalkDist = 0.0f;
 	float mPrevSmoothBob = 0.0f;
 	float mCurrSmoothBob = 0.0f;
+	float mTilt = 0.0f;
+	float mPrevTilt = 0.0f;
+	float mCurrTilt = 0.0f;
+	int mHurtTime = 0;
+	int mHurtDuration = 10;
+	float mHurtDir = 0.0f;
+	int mDeathTime = 0;
+	float mAlpha = 0.0f;
 	float mWalkAnimPos = 0.0f;
 	float mPrevWalkAnimPos = 0.0f;
 	float mCurrWalkAnimPos = 0.0f;
@@ -495,6 +503,10 @@ public:
 		mPrevFeetY = mCurrFeetY;
 		mPrevWalkDist = mCurrWalkDist;
 		mPrevSmoothBob = mCurrSmoothBob;
+		mPrevTilt = mCurrTilt;
+		if (mHurtTime > 0) --mHurtTime;
+		if (gGuiContext.health <= 0) ++mDeathTime;
+		else mDeathTime = 0;
 		mPrevWalkAnimPos = mCurrWalkAnimPos;
 		mPrevWalkAnimSpeed = mCurrWalkAnimSpeed;
 		mPrevBodyYaw = mCurrBodyYaw;
@@ -624,15 +636,18 @@ public:
 		float stepDx = mCurrPos.x - prevX;
 		float stepDz = mCurrPos.z - prevZ;
 		float horizStep = std::sqrt(stepDx * stepDx + stepDz * stepDz);
-		if (mOnGround && !mIsFlying) {
-			mCurrWalkDist += horizStep * 0.6f;
-		}
+		mCurrWalkDist += horizStep * 0.6f;
 		if (!gGuiContext.isCreative && !mIsFlying && horizStep > 0.0005f) {
 			float moveRate = sprinting ? 0.14f : (inWater ? 0.09f : 0.07f);
 			gGuiContext.exhaustion += horizStep * moveRate;
 		}
-		float targetBob = (mOnGround && !mIsFlying) ? std::min(horizStep * 10.0f, 1.0f) : 0.0f;
-		mCurrSmoothBob += (targetBob - mCurrSmoothBob) * 0.4f;
+		float v2 = std::sqrt(mPosDelta.x * mPosDelta.x + mPosDelta.z * mPosDelta.z);
+		if (v2 > 0.1f) v2 = 0.1f;
+		if (!mOnGround || gGuiContext.health <= 0) v2 = 0.0f;
+		mCurrSmoothBob += (v2 - mCurrSmoothBob) * 0.4f;
+		float v3 = std::atan(-(mPosDelta.y * 0.2f));
+		float v6 = (!mOnGround && gGuiContext.health > 0) ? (v3 * 15.0f) : 0.0f;
+		mCurrTilt += (v6 - mCurrTilt) * 0.8f;
 
 		// MCPE 0.8.1 Mob::tick (L358-406) body yaw tracking + Mob::updateWalkAnim (L1047-1088)
 		auto wrapDeg = [](float d) {
@@ -760,10 +775,12 @@ public:
 		}
 
 		float alpha = mTickAccum / TICK_DT;
+		mAlpha = alpha;
 		mPos = glm::mix(mPrevPos, mCurrPos, alpha);
 		mRenderFeetY = mPrevFeetY + (mCurrFeetY - mPrevFeetY) * alpha;
 		mWalkDist = mPrevWalkDist + (mCurrWalkDist - mPrevWalkDist) * alpha;
 		mSmoothBob = mPrevSmoothBob + (mCurrSmoothBob - mPrevSmoothBob) * alpha;
+		mTilt = mPrevTilt + (mCurrTilt - mPrevTilt) * alpha;
 		mWalkAnimSpeed = std::min(1.0f, mPrevWalkAnimSpeed + (mCurrWalkAnimSpeed - mPrevWalkAnimSpeed) * alpha);
 		mWalkAnimPos = mCurrWalkAnimPos - (1.0f - alpha) * mCurrWalkAnimSpeed;
 		float bodyDiff = mCurrBodyYaw - mPrevBodyYaw;
@@ -2885,6 +2902,32 @@ std::string getArmorTexturePath(const ItemInstance& item, bool layer2) {
 	return "";
 }
 
+static void bobHurt(glm::mat4& mat, const Camera& c) {
+	if (gGuiContext.health <= 0) {
+		float f = 40.0f - (8000.0f / (static_cast<float>(c.mDeathTime) + c.mAlpha + 200.0f));
+		mat = glm::rotate(mat, glm::radians(f), glm::vec3(0.0f, 0.0f, 1.0f));
+	}
+	if (c.mHurtTime > 0) {
+		float p = (static_cast<float>(c.mHurtTime) - c.mAlpha) / static_cast<float>(c.mHurtDuration);
+		float v5 = std::sin((p * p * p * p) * 3.14159265f);
+		mat = glm::rotate(mat, glm::radians(-c.mHurtDir), glm::vec3(0.0f, 1.0f, 0.0f));
+		mat = glm::rotate(mat, glm::radians(-(v5 * 14.0f)), glm::vec3(0.0f, 0.0f, 1.0f));
+		mat = glm::rotate(mat, glm::radians(c.mHurtDir), glm::vec3(0.0f, 1.0f, 0.0f));
+	}
+}
+
+static void bobView(glm::mat4& mat, const Camera& c) {
+	float v5 = c.mSmoothBob;
+	float v6 = -((c.mCurrWalkDist + (c.mCurrWalkDist - c.mPrevWalkDist) * c.mAlpha) * 3.14159265f);
+	float v7 = c.mTilt;
+	float v8 = std::sin(v6);
+	float v9 = std::cos(v6);
+	mat = glm::translate(mat, glm::vec3((v8 * v5) * 0.5f, -std::fabs(v9 * v5), 0.0f));
+	mat = glm::rotate(mat, glm::radians((std::sin(v6) * v5) * 3.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	mat = glm::rotate(mat, glm::radians(std::fabs(std::cos(v6 - 0.2f) * v5) * 5.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+	mat = glm::rotate(mat, glm::radians(v7), glm::vec3(1.0f, 0.0f, 0.0f));
+}
+
 void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspect, bool viewBobbing, float lightShade) {
 	glUseProgram(0);
 	glEnable(GL_DEPTH_TEST);
@@ -2901,15 +2944,12 @@ void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspe
 	glLoadMatrixf(glm::value_ptr(handProj));
 	glMatrixMode(GL_MODELVIEW);
 	glPushMatrix();
-	glLoadIdentity();
-
-	float bobX = 0.0f;
-	float bobY = 0.0f;
+	glm::mat4 handBob(1.0f);
+	bobHurt(handBob, c);
 	if (viewBobbing) {
-		float phase = c.mWalkDist * 3.14159265f;
-		bobX = -std::cos(phase) * 0.045f * c.mSmoothBob;
-		bobY = std::abs(std::sin(phase)) * 0.045f * c.mSmoothBob;
+		bobView(handBob, c);
 	}
+	glLoadMatrixf(glm::value_ptr(handBob));
 
 	float sw = c.mSwingProgress;
 	float swSqSin = std::sin(sw * sw * 3.14159265f);
@@ -2920,7 +2960,7 @@ void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspe
 	if (held.isNull() || held.getStackSize() <= 0) {
 		if (GuiComponent::bindTexture("textures/entity/steve.png")) {
 			glTranslatef(-swSqrtSin * 0.30f, swDoubleSin * 0.40f, -swSin * 0.40f);
-			glTranslatef(0.64f + bobX, -0.60f - bobY, -0.72f);
+			glTranslatef(0.64f, -0.60f, -0.72f);
 			glRotatef(45.0f + swSqrtSin * 70.0f, 0.0f, 1.0f, 0.0f);
 			glRotatef(-swSqSin * 20.0f, 0.0f, 0.0f, 1.0f);
 			// Match MCPE 0.8.1 ItemInHandRenderer::render() empty arm pose
@@ -2940,7 +2980,7 @@ void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspe
 		if (!isPullingBow) {
 			glTranslatef(-swSqrtSin * 0.40f, swDoubleSin * 0.20f, -swSin * 0.20f);
 		}
-		glTranslatef(0.56f + bobX, -0.52f - bobY, -0.72f);
+		glTranslatef(0.56f, -0.52f, -0.72f);
 		glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
 		if (!isPullingBow) {
 			glRotatef(-swSqSin * 20.0f, 0.0f, 1.0f, 0.0f);
@@ -4153,10 +4193,15 @@ void renderThreadStuff()
 				int dealt = gGuiContext.applyDamage(rawDmg, false);
 				if (dealt > 0) {
 					SoundEngine::play(SoundEngine::SND_HURT, 0.9f);
+					c.mHurtTime = 10;
+					c.mHurtDuration = 10;
 					float kLen = std::sqrt(knockDir.x * knockDir.x + knockDir.z * knockDir.z);
 					if (kLen > 0.001f) {
 						c.mPosDelta.x += (knockDir.x / kLen) * 0.34f;
 						c.mPosDelta.z += (knockDir.z / kLen) * 0.34f;
+						c.mHurtDir = (std::atan2(knockDir.z, knockDir.x) * (180.0f / 3.14159265f)) - static_cast<float>(c.yaw);
+					} else {
+						c.mHurtDir = static_cast<float>((std::rand() % 2) * 180);
 					}
 					c.mPosDelta.y = std::max(c.mPosDelta.y, 0.24f);
 				}
@@ -5365,18 +5410,20 @@ void renderThreadStuff()
 					renderCamPos = desiredCam;
 				}
 				lookTarget = eyePos;
-			} else if (gGuiOptions.viewBobbing) {
-				float phase = c.mWalkDist * 3.14159265f;
-				float bobVert = -std::abs(std::cos(phase)) * 0.045f * c.mSmoothBob;
-				float bobHoriz = std::sin(phase) * 0.035f * c.mSmoothBob;
-				glm::vec3 rightVec = glm::normalize(glm::cross(c.cameraFront, c.cameraUp));
-				renderCamPos += rightVec * bobHoriz + c.cameraUp * bobVert;
-				lookTarget = renderCamPos + c.cameraFront;
 			}
 
 			glm::mat4 view = glm::lookAt(renderCamPos, lookTarget, c.cameraUp);
 			latestRenderCamPos = renderCamPos;
 			glm::mat4 camRelView = glm::lookAt(glm::vec3(0.0f), lookTarget - renderCamPos, c.cameraUp);
+			if (!gGuiOptions.thirdPerson) {
+				glm::mat4 bobMat(1.0f);
+				bobHurt(bobMat, c);
+				if (gGuiOptions.viewBobbing) {
+					bobView(bobMat, c);
+				}
+				view = bobMat * view;
+				camRelView = bobMat * camRelView;
+			}
 			FrustumPlanes frustum;
 			frustum.extract(projection * camRelView);
 
