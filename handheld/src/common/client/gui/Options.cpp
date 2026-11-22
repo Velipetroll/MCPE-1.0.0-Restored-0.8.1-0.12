@@ -59,6 +59,7 @@ bool Options::getBooleanValue(Option opt) const {
 	case Option::FANCY_SKIES: return fancySkies;
 	case Option::ANIMATE_TEXTURES: return animateTextures;
 	case Option::SHOW_FPS: return showFps;
+	case Option::GREEDY_MESHING: return greedyMeshing;
 	default: return false;
 	}
 }
@@ -78,6 +79,7 @@ void Options::toggle(Option opt) {
 	case Option::FANCY_SKIES: fancySkies = !fancySkies; break;
 	case Option::ANIMATE_TEXTURES: animateTextures = !animateTextures; break;
 	case Option::SHOW_FPS: showFps = !showFps; break;
+	case Option::GREEDY_MESHING: greedyMeshing = !greedyMeshing; break;
 	default: break;
 	}
 }
@@ -141,6 +143,8 @@ std::string Options::getMessage(Option opt) const {
 		int idx = std::max(0, std::min(5, fpsLimit));
 		return std::string("Max FPS: ") + names[idx];
 	}
+	case Option::GREEDY_MESHING:
+		return std::string("Greedy Meshing: ") + (greedyMeshing ? "ON" : "OFF");
 	}
 	return "";
 }
@@ -156,7 +160,7 @@ std::string Options::serialize() const {
 	  << "\nuseTouchJoypad=" << useTouchJoypad << "\ndpadSize=" << dpadSize
 	  << "\ndestroyVibration=" << destroyVibration << "\nfancySkies=" << fancySkies
 	  << "\nanimateTextures=" << animateTextures << "\nshowFps=" << showFps
-	  << "\nfpsLimit=" << fpsLimit << "\n";
+	  << "\nfpsLimit=" << fpsLimit << "\ngreedyMeshing=" << greedyMeshing << "\n";
 	return o.str();
 }
 
@@ -196,6 +200,7 @@ void Options::load(const std::string& path) {
 			else if (k == "animateTextures") animateTextures = std::stoi(v) != 0;
 			else if (k == "showFps") showFps = std::stoi(v) != 0;
 			else if (k == "fpsLimit") fpsLimit = std::max(0, std::min(5, std::stoi(v)));
+			else if (k == "greedyMeshing") greedyMeshing = std::stoi(v) != 0;
 		} catch (...) {}
 	}
 }

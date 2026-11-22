@@ -27,6 +27,7 @@ namespace mce {
 
 		// Per-shader cache of the last CHUNK_ORIGIN_AND_SCALE applied (see RenderChunk::render)
 		mutable GLint mChunkOriginLoc = -2;
+		mutable GLint mChunkWorldPosLoc = -2;
 		mutable uint32_t mChunkOriginSerial = 0;
 
 		void setMatrix2(const std::string& name, float*) const;

@@ -25,8 +25,8 @@ public:
 	void fillGradient(int x0, int y0, int x1, int y1, uint32_t colorTop, uint32_t colorBottom) const;
 	void drawRect(int x0, int y0, int x1, int y1, uint32_t color) const;
 
-	void drawString(Font* font, const std::string& text, int x, int y, uint32_t color) const;
-	void drawCenteredString(Font* font, const std::string& text, int x, int y, uint32_t color) const;
+	void drawString(Font* font, const std::string& text, int x, int y, uint32_t color, bool shadow = true) const;
+	void drawCenteredString(Font* font, const std::string& text, int x, int y, uint32_t color, bool shadow = true) const;
 	void drawItemInSlot(Font* font, const ItemInstance& item, int x, int y, bool drawCount = true) const;
 
 	static bool bindTexture(const std::string& relativePath);

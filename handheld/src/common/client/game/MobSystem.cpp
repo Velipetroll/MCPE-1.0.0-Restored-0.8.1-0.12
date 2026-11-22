@@ -1829,8 +1829,42 @@ void MobManager::render(BlockSource& region,
 	glPushMatrix();
 	glLoadMatrixf(glm::value_ptr(view));
 
+	const glm::mat4 vp = projection * view;
+	glm::vec4 fPlanes[6];
+	for (int i = 0; i < 4; ++i) {
+		fPlanes[0][i] = vp[i][3] + vp[i][0];
+		fPlanes[1][i] = vp[i][3] - vp[i][0];
+		fPlanes[2][i] = vp[i][3] + vp[i][1];
+		fPlanes[3][i] = vp[i][3] - vp[i][1];
+		fPlanes[4][i] = vp[i][3] + vp[i][2];
+		fPlanes[5][i] = vp[i][3] - vp[i][2];
+	}
+	for (int p = 0; p < 6; ++p) {
+		const float len = std::sqrt(fPlanes[p].x * fPlanes[p].x + fPlanes[p].y * fPlanes[p].y + fPlanes[p].z * fPlanes[p].z);
+		if (len > 0.0f) fPlanes[p] /= len;
+	}
+
+	int lastBoundMobType = -1;
+	bool lastBindOk = false;
 	for (const auto& m : mobs) {
-		if (!GuiComponent::bindTexture(getMobTexturePath(m.type))) continue;
+		const float cx = m.pos.x;
+		const float cy = m.pos.y + m.height() * 0.5f;
+		const float cz = m.pos.z;
+		const float rad = std::max(m.height(), 1.5f);
+		bool vis = true;
+		for (int p = 0; p < 6; ++p) {
+			if (fPlanes[p].x * cx + fPlanes[p].y * cy + fPlanes[p].z * cz + fPlanes[p].w < -rad) {
+				vis = false;
+				break;
+			}
+		}
+		if (!vis) continue;
+		const int mTypeInt = static_cast<int>(m.type);
+		if (mTypeInt != lastBoundMobType) {
+			lastBoundMobType = mTypeInt;
+			lastBindOk = GuiComponent::bindTexture(getMobTexturePath(m.type));
+		}
+		if (!lastBindOk) continue;
 
 		BlockPos samplePos(Math::floor(m.pos.x), Math::floor(m.pos.y + m.height() * 0.5f), Math::floor(m.pos.z));
 		float light = WorldLighting::sampleWorldBrightness(region, samplePos, sunFactor);

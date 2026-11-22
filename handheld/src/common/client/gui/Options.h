@@ -25,7 +25,8 @@ public:
 		FANCY_SKIES,
 		ANIMATE_TEXTURES,
 		SHOW_FPS,
-		FPS_LIMIT
+		FPS_LIMIT,
+		GREEDY_MESHING
 	};
 
 	float musicVolume = 1.0f;
@@ -50,6 +51,7 @@ public:
 	bool animateTextures = true;
 	bool showFps = false;
 	int fpsLimit = 0; // 0=VSync, 1=30, 2=60, 3=120, 4=240, 5=Unlimited
+	bool greedyMeshing = true;
 
 	float getProgressValue(Option opt) const;
 	void set(Option opt, float value);

@@ -165,7 +165,6 @@ class BackgroundWorker
 public:
 	std::mutex tmutex;
 	WorkerRole role;
-	std::thread t;
 	std::condition_variable vv;
 	std::condition_variable taskFinished;
 	bool running = true;
@@ -251,9 +250,9 @@ public:
 		}
 	}
 
-	BackgroundWorker() : t(&BackgroundWorker::workerThread, this)
+	BackgroundWorker()
 	{
-
+		t = std::thread(&BackgroundWorker::workerThread, this);
 	}
 
 	~BackgroundWorker() 
@@ -301,6 +300,7 @@ public:
 	};
 
 	std::vector<Task> tasks;
+	std::thread t;
 };
 
 inline BackgroundWorker& WorkerPool::getFor(WorkerRole role)

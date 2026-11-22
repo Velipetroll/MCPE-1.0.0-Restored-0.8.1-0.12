@@ -127,6 +127,7 @@ void OptionsScreen::init() {
 		grpGraphics->addOptionItem("Fancy Graphics", new TouchSwitch(opts, Options::Option::FANCY_GRAPHICS));
 		grpGraphics->addOptionItem("Beautiful Skies", new TouchSwitch(opts, Options::Option::FANCY_SKIES));
 		grpGraphics->addOptionItem("Animated Water", new TouchSwitch(opts, Options::Option::ANIMATE_TEXTURES));
+		grpGraphics->addOptionItem("Greedy Meshing", new TouchSwitch(opts, Options::Option::GREEDY_MESHING));
 		grpGraphics->addOptionItem("Show FPS", new TouchSwitch(opts, Options::Option::SHOW_FPS));
 		grpGraphics->addOptionItem("Max FPS", makeTouchStepSlider(opts, Options::Option::FPS_LIMIT, { 0, 1, 2, 3, 4, 5 }));
 		auto* grpExp = paneGraphics->createOptionsGroup("Experimental");
@@ -173,6 +174,7 @@ void OptionsScreen::init() {
 	mAnimateTexturesButton = new Button(18, "Animated Water");
 	mHideGuiButton = new Button(19, "Hide GUI");
 	mShowFpsButton = new Button(20, "Show FPS");
+	mGreedyMeshingButton = new Button(21, "Greedy Meshing");
 	mBackButton = new Button(1, "Done");
 
 	buttons.push_back(mInvertMouseButton);
@@ -186,6 +188,7 @@ void OptionsScreen::init() {
 	buttons.push_back(mAnimateTexturesButton);
 	buttons.push_back(mHideGuiButton);
 	buttons.push_back(mShowFpsButton);
+	buttons.push_back(mGreedyMeshingButton);
 	buttons.push_back(mBackButton);
 
 	updateButtonLabels();
@@ -205,6 +208,7 @@ void OptionsScreen::updateButtonLabels() {
 	if (mAnimateTexturesButton) mAnimateTexturesButton->msg = opts->getMessage(Options::Option::ANIMATE_TEXTURES);
 	if (mHideGuiButton) mHideGuiButton->msg = opts->getMessage(Options::Option::HIDE_GUI);
 	if (mShowFpsButton) mShowFpsButton->msg = opts->getMessage(Options::Option::SHOW_FPS);
+	if (mGreedyMeshingButton) mGreedyMeshingButton->msg = opts->getMessage(Options::Option::GREEDY_MESHING);
 }
 
 void OptionsScreen::setupPositions() {
@@ -254,28 +258,30 @@ void OptionsScreen::setupPositions() {
 	int gap = 10;
 	int leftX = width / 2 - colW - gap / 2;
 	int rightX = width / 2 + gap / 2;
-	int startY = 30;
-	int rowH = 21;
+	int startY = (height < 260) ? 20 : 26;
+	int rowH = (height < 260) ? 19 : 21;
+	int btnH = (height < 260) ? 18 : 20;
 
-	if (mMusicSlider) { mMusicSlider->posX = leftX; mMusicSlider->posY = startY; mMusicSlider->width = colW; mMusicSlider->height = 20; }
-	if (mSoundSlider) { mSoundSlider->posX = rightX; mSoundSlider->posY = startY; mSoundSlider->width = colW; mSoundSlider->height = 20; }
-	if (mSensitivitySlider) { mSensitivitySlider->posX = leftX; mSensitivitySlider->posY = startY + rowH; mSensitivitySlider->width = colW; mSensitivitySlider->height = 20; }
-	if (mRenderDistanceSlider) { mRenderDistanceSlider->posX = rightX; mRenderDistanceSlider->posY = startY + rowH; mRenderDistanceSlider->width = colW; mRenderDistanceSlider->height = 20; }
-	if (mGuiScaleSlider) { mGuiScaleSlider->posX = leftX; mGuiScaleSlider->posY = startY + rowH * 2; mGuiScaleSlider->width = colW; mGuiScaleSlider->height = 20; }
-	if (mDifficultySlider) { mDifficultySlider->posX = rightX; mDifficultySlider->posY = startY + rowH * 2; mDifficultySlider->width = colW; mDifficultySlider->height = 20; }
+	if (mMusicSlider) { mMusicSlider->posX = leftX; mMusicSlider->posY = startY; mMusicSlider->width = colW; mMusicSlider->height = btnH; }
+	if (mSoundSlider) { mSoundSlider->posX = rightX; mSoundSlider->posY = startY; mSoundSlider->width = colW; mSoundSlider->height = btnH; }
+	if (mSensitivitySlider) { mSensitivitySlider->posX = leftX; mSensitivitySlider->posY = startY + rowH; mSensitivitySlider->width = colW; mSensitivitySlider->height = btnH; }
+	if (mRenderDistanceSlider) { mRenderDistanceSlider->posX = rightX; mRenderDistanceSlider->posY = startY + rowH; mRenderDistanceSlider->width = colW; mRenderDistanceSlider->height = btnH; }
+	if (mGuiScaleSlider) { mGuiScaleSlider->posX = leftX; mGuiScaleSlider->posY = startY + rowH * 2; mGuiScaleSlider->width = colW; mGuiScaleSlider->height = btnH; }
+	if (mDifficultySlider) { mDifficultySlider->posX = rightX; mDifficultySlider->posY = startY + rowH * 2; mDifficultySlider->width = colW; mDifficultySlider->height = btnH; }
 
-	if (mInvertMouseButton) { mInvertMouseButton->posX = leftX; mInvertMouseButton->posY = startY + rowH * 3; mInvertMouseButton->width = colW; mInvertMouseButton->height = 20; }
-	if (mViewBobbingButton) { mViewBobbingButton->posX = rightX; mViewBobbingButton->posY = startY + rowH * 3; mViewBobbingButton->width = colW; mViewBobbingButton->height = 20; }
-	if (mFancyGraphicsButton) { mFancyGraphicsButton->posX = leftX; mFancyGraphicsButton->posY = startY + rowH * 4; mFancyGraphicsButton->width = colW; mFancyGraphicsButton->height = 20; }
-	if (mFancySkiesButton) { mFancySkiesButton->posX = rightX; mFancySkiesButton->posY = startY + rowH * 4; mFancySkiesButton->width = colW; mFancySkiesButton->height = 20; }
-	if (mAnimateTexturesButton) { mAnimateTexturesButton->posX = leftX; mAnimateTexturesButton->posY = startY + rowH * 5; mAnimateTexturesButton->width = colW; mAnimateTexturesButton->height = 20; }
-	if (mThirdPersonButton) { mThirdPersonButton->visible = true; mThirdPersonButton->posX = rightX; mThirdPersonButton->posY = startY + rowH * 5; mThirdPersonButton->width = colW; mThirdPersonButton->height = 20; }
-	if (mServerVisibleButton) { mServerVisibleButton->posX = leftX; mServerVisibleButton->posY = startY + rowH * 6; mServerVisibleButton->width = colW; mServerVisibleButton->height = 20; }
-	if (mLeftHandedButton) { mLeftHandedButton->posX = rightX; mLeftHandedButton->posY = startY + rowH * 6; mLeftHandedButton->width = colW; mLeftHandedButton->height = 20; }
-	if (mHideGuiButton) { mHideGuiButton->posX = leftX; mHideGuiButton->posY = startY + rowH * 7; mHideGuiButton->width = colW; mHideGuiButton->height = 20; }
-	if (mUiStyleButton) { mUiStyleButton->posX = rightX; mUiStyleButton->posY = startY + rowH * 7; mUiStyleButton->width = colW; mUiStyleButton->height = 20; }
-	if (mShowFpsButton) { mShowFpsButton->posX = leftX; mShowFpsButton->posY = startY + rowH * 8; mShowFpsButton->width = colW; mShowFpsButton->height = 20; }
-	if (mFpsLimitSlider) { mFpsLimitSlider->posX = rightX; mFpsLimitSlider->posY = startY + rowH * 8; mFpsLimitSlider->width = colW; mFpsLimitSlider->height = 20; }
+	if (mInvertMouseButton) { mInvertMouseButton->posX = leftX; mInvertMouseButton->posY = startY + rowH * 3; mInvertMouseButton->width = colW; mInvertMouseButton->height = btnH; }
+	if (mViewBobbingButton) { mViewBobbingButton->posX = rightX; mViewBobbingButton->posY = startY + rowH * 3; mViewBobbingButton->width = colW; mViewBobbingButton->height = btnH; }
+	if (mFancyGraphicsButton) { mFancyGraphicsButton->posX = leftX; mFancyGraphicsButton->posY = startY + rowH * 4; mFancyGraphicsButton->width = colW; mFancyGraphicsButton->height = btnH; }
+	if (mFancySkiesButton) { mFancySkiesButton->posX = rightX; mFancySkiesButton->posY = startY + rowH * 4; mFancySkiesButton->width = colW; mFancySkiesButton->height = btnH; }
+	if (mAnimateTexturesButton) { mAnimateTexturesButton->posX = leftX; mAnimateTexturesButton->posY = startY + rowH * 5; mAnimateTexturesButton->width = colW; mAnimateTexturesButton->height = btnH; }
+	if (mThirdPersonButton) { mThirdPersonButton->visible = true; mThirdPersonButton->posX = rightX; mThirdPersonButton->posY = startY + rowH * 5; mThirdPersonButton->width = colW; mThirdPersonButton->height = btnH; }
+	if (mServerVisibleButton) { mServerVisibleButton->posX = leftX; mServerVisibleButton->posY = startY + rowH * 6; mServerVisibleButton->width = colW; mServerVisibleButton->height = btnH; }
+	if (mLeftHandedButton) { mLeftHandedButton->posX = rightX; mLeftHandedButton->posY = startY + rowH * 6; mLeftHandedButton->width = colW; mLeftHandedButton->height = btnH; }
+	if (mHideGuiButton) { mHideGuiButton->posX = leftX; mHideGuiButton->posY = startY + rowH * 7; mHideGuiButton->width = colW; mHideGuiButton->height = btnH; }
+	if (mUiStyleButton) { mUiStyleButton->posX = rightX; mUiStyleButton->posY = startY + rowH * 7; mUiStyleButton->width = colW; mUiStyleButton->height = btnH; }
+	if (mShowFpsButton) { mShowFpsButton->posX = leftX; mShowFpsButton->posY = startY + rowH * 8; mShowFpsButton->width = colW; mShowFpsButton->height = btnH; }
+	if (mFpsLimitSlider) { mFpsLimitSlider->posX = rightX; mFpsLimitSlider->posY = startY + rowH * 8; mFpsLimitSlider->width = colW; mFpsLimitSlider->height = btnH; }
+	if (mGreedyMeshingButton) { mGreedyMeshingButton->posX = leftX; mGreedyMeshingButton->posY = startY + rowH * 9; mGreedyMeshingButton->width = colW; mGreedyMeshingButton->height = btnH; }
 
 	if (mBackButton) {
 		mBackButton->posX = width / 2 - 100;
@@ -339,6 +345,7 @@ void OptionsScreen::buttonClicked(Button* button) {
 		if (button->id == 18) opts->toggle(Options::Option::ANIMATE_TEXTURES);
 		if (button->id == 19) opts->toggle(Options::Option::HIDE_GUI);
 		if (button->id == 20) opts->toggle(Options::Option::SHOW_FPS);
+		if (button->id == 21) opts->toggle(Options::Option::GREEDY_MESHING);
 		if (button->id == 13) {
 			opts->toggle(Options::Option::USE_TOUCH_UI);
 			context->setScreen(new OptionsScreen(mFromPause));

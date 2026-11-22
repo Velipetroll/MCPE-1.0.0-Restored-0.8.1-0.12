@@ -247,15 +247,20 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 		} else if (key == GLFW_KEY_F5) {
 			gGuiOptions.thirdPerson = !gGuiOptions.thirdPerson;
 			return;
+		} else if (key == GLFW_KEY_O) {
+			gGuiOptions.greedyMeshing = !gGuiOptions.greedyMeshing;
+			gGuiContext.chatHistory.push_back(gGuiOptions.greedyMeshing ? "Greedy Meshing: ON" : "Greedy Meshing: OFF");
+			return;
 		}
 	}
 	if (action == GLFW_PRESS && gGuiContext.currentScreen) {
 		gGuiContext.currentScreen->keyPressed(key);
 	}
-	if (key == GLFW_KEY_0 && action == GLFW_PRESS)
-		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	if (key == GLFW_KEY_1 && action == GLFW_PRESS && gGuiContext.state != GameState::InGame)
-		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	if (key == GLFW_KEY_0 && action == GLFW_PRESS) {
+		static bool sWireframe = false;
+		sWireframe = !sWireframe;
+		glPolygonMode(GL_FRONT_AND_BACK, sWireframe ? GL_LINE : GL_FILL);
+	}
 
 	bool pressed = (action != GLFW_RELEASE);
 
@@ -1297,13 +1302,13 @@ struct FrustumPlanes {
 		}
 	}
 
-	bool isBoxVisible(const BlockPos& minPos, float pad, const glm::vec3& camPos) const {
+	bool isBoxVisible(const BlockPos& minPos, float pad, const glm::vec3& camPos, float extentX = 16.0f, float extentZ = 16.0f) const {
 		const float minX = static_cast<float>(minPos.x) - pad - camPos.x;
 		const float minY = static_cast<float>(minPos.y) - pad - camPos.y;
 		const float minZ = static_cast<float>(minPos.z) - pad - camPos.z;
-		const float maxX = static_cast<float>(minPos.x + 16) + pad - camPos.x;
+		const float maxX = static_cast<float>(minPos.x) + extentX + pad - camPos.x;
 		const float maxY = static_cast<float>(minPos.y + 16) + pad - camPos.y;
-		const float maxZ = static_cast<float>(minPos.z + 16) + pad - camPos.z;
+		const float maxZ = static_cast<float>(minPos.z) + extentZ + pad - camPos.z;
 		for (int i = 0; i < 6; ++i) {
 			const glm::vec4& p = planes[i];
 			const float px = (p.x >= 0.0f) ? maxX : minX;
@@ -1334,8 +1339,8 @@ void rebuildSubChunkAt(const ChunkPos& cp, int subY,
 		}
 		return;
 	}
-	chunkPart->startRebuild(std::move(chunkBuilder));
-	chunkPart->rebuild(gGuiOptions.fancyGraphics, true);
+	chunkPart->startRebuild(std::move(chunkBuilder), false);
+	chunkPart->rebuild(gGuiOptions.fancyGraphics, true, 0, gGuiOptions.greedyMeshing, false);
 	chunkBuilder = chunkPart->endRebuild(camPos);
 	ChunkPerfMetrics::instance.meshRebuilds.fetch_add(1, std::memory_order_relaxed);
 }
@@ -2039,12 +2044,34 @@ void renderWorldItemEntities(const std::vector<WorldItemEntity>& items,
 	glEnable(GL_ALPHA_TEST);
 	glAlphaFunc(GL_GREATER, 0.1f);
 
+	// Extract frustum planes from projection * view for world-space item culling
+	const glm::mat4 vp = projection * view;
+	glm::vec4 fPlanes[6];
+	for (int i = 0; i < 4; ++i) {
+		fPlanes[0][i] = vp[i][3] + vp[i][0];
+		fPlanes[1][i] = vp[i][3] - vp[i][0];
+		fPlanes[2][i] = vp[i][3] + vp[i][1];
+		fPlanes[3][i] = vp[i][3] - vp[i][1];
+		fPlanes[4][i] = vp[i][3] + vp[i][2];
+		fPlanes[5][i] = vp[i][3] - vp[i][2];
+	}
+
 	for (const auto& e : items) {
 		if (e.item.isNull()) continue;
 
 		float rx = e.prevPos.x + (e.pos.x - e.prevPos.x) * partialTicks;
 		float ry = e.prevPos.y + (e.pos.y - e.prevPos.y) * partialTicks;
 		float rz = e.prevPos.z + (e.pos.z - e.prevPos.z) * partialTicks;
+
+		bool vis = true;
+		for (int p = 0; p < 6; ++p) {
+			const float len = std::sqrt(fPlanes[p].x * fPlanes[p].x + fPlanes[p].y * fPlanes[p].y + fPlanes[p].z * fPlanes[p].z);
+			if (fPlanes[p].x * rx + fPlanes[p].y * ry + fPlanes[p].z * rz + fPlanes[p].w < -1.0f * len) {
+				vis = false;
+				break;
+			}
+		}
+		if (!vis) continue;
 
 		// MCPE 0.8.1 Entity::getBrightness & Entity::setupLighting (clamp [0.35, 1.0])
 		int lightY = Math::floor((ry - 0.125f) + 0.25f * 0.66f);
@@ -2234,6 +2261,24 @@ void renderSkyAndCelestials(const glm::mat4& projection,
 	glPushMatrix();
 	glLoadMatrixf(glm::value_ptr(camRelView));
 
+	// Precomputed unit-circle trig tables for sky dome (16) and horizon band (24)
+	static float sDomeX[17], sDomeZ[17];
+	static float sBandX[25], sBandZ[25];
+	static bool sSkyTrigInited = false;
+	if (!sSkyTrigInited) {
+		for (int i = 0; i <= 16; ++i) {
+			float ang = static_cast<float>(i) * (6.2831853f / 16.0f);
+			sDomeX[i] = std::cos(ang) * 200.0f;
+			sDomeZ[i] = std::sin(ang) * 200.0f;
+		}
+		for (int i = 0; i <= 24; ++i) {
+			float ang = static_cast<float>(i) * (6.2831853f / 24.0f);
+			sBandX[i] = std::cos(ang) * 180.0f;
+			sBandZ[i] = std::sin(ang) * 180.0f;
+		}
+		sSkyTrigInited = true;
+	}
+
 	// Sky dome disc above horizon
 	glDisable(GL_TEXTURE_2D);
 	glDisable(GL_BLEND);
@@ -2241,21 +2286,17 @@ void renderSkyAndCelestials(const glm::mat4& projection,
 	glColor3f(sky.skyColor.r, sky.skyColor.g, sky.skyColor.b);
 	glVertex3f(0.0f, 16.0f, 0.0f);
 	for (int i = 0; i <= 16; ++i) {
-		float ang = static_cast<float>(i) * (6.2831853f / 16.0f);
-		glVertex3f(std::cos(ang) * 200.0f, 16.0f, std::sin(ang) * 200.0f);
+		glVertex3f(sDomeX[i], 16.0f, sDomeZ[i]);
 	}
 	glEnd();
 
 	// Horizon mist gradient band (fog color at horizon -> sky color up high)
 	glBegin(GL_QUAD_STRIP);
 	for (int i = 0; i <= 24; ++i) {
-		float ang = static_cast<float>(i) * (6.2831853f / 24.0f);
-		float cx = std::cos(ang) * 180.0f;
-		float cz = std::sin(ang) * 180.0f;
 		glColor3f(sky.fogColor.r, sky.fogColor.g, sky.fogColor.b);
-		glVertex3f(cx, -12.0f, cz);
+		glVertex3f(sBandX[i], -12.0f, sBandZ[i]);
 		glColor3f(sky.skyColor.r, sky.skyColor.g, sky.skyColor.b);
-		glVertex3f(cx, 28.0f, cz);
+		glVertex3f(sBandX[i], 28.0f, sBandZ[i]);
 	}
 	glEnd();
 
@@ -2370,22 +2411,6 @@ void renderClouds(const glm::mat4& projection,
 	if (!GuiComponent::bindTexture("textures/environment/clouds.png")) {
 		return;
 	}
-
-	const GLboolean prevTex2D = glIsEnabled(GL_TEXTURE_2D);
-	const GLboolean prevBlend = glIsEnabled(GL_BLEND);
-	const GLboolean prevAlphaTest = glIsEnabled(GL_ALPHA_TEST);
-	const GLboolean prevCullFace = glIsEnabled(GL_CULL_FACE);
-	const GLboolean prevDepthTest = glIsEnabled(GL_DEPTH_TEST);
-	const GLboolean prevFog = glIsEnabled(GL_FOG);
-	GLboolean prevDepthMask = GL_TRUE;
-	glGetBooleanv(GL_DEPTH_WRITEMASK, &prevDepthMask);
-	GLint prevFogMode = GL_LINEAR;
-	glGetIntegerv(GL_FOG_MODE, &prevFogMode);
-	GLfloat prevFogStart = 0.0f, prevFogEnd = 1.0f;
-	GLfloat prevFogColor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-	glGetFloatv(GL_FOG_START, &prevFogStart);
-	glGetFloatv(GL_FOG_END, &prevFogEnd);
-	glGetFloatv(GL_FOG_COLOR, prevFogColor);
 
 	glUseProgram(0);
 	glEnable(GL_BLEND);
@@ -2507,6 +2532,8 @@ void renderClouds(const glm::mat4& projection,
 		static float sCachedCloudG = 0.0f;
 		static float sCachedCloudB = 0.0f;
 		static std::vector<CloudVertex> sCloudMesh;
+		static GLuint sCloudVbo = 0;
+		static GLsizei sCloudVboVertexCount = 0;
 
 		const float colorDiff = std::fabs(cloudR - sCachedCloudR) + std::fabs(cloudG - sCachedCloudG) + std::fabs(cloudB - sCachedCloudB);
 		if (!sCloudMeshValid || baseCellX != sCachedBaseCellX || baseCellZ != sCachedBaseCellZ || colorDiff > 0.06f) {
@@ -2594,20 +2621,31 @@ void renderClouds(const glm::mat4& projection,
 			sCachedCloudG = cloudG;
 			sCachedCloudB = cloudB;
 			sCloudMeshValid = true;
+			if (sCloudVbo == 0) {
+				glGenBuffers(1, &sCloudVbo);
+			}
+			sCloudVboVertexCount = static_cast<GLsizei>(sCloudMesh.size());
+			glBindBuffer(GL_ARRAY_BUFFER, sCloudVbo);
+			glBufferData(GL_ARRAY_BUFFER,
+			             static_cast<GLsizeiptr>(sCloudMesh.size() * sizeof(CloudVertex)),
+			             sCloudMesh.empty() ? nullptr : sCloudMesh.data(),
+			             GL_STATIC_DRAW);
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
 		}
 
 		glPushMatrix();
 		glTranslatef(-fracX, v7, -fracZ);
-		if (!sCloudMesh.empty()) {
-			glBindBuffer(GL_ARRAY_BUFFER, 0);
+		if (sCloudVbo != 0 && sCloudVboVertexCount > 0) {
+			glBindBuffer(GL_ARRAY_BUFFER, sCloudVbo);
 			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 			glEnableClientState(GL_VERTEX_ARRAY);
 			glEnableClientState(GL_COLOR_ARRAY);
-			glVertexPointer(3, GL_FLOAT, sizeof(CloudVertex), &sCloudMesh[0].x);
-			glColorPointer(4, GL_FLOAT, sizeof(CloudVertex), &sCloudMesh[0].r);
-			glDrawArrays(GL_QUADS, 0, static_cast<GLsizei>(sCloudMesh.size()));
+			glVertexPointer(3, GL_FLOAT, sizeof(CloudVertex), reinterpret_cast<const void*>(0));
+			glColorPointer(4, GL_FLOAT, sizeof(CloudVertex), reinterpret_cast<const void*>(offsetof(CloudVertex, r)));
+			glDrawArrays(GL_QUADS, 0, sCloudVboVertexCount);
 			glDisableClientState(GL_COLOR_ARRAY);
 			glDisableClientState(GL_VERTEX_ARRAY);
+			glBindBuffer(GL_ARRAY_BUFFER, 0);
 		}
 		glPopMatrix();
 	}
@@ -2619,18 +2657,13 @@ void renderClouds(const glm::mat4& projection,
 	glPopMatrix();
 	glMatrixMode(GL_MODELVIEW);
 
-	if (prevFog) glEnable(GL_FOG); else glDisable(GL_FOG);
-	glFogi(GL_FOG_MODE, prevFogMode);
-	glFogf(GL_FOG_START, prevFogStart);
-	glFogf(GL_FOG_END, prevFogEnd);
-	glFogfv(GL_FOG_COLOR, prevFogColor);
-
-	if (prevTex2D) glEnable(GL_TEXTURE_2D); else glDisable(GL_TEXTURE_2D);
-	if (prevBlend) glEnable(GL_BLEND); else glDisable(GL_BLEND);
-	if (prevAlphaTest) glEnable(GL_ALPHA_TEST); else glDisable(GL_ALPHA_TEST);
-	if (prevCullFace) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
-	if (prevDepthTest) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
-	glDepthMask(prevDepthMask);
+	glDisable(GL_FOG);
+	glDisable(GL_BLEND);
+	glDisable(GL_ALPHA_TEST);
+	glDisable(GL_CULL_FACE);
+	glEnable(GL_TEXTURE_2D);
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
 }
 
 GLuint createWhiteTexture() {
@@ -3609,6 +3642,7 @@ void renderThreadStuff()
 		sh->setInt("TEXTURE_0", 0);
 		sh->setInt("TEXTURE_1", 1);
 		sh->setInt("TEXTURE_2", 2);
+		sh->setInt("TEXTURE_3", 3);
 		sh->setFloat("FAR_CHUNKS_DISTANCE", 48.0f);
 		sh->setFloat("RENDER_DISTANCE", 48.0f);
 		sh->setVector2("TILE_TEXEL_STEP", tileStepU, tileStepV);
@@ -3708,7 +3742,20 @@ void renderThreadStuff()
 		}
 	};
 	applyFancyGraphicsMode(gGuiOptions.fancyGraphics);
+	if (const char* fgEnv = std::getenv("MCPE_FORCE_GREEDY")) {
+		gGuiOptions.greedyMeshing = (std::atoi(fgEnv) != 0);
+	}
 	bool lastFancyGraphics = gGuiOptions.fancyGraphics;
+	bool lastGreedyMeshing = gGuiOptions.greedyMeshing;
+	if (const char* autoWorld = std::getenv("MCPE_AUTOLOAD_WORLD")) {
+		if (autoWorld[0] != '\0') {
+			std::string wname(autoWorld);
+			gGuiContext.activeWorldDir = "worlds/" + wname;
+			gGuiContext.activeWorldName = wname;
+			gGuiContext.worldOpenRequested = true;
+			gGuiContext.setScreen(new ProgressScreen());
+		}
+	}
 
 	auto saveActiveWorld = [&]() {
 		if (!gGuiContext.hasWorldLoaded) return;
@@ -3947,6 +3994,17 @@ void renderThreadStuff()
 		if (gGuiOptions.fancyGraphics != lastFancyGraphics) {
 			lastFancyGraphics = gGuiOptions.fancyGraphics;
 			applyFancyGraphicsMode(gGuiOptions.fancyGraphics);
+		}
+		if (gGuiOptions.greedyMeshing != lastGreedyMeshing) {
+			lastGreedyMeshing = gGuiOptions.greedyMeshing;
+			for (auto& kv : rc) {
+				for (int i = 0; i < 8; ++i) {
+					if (kv.second[i]) {
+						kv.second[i]->setDirty(Tick(0), true);
+					}
+				}
+				needsReRendering2.insert(kv.first);
+			}
 		}
 		if (gGuiContext.worldSaveAndCloseRequested) {
 			saveActiveWorld();
@@ -4229,7 +4287,17 @@ void renderThreadStuff()
 				            c.mPos.y + c.cameraFront.y * reach,
 				            c.mPos.z + c.cameraFront.z * reach);
 				BlockSource& region = c.getRegion();
-				targetHit = region.clip(rayStart, rayEnd, false, false, 200, false);
+				static Vec3 sLastRayStart(1e9f, 1e9f, 1e9f);
+				static Vec3 sLastRayEnd(1e9f, 1e9f, 1e9f);
+				static HitResult sCachedTargetHit;
+				if (rayStart.x != sLastRayStart.x || rayStart.y != sLastRayStart.y || rayStart.z != sLastRayStart.z ||
+				    rayEnd.x != sLastRayEnd.x || rayEnd.y != sLastRayEnd.y || rayEnd.z != sLastRayEnd.z ||
+				    glinput.MouseDown(GLFW_MOUSE_BUTTON_LEFT) || glinput.MouseDown(GLFW_MOUSE_BUTTON_RIGHT)) {
+					sCachedTargetHit = region.clip(rayStart, rayEnd, false, false, 32, false);
+					sLastRayStart = rayStart;
+					sLastRayEnd = rayEnd;
+				}
+				targetHit = sCachedTargetHit;
 				hasTargetHit = targetHit.isHit() && targetHit.isTile();
 
 				gGuiContext.ensureInventoryInitialized();
@@ -5349,11 +5417,23 @@ void renderThreadStuff()
 				const float dx = static_cast<float>(center.x) - renderCamPos.x;
 				const float dz = static_cast<float>(center.z) - renderCamPos.z;
 				const float distSq = dx * dx + dz * dz;
-				if (distSq >= 112.0f * 112.0f) return 3;
-				if (distSq >= 80.0f * 80.0f) return 2;
-				if (distSq >= 48.0f * 48.0f) return 1;
+				if (distSq >= 176.0f * 176.0f) return 3;
+				if (distSq >= 128.0f * 128.0f) return 2;
+				if (distSq >= 64.0f * 64.0f) return 1;
 				return 0;
 			};
+
+			static bool allLoadOffsetsSettled = false;
+			static bool allLightOffsetsSettled = false;
+			static ChunkPos lastSettledCamChunkPos(INT_MAX, INT_MAX);
+			static int lastSettledRenderDist = -1;
+			static uint64_t rcGeneration = 1;
+			if (camChunkPos != lastSettledCamChunkPos || activeRenderDist != lastSettledRenderDist) {
+				allLoadOffsetsSettled = false;
+				allLightOffsetsSettled = false;
+				lastSettledCamChunkPos = camChunkPos;
+				lastSettledRenderDist = activeRenderDist;
+			}
 
 			auto tUnload0 = std::chrono::high_resolution_clock::now();
 			// Only scan unload maps when the camera enters a different chunk or render distance changes
@@ -5362,7 +5442,7 @@ void renderThreadStuff()
 				lastUnloadRenderDist = activeRenderDist;
 
 				for (auto it = rc.begin(); it != rc.end(); ) {
-					const ChunkPos& pos = it->first;
+					const ChunkPos pos = it->first;
 					if (std::abs(pos.x - camChunkPos.x) > renderUnloadDist ||
 					    std::abs(pos.z - camChunkPos.z) > renderUnloadDist) {
 						for (int i = 0; i < 8; ++i) {
@@ -5370,6 +5450,7 @@ void renderThreadStuff()
 						}
 						needsReRendering2.erase(pos);
 						it = rc.erase(it);
+						++rcGeneration;
 					} else {
 						++it;
 					}
@@ -5488,31 +5569,42 @@ void renderThreadStuff()
 				gGuiContext.loadingChunks ? 16 : 1,
 				loadBudgetMs);
 			const auto& loadOffsets = getCachedSpiralOffsets(loadDistance);
-			for (const auto& off : loadOffsets) {
-				ChunkPos cp(camChunkPos.x + off.dx, camChunkPos.z + off.dz);
-				if (loadedChunkSet.find(cp) != loadedChunkSet.end()) {
-					continue;
-				}
-				LevelChunk* lc = nullptr;
-				auto heldIt = heldChunks.find(cp);
-				if (heldIt == heldChunks.end()) {
-					if (loadedThisFrame >= maxLoadsPerFrame ||
-					    (loadedThisFrame > 0 && phaseElapsedMs(tChunkPhase0) >= loadBudgetMs)) {
-						break;
+			if (!allLoadOffsetsSettled) {
+				bool anyPendingLoad = false;
+				bool brokeEarly = false;
+				for (const auto& off : loadOffsets) {
+					ChunkPos cp(camChunkPos.x + off.dx, camChunkPos.z + off.dz);
+					if (loadedChunkSet.find(cp) != loadedChunkSet.end()) {
+						continue;
 					}
-					lc = acquireHeldChunk(chunkSrc, cp);
-					++loadedThisFrame;
-				} else {
-					lc = heldIt->second;
-				}
+					LevelChunk* lc = nullptr;
+					auto heldIt = heldChunks.find(cp);
+					if (heldIt == heldChunks.end()) {
+						if (loadedThisFrame >= maxLoadsPerFrame ||
+						    (loadedThisFrame > 0 && phaseElapsedMs(tChunkPhase0) >= loadBudgetMs)) {
+							brokeEarly = true;
+							break;
+						}
+						lc = acquireHeldChunk(chunkSrc, cp);
+						++loadedThisFrame;
+					} else {
+						lc = heldIt->second;
+					}
 
-				if (lc && lc->getState() == ChunkState::Loaded) {
-					if (loadedChunkSet.insert(cp).second) {
-						deserializeChunkWorldItems(*lc, worldItems);
-						queueChunkAndNeighbors(cp);
+					if (lc && lc->getState() == ChunkState::Loaded) {
+						if (loadedChunkSet.insert(cp).second) {
+							deserializeChunkWorldItems(*lc, worldItems);
+							queueChunkAndNeighbors(cp);
+						}
+					} else {
+						anyPendingLoad = true;
+						if (std::abs(off.dx) <= lightDistance + 1 && std::abs(off.dz) <= lightDistance + 1) {
+							needsReRendering.insert(cp);
+						}
 					}
-				} else if (std::abs(off.dx) <= lightDistance + 1 && std::abs(off.dz) <= lightDistance + 1) {
-					needsReRendering.insert(cp);
+				}
+				if (!brokeEarly && !anyPendingLoad) {
+					allLoadOffsetsSettled = true;
 				}
 			}
 
@@ -5540,37 +5632,48 @@ void renderThreadStuff()
 			const int maxLitPerFrame = gGuiContext.loadingChunks ? 24 : 4;
 			int litThisFrame = 0;
 			const auto& lightOffsets = getCachedSpiralOffsets(lightDistance);
-			for (const auto& off : lightOffsets) {
-				if (litThisFrame >= maxLitPerFrame ||
-				    (litThisFrame > 0 && phaseElapsedMs(tLightPhase0) >= lightBudgetMs)) {
-					break;
-				}
-				ChunkPos pos(camChunkPos.x + off.dx, camChunkPos.z + off.dz);
-				if (litChunks.find(pos) != litChunks.end()) continue;
-				if (!areChunkNeighborsLoaded(chunkSrc, pos)) continue;
+			if (!allLightOffsetsSettled) {
+				bool anyPendingLight = false;
+				bool brokeLightEarly = false;
+				for (const auto& off : lightOffsets) {
+					if (litThisFrame >= maxLitPerFrame ||
+					    (litThisFrame > 0 && phaseElapsedMs(tLightPhase0) >= lightBudgetMs)) {
+						brokeLightEarly = true;
+						break;
+					}
+					ChunkPos pos(camChunkPos.x + off.dx, camChunkPos.z + off.dz);
+					if (litChunks.find(pos) != litChunks.end()) continue;
+					if (!areChunkNeighborsLoaded(chunkSrc, pos)) {
+						anyPendingLight = true;
+						continue;
+					}
 
-				litChunks.insert(pos);
-				queueChunkAndNeighbors(pos);
-				WorldLighting::TouchedSubChunkMap touchedSubChunks;
-				WorldLighting::propagateChunkLighting(c.getRegion(), pos, nullptr, &touchedSubChunks);
-				++litThisFrame;
+					litChunks.insert(pos);
+					queueChunkAndNeighbors(pos);
+					WorldLighting::TouchedSubChunkMap touchedSubChunks;
+					WorldLighting::propagateChunkLighting(c.getRegion(), pos, nullptr, &touchedSubChunks);
+					++litThisFrame;
 
-				// Only dirty already-built neighbor subchunks whose lighting actually changed
-				for (const auto& kv : touchedSubChunks) {
-					const ChunkPos& np = kv.first;
-					if (np == pos) continue;
-					auto rcIt = rc.find(np);
-					if (rcIt != rc.end()) {
-						for (int s = 0; s < 8; ++s) {
-							if ((kv.second & (1u << s)) != 0 && rcIt->second[s]) {
-								rcIt->second[s]->setDirty(Tick(0), false);
+					// Only dirty already-built neighbor subchunks whose lighting actually changed
+					for (const auto& kv : touchedSubChunks) {
+						const ChunkPos& np = kv.first;
+						if (np == pos) continue;
+						auto rcIt = rc.find(np);
+						if (rcIt != rc.end()) {
+							for (int s = 0; s < 8; ++s) {
+								if ((kv.second & (1u << s)) != 0 && rcIt->second[s]) {
+									rcIt->second[s]->setDirty(Tick(0), false);
+								}
+							}
+							if (std::abs(np.x - camChunkPos.x) <= activeRenderDist &&
+							    std::abs(np.z - camChunkPos.z) <= activeRenderDist) {
+								needsReRendering2.insert(np);
 							}
 						}
-						if (std::abs(np.x - camChunkPos.x) <= activeRenderDist &&
-						    std::abs(np.z - camChunkPos.z) <= activeRenderDist) {
-							needsReRendering2.insert(np);
-						}
 					}
+				}
+				if (!brokeLightEarly && !anyPendingLight) {
+					allLightOffsetsSettled = true;
 				}
 			}
 
@@ -5611,7 +5714,11 @@ void renderThreadStuff()
 				LevelChunk* centerLc = chunkSrc.getExistingChunk(pos);
 				if (!centerLc) continue;
 				const auto subs = centerLc->getSubChunks();
+				const size_t prevRcSize = rc.size();
 				auto& subChunks = rc[pos];
+				if (rc.size() != prevRcSize) {
+					++rcGeneration;
+				}
 				bool allSettled = true;
 				for (int sy = 0; sy < 8; ++sy) {
 					const bool hasBlocks = (static_cast<size_t>(sy) < subs.size() && subs[sy]->hasBlocks());
@@ -5666,15 +5773,17 @@ void renderThreadStuff()
 			int dispatchedAsync = 0;
 			int rebuiltSync = 0;
 			const bool fancyGraphics = gGuiOptions.fancyGraphics;
+			const bool greedyMeshing = gGuiOptions.greedyMeshing;
 
 			for (const auto& cand : dirtySubChunks) {
 				RenderChunk* chunkPart = cand.part;
 				if (!chunkPart->isBuildState(RenderChunk::BuildState::Dirty)) continue;
 
 				if (cand.immediate && rebuiltSync < maxSyncImmediatePerFrame && chunkBuilder) {
-					chunkPart->startRebuild(std::move(chunkBuilder));
+					const uint8_t targetLod = greedyMeshing ? computeSubChunkLod(chunkPart->getCenter()) : 0;
+					chunkPart->startRebuild(std::move(chunkBuilder), false);
 					auto tBuild0 = std::chrono::high_resolution_clock::now();
-					chunkPart->rebuild(fancyGraphics, true, 0);
+					chunkPart->rebuild(fancyGraphics, true, targetLod, greedyMeshing, false);
 					auto tBuild1 = std::chrono::high_resolution_clock::now();
 					chunkBuilder = chunkPart->endRebuild(Vec3(renderCamPos.x, renderCamPos.y, renderCamPos.z));
 					auto tBuild2 = std::chrono::high_resolution_clock::now();
@@ -5696,15 +5805,15 @@ void renderThreadStuff()
 				std::unique_ptr<RenderChunkBuilder> workerBuilder = std::move(asyncBuilderPool.back());
 				asyncBuilderPool.pop_back();
 				inFlightRenderChunks.insert(chunkPart);
-				chunkPart->startRebuild(std::move(workerBuilder));
+				chunkPart->startRebuild(std::move(workerBuilder), false);
 				const uint8_t targetLod = computeSubChunkLod(chunkPart->getCenter());
 				const uint64_t taskEpoch = worldEpoch;
 				const int priority = (cand.inFrustum ? 0 : 10000) + std::min(9000, static_cast<int>(cand.distSq));
 
 				WorkerPool::getFor(WorkerRole::MainThread).queue(
-					[chunkPart, fancyGraphics, targetLod]() -> bool {
+					[chunkPart, fancyGraphics, targetLod, greedyMeshing]() -> bool {
 						auto tBuild0 = std::chrono::high_resolution_clock::now();
-						chunkPart->rebuild(fancyGraphics, true, targetLod);
+						chunkPart->rebuild(fancyGraphics, true, targetLod, greedyMeshing, false);
 						auto tBuild1 = std::chrono::high_resolution_clock::now();
 						ChunkPerfMetrics::instance.meshBuildUs.fetch_add(
 							static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(tBuild1 - tBuild0).count()),
@@ -5776,6 +5885,16 @@ void renderThreadStuff()
 				}
 			}
 
+			static glm::vec3 lastUploadedViewPos(1e9f, 1e9f, 1e9f);
+			if (renderCamPos.x != lastUploadedViewPos.x ||
+			    renderCamPos.y != lastUploadedViewPos.y ||
+			    renderCamPos.z != lastUploadedViewPos.z) {
+				lastUploadedViewPos = renderCamPos;
+				for (mce::Shader* sh : uniqueTerrainShaders) {
+					sh->setVector3("VIEW_POS", renderCamPos);
+				}
+			}
+
 			if (!camUnderwater && !camUnderlava && gGuiOptions.fancySkies) {
 				renderSkyAndCelestials(projection, camRelView, skyInfo, gGuiContext.worldTime);
 				renderClouds(projection, camRelView, renderCamPos, skyInfo, gGuiContext.worldTime, gGuiContext.worldTimeSubTick, gGuiOptions.fancyGraphics);
@@ -5822,14 +5941,43 @@ void renderThreadStuff()
 			}
 			transparentChunks.clear();
 
-			for (const auto& off : renderOffsets) {
-				ChunkPos pos(camChunkPos.x + off.dx, camChunkPos.z + off.dz);
-				auto rcIt = rc.find(pos);
-				if (rcIt == rc.end()) continue;
+			struct CachedRenderColumn {
+				RenderChunk** subChunks;
+				int d2;
+			};
+			static std::vector<CachedRenderColumn> sCachedRenderCols;
+			static ChunkPos sCachedColsCamChunk(INT_MAX, INT_MAX);
+			static int sCachedColsRenderDist = -1;
+			static uint64_t sCachedColsRcGen = 0;
+			if (camChunkPos != sCachedColsCamChunk ||
+			    activeRenderDist != sCachedColsRenderDist ||
+			    rcGeneration != sCachedColsRcGen) {
+				sCachedRenderCols.clear();
+				sCachedRenderCols.reserve(renderOffsets.size());
+				for (const auto& off : renderOffsets) {
+					ChunkPos pos(camChunkPos.x + off.dx, camChunkPos.z + off.dz);
+					auto rcIt = rc.find(pos);
+					if (rcIt != rc.end()) {
+						sCachedRenderCols.push_back({ rcIt->second, off.d2 });
+					}
+				}
+				sCachedColsCamChunk = camChunkPos;
+				sCachedColsRenderDist = activeRenderDist;
+				sCachedColsRcGen = rcGeneration;
+			}
+
+			const bool camOutdoors = (renderCamPos.y >= 62.0f) &&
+				(c.getRegion().getBrightness(c.getRegion().getDimension().getSkyLightLayer(), camBlockPos) > 0);
+
+			for (const auto& col : sCachedRenderCols) {
+				RenderChunk** subChunks = col.subChunks;
+				const bool farHoriz = (col.d2 > 4);
 				for (int i = 0; i < 8; i++) {
-					RenderChunk* chunkPart = rcIt->second[i];
+					RenderChunk* chunkPart = subChunks[i];
 					if (!chunkPart || chunkPart->isEmpty() || !chunkPart->isReady()) continue;
-					if (!frustum.isBoxVisible(chunkPart->getPosition(), 2.0f, renderCamPos)) continue;
+					if (camOutdoors && farHoriz && !chunkPart->isSkyLit()) continue;
+					const float extent = chunkPart->isGreedyClusterOwner() ? 32.0f : 16.0f;
+					if (!frustum.isBoxVisible(chunkPart->getPosition(), 2.0f, renderCamPos, extent, extent)) continue;
 
 					if (chunkPart->hasLayer(TerrainLayer::Blend) || chunkPart->hasLayer(TerrainLayer::Water)) {
 						BlockPos center = chunkPart->getCenter();
@@ -6078,6 +6226,59 @@ void renderThreadStuff()
 		if (gGuiOptions.fpsLimit != lastFpsLimitMode) {
 			lastFpsLimitMode = gGuiOptions.fpsLimit;
 			glfwSwapInterval(lastFpsLimitMode == 0 ? 1 : 0);
+		}
+
+		if (const char* fpsLog = std::getenv("MCPE_FPS_LOG")) {
+			static int sFpsFrames = 0;
+			static double sFpsStart = 0.0;
+			if (fpsLog[0] != '\0' && gGuiContext.hasWorldLoaded && !gGuiContext.loadingChunks) {
+				if (sFpsFrames == 0) sFpsStart = glfwGetTime();
+				++sFpsFrames;
+				double now = glfwGetTime();
+				if (now - sFpsStart >= 5.0) {
+					LOGI("AVG_FPS=%.1f (%d frames in %.2fs, greedy=%d)\n",
+					     static_cast<double>(sFpsFrames) / (now - sFpsStart),
+					     sFpsFrames, now - sFpsStart, gGuiOptions.greedyMeshing ? 1 : 0);
+					sFpsFrames = 0;
+					sFpsStart = now;
+				}
+			}
+		}
+		if (const char* testTime = std::getenv("MCPE_TEST_TIME")) {
+			if (std::string(testTime) == "day") {
+				gGuiContext.worldTime = 6000;
+				if (commandContext.level) commandContext.level->setTime(6000);
+			}
+		}
+		if (const char* testCam = std::getenv("MCPE_TEST_CAM")) {
+			float tx = 0, ty = 80, tz = 0, tyaw = 0, tpitch = 20;
+			if (std::sscanf(testCam, "%f,%f,%f,%f,%f", &tx, &ty, &tz, &tyaw, &tpitch) >= 3) {
+				c.setPositionAndLook(tx, ty, tz, tyaw, tpitch);
+			}
+		}
+		if (const char* ssPath = std::getenv("MCPE_SCREENSHOT")) {
+			static int sInWorldFrames = 0;
+			static bool sSavedScreenshot = false;
+			if (!sSavedScreenshot && gGuiContext.hasWorldLoaded && !gGuiContext.loadingChunks) {
+				if (++sInWorldFrames >= 180) {
+					sSavedScreenshot = true;
+					int fbw = 0, fbh = 0;
+					glfwGetFramebufferSize(window, &fbw, &fbh);
+					if (fbw > 0 && fbh > 0) {
+						std::vector<unsigned char> px(static_cast<size_t>(fbw) * static_cast<size_t>(fbh) * 3);
+						glPixelStorei(GL_PACK_ALIGNMENT, 1);
+						glReadPixels(0, 0, fbw, fbh, GL_RGB, GL_UNSIGNED_BYTE, px.data());
+						std::ofstream out(ssPath, std::ios::binary);
+						if (out) {
+							out << "P6\n" << fbw << " " << fbh << "\n255\n";
+							for (int y = fbh - 1; y >= 0; --y) {
+								out.write(reinterpret_cast<const char*>(px.data() + static_cast<size_t>(y) * fbw * 3), static_cast<std::streamsize>(fbw * 3));
+							}
+							LOGI("SCREENSHOT_SAVED=%s (%dx%d)\n", ssPath, fbw, fbh);
+						}
+					}
+				}
+			}
 		}
 
 		glfwSwapBuffers(window);

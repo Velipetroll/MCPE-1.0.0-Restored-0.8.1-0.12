@@ -93,6 +93,7 @@ namespace mce
 		static uint64_t sGlGenCalls;
 		static uint64_t sGlDeleteCalls;
 		static uint64_t sGlPoolHits;
+		static unsigned int sLastTerrainVAO;
 		static void resetStats() { sGlGenCalls = 0; sGlDeleteCalls = 0; sGlPoolHits = 0; }
 	};
 }

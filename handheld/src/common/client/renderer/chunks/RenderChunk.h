@@ -68,14 +68,18 @@ public:
 
 	void setPos(const BlockPos& p);
 
-	void startRebuild(Unique<RenderChunkBuilder> set);
+	void startRebuild(Unique<RenderChunkBuilder> set, bool greedyCluster = false);
 	void startFaceSort(Unique<RenderChunkSorter> set);
 
-	void rebuild(bool transparentLeaves, bool smoothLighting, uint8_t lodLevel = 0);
+	void rebuild(bool transparentLeaves, bool smoothLighting, uint8_t lodLevel = 0, bool greedyMeshing = false, bool allowCluster = false);
 	void faceSort();
 
 	uint8_t getLodLevel() const { return mLodLevel; }
 	void setLodLevel(uint8_t lod) { mLodLevel = lod; }
+	bool isGreedyClusterOwner() const { return mGreedyClusterOwner; }
+	void setGreedyClusterOwner(bool owner) { mGreedyClusterOwner = owner; }
+	bool wasBuiltWithCluster() const { return mBuiltWithCluster; }
+	void setBuiltWithCluster(bool built) { mBuiltWithCluster = built; }
 
 	Unique<RenderChunkBuilder>&& endRebuild(const Vec3& viewPos);
 	Unique<RenderChunkSorter>&& endFaceSort();
@@ -103,7 +107,9 @@ public:
 	bool isPending() const;
 	bool isReady();
 
-	bool hasLayer(TerrainLayer r) const;
+	bool hasLayer(TerrainLayer r) const {
+		return (mLayerMask & (1u << static_cast<int>(r))) != 0;
+	}
 
 	bool isCulled() const;
 	bool isAllDark() const;
@@ -173,6 +179,10 @@ private:
 	AABB mBoundingBox;
 
  	mce::Mesh mMesh;
+	unsigned int mGreedyTboBuffer = 0;
+	unsigned int mGreedyTboTex = 0;
+	uint32_t mLayerMask = 0;
+	uint32_t mTboLayerMask = 0;
 
 	Unique<RenderChunkBuilder> mCurrentBuilder;
 	Unique<RenderChunkSorter> mCurrentSorter;
@@ -194,6 +204,8 @@ private:
 	float mAverageSkyLight = 0;
 	bool mAllDark = false;
 	uint8_t mLodLevel = 0;
+	bool mGreedyClusterOwner = false;
+	bool mBuiltWithCluster = false;
 
 	double mReadyTime = 0;
 	Tick mLastChangeTick, mFirstChangeTick;

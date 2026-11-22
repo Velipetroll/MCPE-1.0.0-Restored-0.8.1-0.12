@@ -178,16 +178,16 @@ void GuiComponent::drawRect(int x0, int y0, int x1, int y1, uint32_t color) cons
 	fill(x1 - 1, y0, x1, y1, color);
 }
 
-void GuiComponent::drawString(Font* font, const std::string& text, int x, int y, uint32_t color) const {
+void GuiComponent::drawString(Font* font, const std::string& text, int x, int y, uint32_t color, bool shadow) const {
 	if (font) {
-		font->drawShadow(text, x, y, color);
+		font->draw(text, x, y, color, shadow);
 	}
 }
 
-void GuiComponent::drawCenteredString(Font* font, const std::string& text, int x, int y, uint32_t color) const {
+void GuiComponent::drawCenteredString(Font* font, const std::string& text, int x, int y, uint32_t color, bool shadow) const {
 	if (font) {
 		int w = font->width(text);
-		font->drawShadow(text, x - w / 2, y, color);
+		font->draw(text, x - w / 2, y, color, shadow);
 	}
 }
 

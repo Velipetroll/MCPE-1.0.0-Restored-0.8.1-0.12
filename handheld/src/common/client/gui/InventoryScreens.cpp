@@ -632,7 +632,7 @@ namespace {
 	};
 
 	void drawPcClassicCrafting(const Screen* s, Font* font, int px, int py, int gridSize, const char* title) {
-		if (font && title) s->drawString(font, title, px + 8, py + 6, 0xFF404040);
+		if (font && title) s->drawString(font, title, px + 8, py + 6, 0xFF404040, false);
 		if (gridSize == 3) {
 			drawSlotGrid(s, px + 38, py + 18, 3, 3, 18);
 		}
@@ -780,7 +780,7 @@ void InventoryScreen::render(int mouseX, int mouseY, float partialTicks) {
 	renderSteve3D(this, px + 26, py + 8, 52, 70, mouseX, mouseY, true);
 
 	// Crafting 2x2
-	if (font) drawString(font, "Crafting", px + 97, py + 8, 0xFF404040);
+	if (font) drawString(font, "Crafting", px + 97, py + 8, 0xFF404040, false);
 	for (int r = 0; r < 2; ++r) {
 		for (int c = 0; c < 2; ++c) {
 			renderPcSlotWithItem(this, font, px + 98 + c * 18, py + 18 + r * 18, mCraftGrid.at(r * 2 + c), mouseX, mouseY, nullptr, hoverText);
@@ -791,7 +791,7 @@ void InventoryScreen::render(int mouseX, int mouseY, float partialTicks) {
 	if (bindTexture("textures/gui/newgui/arrow_large.png")) {
 		blitScaled(px + 134, py + 28, 18, 15, 0, 0, 22, 15, 22, 15);
 	} else if (font) {
-		drawString(font, "->", px + 136, py + 32, 0xFF404040);
+		drawString(font, "->", px + 136, py + 32, 0xFF404040, false);
 	}
 
 	// Result slot at (px + 154, py + 28)
@@ -834,7 +834,7 @@ void InventoryScreen::mouseClicked(int x, int y, int button) {
 	}
 
 	if ((button == 0 || button == 1) && context) {
-		ItemInstance& carried = mExternalCarried ? *mExternalCarried : carried;
+		ItemInstance& carried = mExternalCarried ? *mExternalCarried : mCarriedItem;
 		int pw = 176, ph = 166;
 		int px = mEmbedded ? mCustomX : (width - pw) / 2;
 		int py = mEmbedded ? mCustomY : (height - ph) / 2;
@@ -1669,7 +1669,7 @@ void CreativeInventoryScreen::render(int mouseX, int mouseY, float partialTicks)
 	drawPcBevelPanel(this, px, py, pw, ph);
 
 	static const char* catTitles[4] = { "Building Blocks", "Decorations", "Tools & Armor", "Miscellaneous" };
-	if (font) drawString(font, catTitles[cat], px + 8, py + 6, 0xFF404040);
+	if (font) drawString(font, catTitles[cat], px + 8, py + 6, 0xFF404040, false);
 
 	std::string hoverText;
 
@@ -2170,7 +2170,7 @@ void PaneCraftingScreen::render(int mouseX, int mouseY, float partialTicks) {
 	drawPcBevelPanel(this, px, py, pw, ph);
 
 	std::string hoverText;
-	if (font) drawString(font, "Crafting", px + 28, py + 6, 0xFF404040);
+	if (font) drawString(font, "Crafting", px + 28, py + 6, 0xFF404040, false);
 
 	// 3x3 crafting grid at (px + 30, py + 17)
 	for (int r = 0; r < 3; ++r) {
@@ -2183,7 +2183,7 @@ void PaneCraftingScreen::render(int mouseX, int mouseY, float partialTicks) {
 	if (bindTexture("textures/gui/newgui/arrow_large.png")) {
 		blitScaled(px + 90, py + 35, 22, 15, 0, 0, 22, 15, 22, 15);
 	} else if (font) {
-		drawString(font, "->", px + 94, py + 39, 0xFF404040);
+		drawString(font, "->", px + 94, py + 39, 0xFF404040, false);
 	}
 
 	// Large result slot (26x26) at (px + 120, py + 31), hit-box (18x18) at (px + 124, py + 35)
@@ -2198,7 +2198,7 @@ void PaneCraftingScreen::render(int mouseX, int mouseY, float partialTicks) {
 		}
 	}
 
-	if (font) drawString(font, "Inventory", px + 8, py + 72, 0xFF404040);
+	if (font) drawString(font, "Inventory", px + 8, py + 72, 0xFF404040, false);
 	renderPcPlayerInventorySlots(this, font, context, px, py, mouseX, mouseY, hoverText);
 
 	Screen::render(mouseX, mouseY, partialTicks);
@@ -2680,7 +2680,7 @@ void FurnaceScreen::render(int mouseX, int mouseY, float partialTicks) {
 	int px = (width - pw) / 2;
 	int py = (height - ph) / 2;
 	drawPcBevelPanel(this, px, py, pw, ph);
-	if (font) drawString(font, "Furnace", px + 60, py + 6, 0xFF404040);
+	if (font) drawString(font, "Furnace", px + 60, py + 6, 0xFF404040, false);
 
 	std::string hoverText;
 	ItemInstance input = fd ? fd->input : ItemInstance();
@@ -2704,7 +2704,7 @@ void FurnaceScreen::render(int mouseX, int mouseY, float partialTicks) {
 	drawFurnaceFlame(this, px + 57, py + 37, fd);
 	drawFurnaceArrow(this, context, px + 79, py + 35, fd);
 
-	if (font) drawString(font, "Inventory", px + 8, py + 72, 0xFF404040);
+	if (font) drawString(font, "Inventory", px + 8, py + 72, 0xFF404040, false);
 	renderPcPlayerInventorySlots(this, font, context, px, py, mouseX, mouseY, hoverText);
 
 	Screen::render(mouseX, mouseY, partialTicks);
@@ -2878,7 +2878,7 @@ void ChestScreen::render(int mouseX, int mouseY, float partialTicks) {
 	int ph = 18 + chestH + 14 + 78;
 	int px = (width - pw) / 2, py = (height - ph) / 2;
 	drawPcBevelPanel(this, px, py, pw, ph);
-	if (font) drawString(font, mIsDouble ? "Large Chest" : "Chest", px + 8, py + 6, 0xFF404040);
+	if (font) drawString(font, mIsDouble ? "Large Chest" : "Chest", px + 8, py + 6, 0xFF404040, false);
 
 	std::string hoverText;
 	ChestData* primary = context ? &context->chests[mPrimaryPos] : nullptr;
@@ -2897,7 +2897,7 @@ void ChestScreen::render(int mouseX, int mouseY, float partialTicks) {
 	}
 
 	int invHeaderY = py + 18 + chestH + 3;
-	if (font) drawString(font, "Inventory", px + 8, invHeaderY, 0xFF404040);
+	if (font) drawString(font, "Inventory", px + 8, invHeaderY, 0xFF404040, false);
 	int invAnchorY = py + 18 + chestH + 14 - 84;
 	renderPcPlayerInventorySlots(this, font, context, px, invAnchorY, mouseX, mouseY, hoverText);
 

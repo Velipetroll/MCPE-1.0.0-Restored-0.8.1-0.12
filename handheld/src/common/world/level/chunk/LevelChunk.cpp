@@ -169,6 +169,7 @@ LevelChunk::LevelChunk(Level& level, Dimension& dimension, const ChunkPos& cp, b
 	memset(mHeightmap, 0, sizeof(mHeightmap));
 	memset(mBiomes, 0, sizeof(mBiomes));
 	memset(mBorderBlockMap, 0, sizeof(mBorderBlockMap));
+	memset(mCachedData, 0, sizeof(mCachedData));
 
 	for (auto i : range(CHUNK_WIDTH * CHUNK_WIDTH)) {
 		mRainHeights[i] = -999;

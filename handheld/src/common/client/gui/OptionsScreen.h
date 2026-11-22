@@ -31,6 +31,7 @@ private:
 	Button* mAnimateTexturesButton = nullptr;
 	Button* mHideGuiButton = nullptr;
 	Button* mShowFpsButton = nullptr;
+	Button* mGreedyMeshingButton = nullptr;
 
 	Slider* mMusicSlider = nullptr;
 	Slider* mSoundSlider = nullptr;

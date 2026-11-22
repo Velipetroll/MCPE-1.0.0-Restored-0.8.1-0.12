@@ -9,6 +9,7 @@ namespace mce
     uint64_t Mesh::sGlGenCalls = 0;
     uint64_t Mesh::sGlDeleteCalls = 0;
     uint64_t Mesh::sGlPoolHits = 0;
+    unsigned int Mesh::sLastTerrainVAO = 0;
 
     namespace {
         constexpr size_t MAX_POOLED_GL_HANDLES = 1024;
@@ -290,10 +291,15 @@ namespace mce
 
     void Mesh::renderRangeNoUnbind(int start, int count)
     {
-        if (VBO == -1)
+        if (VBO == -1) {
             upload();
+            sLastTerrainVAO = 0;
+        }
 
-        glBindVertexArray(VAO);
+        if (sLastTerrainVAO != VAO) {
+            glBindVertexArray(VAO);
+            sLastTerrainVAO = VAO;
+        }
         if (useMode == IndexBufferUsageMode::Normal && indexCount * indexSize > 0)
         {
             int realMode = mode == PrimitiveMode::QuadList ? GL_TRIANGLES : primitiveConversions[(int)mode];
@@ -307,6 +313,9 @@ namespace mce
 
     void Mesh::reset()
     {
+        if (sLastTerrainVAO == VAO) {
+            sLastTerrainVAO = 0;
+        }
         recycleGlHandle(VAO, sFreeVAOs, true);
         recycleGlHandle(VBO, sFreeVBOs, false);
         recycleGlHandle(EBO, sFreeEBOs, false);

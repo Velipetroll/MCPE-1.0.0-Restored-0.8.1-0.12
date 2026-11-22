@@ -1,0 +1,226 @@
+// __multiversion__
+// This signals the loading code to prepend either #version 100 or #version 300 es as apropriate.
+
+// To use centroid sampling we need to have version 300 es shaders, which requires changing:
+// attribute to in
+// varying to out when in vertex shaders or in when in fragment shaders
+// defining an out vec4 FragColor and replacing uses of gl_FragColor with FragColor
+// texture2D to texture
+#if __VERSION__ >= 300
+
+	// version 300 code
+
+	#ifdef MSAA_FRAMEBUFFER_ENABLED
+		#define _centroid centroid
+	#else
+		#define _centroid
+	#endif
+
+	#ifndef BYPASS_PIXEL_SHADER
+		#if defined(TEXEL_AA) && defined(TEXEL_AA_FEATURE)
+			_centroid in highp vec2 uv0;
+			_centroid in highp vec2 uv1;
+		#else
+			_centroid in vec2 uv0;
+			_centroid in vec2 uv1;
+		#endif
+		varying vec3 vWorldBlockPos;
+		flat in int vGreedyFace;
+		flat in int vGreedyFlags;
+		flat in int vGreedyCellInfoU;
+		flat in int vGreedyCellInfoV;
+	#endif
+
+	#define varying in
+	#define texture2D texture
+	out vec4 FragColor;
+	#define gl_FragColor FragColor
+#else
+
+	// version 100 code
+
+	#ifndef BYPASS_PIXEL_SHADER
+		varying vec2 uv0;
+		varying vec2 uv1;
+		varying vec3 vWorldBlockPos;
+		varying float vGreedyFace;
+		varying float vGreedyFlags;
+	#endif
+#endif
+
+
+varying vec4 color;
+
+#ifdef FOG
+varying vec4 fogColor;
+#endif
+
+#ifdef NEAR_WATER
+varying float cameraDist;
+#endif
+
+#include "shaders/util.h"
+
+uniform sampler2D TEXTURE_0;
+uniform sampler2D TEXTURE_1;
+uniform sampler2D TEXTURE_2;
+#if __VERSION__ >= 300
+uniform usamplerBuffer TEXTURE_3;
+#endif
+uniform vec2 TILE_TEXEL_STEP;
+
+void main()
+{
+#ifdef BYPASS_PIXEL_SHADER
+	gl_FragColor = vec4(0, 0, 0, 0);
+	return;
+#else 
+
+	vec4 diffuse;
+	bool useCellBuf = false;
+	vec3 cellCol = vec3(1.0);
+	vec2 cellLit = uv1;
+#if __VERSION__ >= 300
+	if (vGreedyFace >= 1 && vGreedyFace <= 6) {
+		int face = vGreedyFace - 1;
+		int flags = vGreedyFlags;
+#else
+	if (vGreedyFace > 0.5 && vGreedyFace < 6.5) {
+		int face = int(vGreedyFace + 0.5) - 1;
+		int flags = int(vGreedyFlags + 0.5);
+#endif
+		vec3 fp = fract(vWorldBlockPos);
+		vec3 fnp = 1.0 - fp;
+
+		float tileU = (face < 2) ? fp.x : ((face == 2) ? fnp.x : ((face == 3) ? fp.x : ((face == 4) ? fp.z : fnp.z)));
+		float tileV = (face < 2) ? fp.z : fnp.y;
+
+		ivec3 bp = ivec3(floor(vWorldBlockPos));
+
+		int rot = flags & 3;
+		if ((flags & 4) != 0) {
+			int seed = (bp.x * 3129871) ^ (bp.z * 116129781) ^ bp.y;
+			seed = seed * seed * 42317861 + seed * 11;
+			rot = (seed >> 24) & 3;
+		}
+		if ((face == 0 || face == 2 || face == 5) && (rot == 1 || rot == 2)) {
+			rot = 3 - rot;
+		}
+		bool flipRotV = (face == 2 || face == 5) && (rot == 1 || rot == 2);
+
+		float ru = tileU;
+		float rv = tileV;
+		if (rot == 1) {
+			ru = tileV;
+			rv = flipRotV ? tileU : (1.0 - tileU);
+		} else if (rot == 2) {
+			ru = 1.0 - tileV;
+			rv = flipRotV ? (1.0 - tileU) : tileU;
+		} else if (rot == 3) {
+			ru = 1.0 - tileU;
+			rv = 1.0 - tileV;
+		}
+
+		vec2 safe = clamp(vec2(ru, rv), 0.0001, 0.9999);
+		vec2 texelCenter = floor(safe * 16.0) + 0.5;
+		vec2 sampleUV = uv0 + texelCenter * TILE_TEXEL_STEP;
+		diffuse = texture2D(TEXTURE_0, sampleUV);
+
+#if __VERSION__ >= 300
+		if ((flags & 8) != 0) {
+			useCellBuf = true;
+			ivec3 lp = bp & 15;
+			int cellUIdx = (face < 4) ? lp.x : lp.z;
+			int cellVIdx = (face < 2) ? lp.z : lp.y;
+			int uMin = vGreedyCellInfoU & 15;
+			int vMin = (vGreedyCellInfoU >> 4) & 15;
+			int w = ((vGreedyCellInfoU >> 8) & 15) + 1;
+			int du = clamp(cellUIdx - uMin, 0, w - 1);
+			int dv = clamp(cellVIdx - vMin, 0, 15);
+			uvec4 pk = texelFetch(TEXTURE_3, vGreedyCellInfoV + dv * w + du);
+
+			if (pk.x == pk.y && pk.x == pk.z && pk.x == pk.w) {
+				cellCol = vec3(float(pk.x & 255u), float((pk.x >> 8) & 255u), float((pk.x >> 16) & 255u)) * (1.0 / 255.0);
+				cellLit = (vec2(float((pk.x >> 24) & 15u), float((pk.x >> 28) & 15u)) + 0.5) * (1.0 / 16.0);
+			} else {
+				float cellU = clamp((face < 4) ? fp.x : fp.z, 0.0, 1.0);
+				float cellV = clamp((face < 2) ? fp.z : fp.y, 0.0, 1.0);
+
+				vec3 col00 = vec3(float(pk.x & 255u), float((pk.x >> 8) & 255u), float((pk.x >> 16) & 255u));
+				vec3 col10 = vec3(float(pk.y & 255u), float((pk.y >> 8) & 255u), float((pk.y >> 16) & 255u));
+				vec3 col01 = vec3(float(pk.z & 255u), float((pk.z >> 8) & 255u), float((pk.z >> 16) & 255u));
+				vec3 col11 = vec3(float(pk.w & 255u), float((pk.w >> 8) & 255u), float((pk.w >> 16) & 255u));
+				cellCol = mix(mix(col00, col10, cellU), mix(col01, col11, cellU), cellV) * (1.0 / 255.0);
+
+				vec2 lit00 = vec2(float((pk.x >> 24) & 15u), float((pk.x >> 28) & 15u));
+				vec2 lit10 = vec2(float((pk.y >> 24) & 15u), float((pk.y >> 28) & 15u));
+				vec2 lit01 = vec2(float((pk.z >> 24) & 15u), float((pk.z >> 28) & 15u));
+				vec2 lit11 = vec2(float((pk.w >> 24) & 15u), float((pk.w >> 28) & 15u));
+				cellLit = (mix(mix(lit00, lit10, cellU), mix(lit01, lit11, cellU), cellV) + 0.5) * (1.0 / 16.0);
+			}
+		}
+#endif
+	} else {
+#if !defined(TEXEL_AA) || !defined(TEXEL_AA_FEATURE)
+		diffuse = texture2D( TEXTURE_0, uv0 );
+#else
+		diffuse = texture2D_AA(TEXTURE_0, uv0 );
+#endif
+	}
+
+	vec4 inColor = color;
+	vec2 sampleUv1 = uv1;
+	if (useCellBuf) {
+		sampleUv1 = cellLit;
+#ifndef SEASONS
+		inColor.rgb = cellCol;
+#else
+		inColor = vec4(cellCol.x, cellCol.y, 1.0, cellCol.z);
+#endif
+	}
+	
+#ifdef SEASONS_FAR
+	diffuse.a = 1.0;
+	inColor.b = 1.0;
+#endif
+
+#ifdef ALPHA_TEST
+	#ifdef ALPHA_TO_COVERAGE
+		float alphaThreshold = .05;
+	#else
+		float alphaThreshold = .5;
+	#endif
+	if(diffuse.a < alphaThreshold)
+		discard;
+#endif
+	
+	diffuse = diffuse * texture2D( TEXTURE_1, sampleUv1 );
+
+#ifndef SEASONS
+
+#if !defined(ALPHA_TEST) && !defined(BLEND)
+	diffuse.a = inColor.a;
+#elif defined(BLEND)
+	diffuse.a *= inColor.a;
+	#ifdef NEAR_WATER
+		float alphaFadeOut = clamp(cameraDist, 0.0, 1.0);
+		diffuse.a = mix(diffuse.a, 1.0, alphaFadeOut);
+	#endif
+#endif	
+	
+	diffuse.rgb *= inColor.rgb;
+#else
+	vec2 uv = inColor.xy;
+	diffuse.rgb *= mix(vec3(1.0,1.0,1.0), texture2D( TEXTURE_2, uv).rgb*2.0, inColor.b);
+	diffuse.rgb *= inColor.aaa;
+	diffuse.a = 1.0;
+#endif
+
+#ifdef FOG
+	diffuse.rgb = mix( diffuse.rgb, fogColor.rgb, fogColor.a );
+#endif
+
+	gl_FragColor = diffuse;
+
+#endif // BYPASS_PIXEL_SHADER
+}

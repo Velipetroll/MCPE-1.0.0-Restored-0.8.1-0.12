@@ -39,6 +39,8 @@ namespace {
 	const mce::Texture* sLastTerrainTex0 = nullptr;
 	const mce::Texture* sLastTerrainTex1 = nullptr;
 	const mce::Texture* sLastTerrainTex2 = nullptr;
+	GLuint sLastTerrainTex3 = 0;
+	GLenum sLastActiveTexUnit = 0;
 }
 
 void RenderChunk::setChunkOrigin(float x, float y, float z, float scale) {
@@ -60,6 +62,9 @@ void RenderChunk::beginTerrainPass() {
 	sLastTerrainTex0 = nullptr;
 	sLastTerrainTex1 = nullptr;
 	sLastTerrainTex2 = nullptr;
+	sLastTerrainTex3 = 0;
+	sLastActiveTexUnit = 0;
+	mce::Mesh::sLastTerrainVAO = 0;
 }
 
 void RenderChunk::endTerrainPass() {
@@ -68,6 +73,9 @@ void RenderChunk::endTerrainPass() {
 	sLastTerrainTex0 = nullptr;
 	sLastTerrainTex1 = nullptr;
 	sLastTerrainTex2 = nullptr;
+	sLastTerrainTex3 = 0;
+	sLastActiveTexUnit = 0;
+	mce::Mesh::sLastTerrainVAO = 0;
 	glBindVertexArray(0);
 	glActiveTexture(GL_TEXTURE0);
 }
@@ -184,7 +192,7 @@ RenderChunk::DataState RenderChunk::getDataState(BlockSource& region) {
 	return DataState::Loaded;
 }
 
-void RenderChunk::startRebuild(Unique<RenderChunkBuilder> set) {
+void RenderChunk::startRebuild(Unique<RenderChunkBuilder> set, bool greedyCluster) {
 	DEBUG_ASSERT(set, "Invalid set");
 	DEBUG_ASSERT(isBuildState(BuildState::Dirty), "Render chunk is in an invalid state");
 
@@ -205,13 +213,8 @@ void RenderChunk::startRebuild(Unique<RenderChunkBuilder> set) {
 	// change state and assign to a worker thread
 	_changeBuildState(BuildState::Dirty, BuildState::Building);
 
-	// Sorting state is now dirty
-	_tryChangeSortState(SortState::Ready, SortState::SortDirty);
-
-	// If the render chunk is already being sorted, restart the sort
-	_tryChangeSortState(SortState::Sorting, SortState::RestartSort);
-
-	// if sort state is already SortDirty or RestartSort, there's no need to change it.
+	// Keep mSortState == SortState::Ready while rebuilding asynchronously:
+	// the previously built mMesh and mSortedIndexRange remain valid until endRebuild() swaps them.
 }
 
 void RenderChunk::startFaceSort(Unique<RenderChunkSorter> set) {
@@ -270,7 +273,7 @@ Unique<RenderChunkSorter>&& RenderChunk::endFaceSort() {
 	return std::move(mCurrentSorter);
 }
 
-void RenderChunk::rebuild(bool transparentLeaves, bool smoothLighting, uint8_t lodLevel) {
+void RenderChunk::rebuild(bool transparentLeaves, bool smoothLighting, uint8_t lodLevel, bool greedyMeshing, bool allowCluster) {
 
 	DEBUG_ASSERT(mCurrentBuilder, "Renderchunk is attempting to rebuild, but 'currentBuilder' is empty!!!\n");
 	if (mCurrentBuilder == nullptr) {
@@ -279,7 +282,7 @@ void RenderChunk::rebuild(bool transparentLeaves, bool smoothLighting, uint8_t l
 	}
 
 	mLodLevel = lodLevel;
-	mCurrentBuilder->build(*this, transparentLeaves, smoothLighting, lodLevel);
+	mCurrentBuilder->build(*this, transparentLeaves, smoothLighting, lodLevel, greedyMeshing, allowCluster);
 }
 #ifndef TAC_COMPILE
 //Basically what it is in ghidra
@@ -369,9 +372,63 @@ Unique<RenderChunkBuilder>&& RenderChunk::endRebuild(const Vec3& viewPos) {
 		memcpy(mIndexRange, builder.mTerrainLayerRange, sizeof(mIndexRange));
 		memcpy(mRenderLayerIndexRange, builder.mRenderLayerRange, sizeof(mRenderLayerIndexRange));
 
+		mLayerMask = 0;
+		for (int l = 0; l < enum_cast(TerrainLayer::Count); ++l) {
+			if (mIndexRange[l].mCount > 0) {
+				mLayerMask |= (1u << l);
+			}
+		}
+
+		mTboLayerMask = 0;
+		if (builder.mTboRenderLayerMask != 0) {
+			auto mapRl = [&](BlockRenderLayer rl, TerrainLayer tl) {
+				if (builder.mTboRenderLayerMask & (1u << static_cast<int>(rl))) {
+					mTboLayerMask |= (1u << static_cast<int>(tl));
+				}
+			};
+			mapRl(BlockRenderLayer::RENDERLAYER_OPAQUE, TerrainLayer::Opaque);
+			mapRl(BlockRenderLayer::RENDERLAYER_LAVA, TerrainLayer::Opaque);
+			mapRl(BlockRenderLayer::RENDERLAYER_SEASONS_OPAQUE, TerrainLayer::OpaqueSeasons);
+			mapRl(BlockRenderLayer::RENDERLAYER_BLEND, TerrainLayer::Blend);
+			mapRl(BlockRenderLayer::RENDERLAYER_WATER, TerrainLayer::Water);
+			mapRl(BlockRenderLayer::RENDERLAYER_OPTIONAL_ALPHATEST, TerrainLayer::Alpha);
+			mapRl(BlockRenderLayer::RENDERLAYER_ALPHATEST, TerrainLayer::Alpha);
+			mapRl(BlockRenderLayer::RENDERLAYER_ALPHATEST_SINGLE_SIDE, TerrainLayer::AlphaSingleSide);
+			mapRl(BlockRenderLayer::RENDERLAYER_SEASONS_OPTIONAL_ALPHATEST, TerrainLayer::AlphaSeasons);
+			mapRl(BlockRenderLayer::RENDERLAYER_DOUBLE_SIDED, TerrainLayer::DoubleSide);
+		}
+
 		if (preSortedReady) {
 			memcpy(mSortedIndexRange, builder.mSortedTerrainLayerRange, sizeof(mSortedIndexRange));
 			memcpy(mSortedRenderLayerIndexRange, builder.mSortedRenderLayerRange, sizeof(mSortedRenderLayerIndexRange));
+		}
+
+		if (!builder.mGreedyCellBuffer.empty()) {
+			if (mGreedyTboBuffer == 0) {
+				glGenBuffers(1, &mGreedyTboBuffer);
+			}
+			if (mGreedyTboTex == 0) {
+				glGenTextures(1, &mGreedyTboTex);
+			}
+			glBindBuffer(GL_TEXTURE_BUFFER, mGreedyTboBuffer);
+			glBufferData(GL_TEXTURE_BUFFER,
+			             static_cast<GLsizeiptr>(builder.mGreedyCellBuffer.size() * sizeof(std::array<uint32_t, 4>)),
+			             builder.mGreedyCellBuffer.data(),
+			             GL_STATIC_DRAW);
+			glBindBuffer(GL_TEXTURE_BUFFER, 0);
+			glBindTexture(GL_TEXTURE_BUFFER, mGreedyTboTex);
+			glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32UI, mGreedyTboBuffer);
+			glBindTexture(GL_TEXTURE_BUFFER, 0);
+		} else if (mGreedyTboTex != 0 || mGreedyTboBuffer != 0) {
+			if (mGreedyTboTex != 0) {
+				if (sLastTerrainTex3 == mGreedyTboTex) sLastTerrainTex3 = 0;
+				glDeleteTextures(1, &mGreedyTboTex);
+				mGreedyTboTex = 0;
+			}
+			if (mGreedyTboBuffer != 0) {
+				glDeleteBuffers(1, &mGreedyTboBuffer);
+				mGreedyTboBuffer = 0;
+			}
 		}
 
 		if (mLastChangeTick < Tick::MAX) {
@@ -418,6 +475,8 @@ void RenderChunk::makeReadyAsEmpty(bool hasNoSkyLight) {
 	memset(mSortedIndexRange, 0, sizeof(mSortedIndexRange));
 	memset(mRenderLayerIndexRange, 0, sizeof(mRenderLayerIndexRange));
 	memset(mSortedRenderLayerIndexRange, 0, sizeof(mSortedRenderLayerIndexRange));
+	mLayerMask = 0;
+	mTboLayerMask = 0;
 	mData.clear();
 	mData32bit.clear();
 	for (int i = 0; i < Facing::NUM_CULLING_IDS; ++i) {
@@ -625,17 +684,30 @@ void RenderChunk::render(const RenderChunkRenderParameters& renderChunkRenderPar
 		if (t3 != nullptr && t3 != sLastTerrainTex2) {
 			t3->bindTexture(mce::RenderContextImmediate::get(), 2, 0);
 			sLastTerrainTex2 = t3;
+			sLastActiveTexUnit = 0;
 		}
 		if (t2 != nullptr && t2 != sLastTerrainTex1) {
 			t2->bindTexture(mce::RenderContextImmediate::get(), 1, 0);
 			sLastTerrainTex1 = t2;
+			sLastActiveTexUnit = 0;
 		}
 		if (t1 != nullptr && t1 != sLastTerrainTex0) {
 			t1->bindTexture(mce::RenderContextImmediate::get(), 0, 0);
 			sLastTerrainTex0 = t1;
+			sLastActiveTexUnit = 0;
+		}
+		if (mGreedyTboTex != 0 &&
+		    (mTboLayerMask & (1u << static_cast<int>(geometryLayer))) != 0 &&
+		    mGreedyTboTex != sLastTerrainTex3) {
+			if (sLastActiveTexUnit != GL_TEXTURE3) {
+				glActiveTexture(GL_TEXTURE3);
+				sLastActiveTexUnit = GL_TEXTURE3;
+			}
+			glBindTexture(GL_TEXTURE_BUFFER, mGreedyTboTex);
+			sLastTerrainTex3 = mGreedyTboTex;
 		}
 
-		if (mSortState == SortState::Ready && !renderChunkRenderParameters.forceUnsorted) {
+		if ((mSortState == SortState::Ready && !renderChunkRenderParameters.forceUnsorted) || mNumFaces > 0) {
 			auto& ri = mSortedIndexRange[(int)geometryLayer];
 			if (ri.mCount > 0) {
 				mMesh.setIndexBufferUsageMode(mce::IndexBufferUsageMode::Normal);
@@ -658,11 +730,27 @@ void RenderChunk::render(const RenderChunkRenderParameters& renderChunkRenderPar
 			}
 			shader->activate();
 			glUniform4f(shader->mChunkOriginLoc, sChunkOrigin[0], sChunkOrigin[1], sChunkOrigin[2], sChunkOrigin[3]);
+			if (shader->mChunkWorldPosLoc == -2) {
+				shader->mChunkWorldPosLoc = shader->getUniformLocation("CHUNK_WORLD_POS");
+			}
+			if (shader->mChunkWorldPosLoc >= 0) {
+				glUniform3f(shader->mChunkWorldPosLoc,
+				            static_cast<float>(mPosition.x),
+				            static_cast<float>(mPosition.y),
+				            static_cast<float>(mPosition.z));
+			}
 			shader->mChunkOriginSerial = sChunkOriginSerial;
 		}
 	}
  
- 	if (mSortState == SortState::Ready && !renderChunkRenderParameters.forceUnsorted) {
+	if (mGreedyTboTex != 0 && mGreedyTboTex != sLastTerrainTex3) {
+		glActiveTexture(GL_TEXTURE3);
+		glBindTexture(GL_TEXTURE_BUFFER, mGreedyTboTex);
+		glActiveTexture(GL_TEXTURE0);
+		sLastTerrainTex3 = mGreedyTboTex;
+	}
+
+ 	if ((mSortState == SortState::Ready && !renderChunkRenderParameters.forceUnsorted) || mNumFaces > 0) {
  		// The sorted index buffer is ready, so use it
  		auto& ri = mSortedIndexRange[(int)geometryLayer];
  		if (ri.mCount > 0) {
@@ -689,9 +777,7 @@ float RenderChunk::distanceToSqr(const Entity* player) const {
 	return xd * xd + yd * yd + zd * zd;
 }
 
-bool RenderChunk::hasLayer(TerrainLayer r) const {
-	return mIndexRange[static_cast<int>(r)].mCount > 0;
-}
+	// Reset VAO/layer masks on chunk reset
 
 bool RenderChunk::isCulled() const {
 	return !mVisible;
@@ -714,6 +800,8 @@ void RenderChunk::reset() {
 	mCanRender = false;
 	mSkyLit = false;
 	mAllDark = false;
+	mLayerMask = 0;
+	mTboLayerMask = 0;
 	mLodLevel = 0;
 	mAverageSkyLight = 0.0f;
 	mReadyTime = 0;
@@ -732,6 +820,8 @@ void RenderChunk::reset() {
 	memset(mSortedIndexRange, 0, sizeof(mSortedIndexRange));
 	memset(mRenderLayerIndexRange, 0, sizeof(mRenderLayerIndexRange));
 	memset(mSortedRenderLayerIndexRange, 0, sizeof(mSortedRenderLayerIndexRange));
+	mLayerMask = 0;
+	mTboLayerMask = 0;
 
 	mData.clear();
 	mData32bit.clear();
@@ -744,6 +834,16 @@ void RenderChunk::reset() {
 
 	mBuildState = BuildState::Dirty;
 	mSortState = SortState::SortDirty;
+
+	if (mGreedyTboTex != 0) {
+		if (sLastTerrainTex3 == mGreedyTboTex) sLastTerrainTex3 = 0;
+		glDeleteTextures(1, &mGreedyTboTex);
+		mGreedyTboTex = 0;
+	}
+	if (mGreedyTboBuffer != 0) {
+		glDeleteBuffers(1, &mGreedyTboBuffer);
+		mGreedyTboBuffer = 0;
+	}
 
  	mMesh.reset();
 }
