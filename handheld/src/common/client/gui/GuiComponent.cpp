@@ -512,7 +512,7 @@ void GuiComponent::drawItemInSlot(Font* font, const ItemInstance& item, int x, i
 		glMatrixMode(GL_MODELVIEW);
 		glPushMatrix();
 		glTranslatef(static_cast<float>(x) + 8.0f, static_cast<float>(y) + 8.0f, 100.0f);
-		glScalef(9.0f, -9.0f, 9.0f);
+		glScalef(8.5f, -8.5f, 8.5f);
 		glRotatef(30.0f, 1.0f, 0.0f, 0.0f);
 		glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
 
