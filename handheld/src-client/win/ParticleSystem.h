@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <string>
 #include <cstdlib>
 #include <cmath>
 #include <algorithm>
@@ -18,7 +19,8 @@ enum class ParticleType {
     Flame,
     Smoke,
     Explode,
-    Heart
+    Heart,
+    ItemBreak
 };
 
 struct Particle {
@@ -36,6 +38,7 @@ struct Particle {
     bool onGround = false;
     float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
     bool hasTexture = false;
+    std::string itemTexPath;
 };
 
 inline std::vector<Particle>& getParticles() {
@@ -462,7 +465,7 @@ inline void render(float yawDeg, float pitchDeg, mce::TextureGroup* texGroup = n
     if (GuiComponent::bindTexture("textures/particle/particles.png")) {
         glBegin(GL_QUADS);
         for (const auto& p : ps) {
-            if (p.type == ParticleType::Terrain) continue;
+            if (p.type == ParticleType::Terrain || p.type == ParticleType::ItemBreak) continue;
 
             float renderScale = p.scale;
             float u0 = 0.0f, v0 = 0.0f, u1 = 0.0625f, v1 = 0.0625f;
@@ -580,6 +583,31 @@ inline void render(float yawDeg, float pitchDeg, mce::TextureGroup* texGroup = n
         glVertex3f(x3, y3, z3);
     }
     glEnd();
+
+    // Pass 3: Breaking item / eat particles (BreakingItemParticle)
+    glEnable(GL_TEXTURE_2D);
+    for (const auto& p : ps) {
+        if (p.type != ParticleType::ItemBreak || p.itemTexPath.empty()) continue;
+        if (!GuiComponent::bindTexture(p.itemTexPath)) continue;
+
+        float px = p.prevX + (p.x - p.prevX) * partialTicks;
+        float py = p.prevY + (p.y - p.prevY) * partialTicks;
+        float pz = p.prevZ + (p.z - p.prevZ) * partialTicks;
+        float s = p.scale * 0.1f;
+
+        float x0 = px - (rx + ux) * s, y0 = py - (ry + uy) * s, z0 = pz - (rz + uz) * s;
+        float x1 = px + (rx - ux) * s, y1 = py + (ry - uy) * s, z1 = pz + (rz - uz) * s;
+        float x2 = px + (rx + ux) * s, y2 = py + (ry + uy) * s, z2 = pz + (rz + uz) * s;
+        float x3 = px - (rx - ux) * s, y3 = py - (ry - uy) * s, z3 = pz - (rz - uz) * s;
+
+        glBegin(GL_QUADS);
+        glColor4f(p.r, p.g, p.b, 1.0f);
+        glTexCoord2f(p.u0, p.v1); glVertex3f(x0, y0, z0);
+        glTexCoord2f(p.u1, p.v1); glVertex3f(x1, y1, z1);
+        glTexCoord2f(p.u1, p.v0); glVertex3f(x2, y2, z2);
+        glTexCoord2f(p.u0, p.v0); glVertex3f(x3, y3, z3);
+        glEnd();
+    }
 
     glDisable(GL_ALPHA_TEST);
     glEnable(GL_TEXTURE_2D);

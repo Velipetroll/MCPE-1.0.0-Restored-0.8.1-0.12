@@ -464,37 +464,69 @@ public:
 
 		if (mLevel && mRegion) {
 			Level::setParticleCallback([](ParticleType type, const Vec3& pos, const Vec3& dir, int data) {
-				if (type != ParticleType::Terrain) return;
 				auto& ps = ParticleSystem::getParticles();
 				if (ps.size() > 800) return;
-				FullBlock fb = FullBlock::fromInt(data);
-				const Block* blk = fb.id > 0 ? Block::mBlocks[fb.id] : nullptr;
-				if (!blk) return;
-				ParticleSystem::Particle p;
-				ParticleSystem::initParticleBase(p, pos.x, pos.y, pos.z, 0.0f, 0.0f, 0.0f);
-				p.vx = dir.x + ParticleSystem::randSigned() * 0.05f;
-				p.vy = dir.y;
-				p.vz = dir.z + ParticleSystem::randSigned() * 0.05f;
-				p.type = ParticleSystem::ParticleType::Terrain;
-				p.scale *= 0.5f;
-				p.initScale = p.scale;
-				p.gravity = 1.0f;
-				if (const BlockGraphics* bg = (fb.id > 0 && fb.id < 256) ? BlockGraphics::mBlocks[fb.id] : nullptr) {
-					const TextureUVCoordinateSet& uv = bg->getTexture(2, fb.data);
-					float du = (uv._u1 - uv._u0) * 0.25f;
-					float dv = (uv._v1 - uv._v0) * 0.25f;
-					p.u0 = uv._u0 + ParticleSystem::rand01() * 3.0f * du;
-					p.v0 = uv._v0 + ParticleSystem::rand01() * 3.0f * dv;
-					p.u1 = p.u0 + du;
-					p.v1 = p.v0 + dv;
+
+				if (type == ParticleType::Terrain) {
+					FullBlock fb = FullBlock::fromInt(data);
+					const Block* blk = fb.id > 0 ? Block::mBlocks[fb.id] : nullptr;
+					if (!blk) return;
+					ParticleSystem::Particle p;
+					ParticleSystem::initParticleBase(p, pos.x, pos.y, pos.z, 0.0f, 0.0f, 0.0f);
+					// TerrainParticle::init (0x01167800..0x0116784e): mVel += dir * 0.2f
+					p.vx += dir.x * 0.2f;
+					p.vy += dir.y * 0.2f;
+					p.vz += dir.z * 0.2f;
+					p.type = ParticleSystem::ParticleType::Terrain;
+					p.scale *= 0.5f;
+					p.initScale = p.scale;
+					p.gravity = 1.0f;
+					if (const BlockGraphics* bg = (fb.id > 0 && fb.id < 256) ? BlockGraphics::mBlocks[fb.id] : nullptr) {
+						const TextureUVCoordinateSet& uv = bg->getTexture(2, fb.data);
+						float du = (uv._u1 - uv._u0) * 0.25f;
+						float dv = (uv._v1 - uv._v0) * 0.25f;
+						p.u0 = uv._u0 + ParticleSystem::rand01() * 3.0f * du;
+						p.v0 = uv._v0 + ParticleSystem::rand01() * 3.0f * dv;
+						p.u1 = p.u0 + du;
+						p.v1 = p.v0 + dv;
+						p.hasTexture = true;
+					}
+					float shade = 0.65f + ParticleSystem::rand01() * 0.35f;
+					p.r = shade;
+					p.g = shade;
+					p.b = shade;
+					p.a = 1.0f;
+					ps.push_back(p);
+				} else if (type == ParticleType::IconCrack) {
+					int itemId = (data >> 16) & 0xFFFF;
+					int itemAux = data & 0xFFFF;
+					if (itemId <= 0) return;
+					ItemInstance itemInst(itemId, 1, itemAux);
+					if (itemInst.isNull()) return;
+					std::string tex;
+					uint32_t tint = 0xFFFFFFu;
+					GuiComponent::getItemSpritePathAndTint(itemInst, tex, tint);
+					if (tex.empty()) return;
+
+					ParticleSystem::Particle p;
+					ParticleSystem::initParticleBase(p, pos.x, pos.y, pos.z, dir.x, dir.y, dir.z);
+					p.type = ParticleSystem::ParticleType::ItemBreak;
+					p.scale *= 0.5f;
+					p.initScale = p.scale;
+					p.gravity = 1.0f;
+					p.itemTexPath = tex;
+					p.u0 = ParticleSystem::rand01() * 0.75f;
+					p.v0 = ParticleSystem::rand01() * 0.75f;
+					p.u1 = p.u0 + 0.25f;
+					p.v1 = p.v0 + 0.25f;
 					p.hasTexture = true;
+					float shade = 0.85f + ParticleSystem::rand01() * 0.15f;
+					p.r = (static_cast<float>((tint >> 16) & 0xFF) / 255.0f) * shade;
+					p.g = (static_cast<float>((tint >> 8) & 0xFF) / 255.0f) * shade;
+					p.b = (static_cast<float>(tint & 0xFF) / 255.0f) * shade;
+					p.a = 1.0f;
+					ps.push_back(p);
 				}
-				float shade = 0.65f + ParticleSystem::rand01() * 0.35f;
-				p.r = shade;
-				p.g = shade;
-				p.b = shade;
-				p.a = 1.0f;
-				ps.push_back(p);
 			});
 
 			mPlayer = std::make_unique<Player>(*mLevel, gGuiContext.isCreative ? GameType::Creative : GameType::Survival);
@@ -535,7 +567,7 @@ public:
 		mPlayer->mHorizontalCollision = mHorizontalCollision;
 		mPlayer->mVerticalCollision = mVerticalCollision;
 		mPlayer->mRot.y = static_cast<float>(yaw - 90.0);
-		mPlayer->mRot.x = static_cast<float>(pitch);
+		mPlayer->mRot.x = static_cast<float>(-pitch);
 		mPlayer->mPosDelta = mPosDelta;
 		mPlayer->mAbilities.mFlying = mIsFlying;
 	}

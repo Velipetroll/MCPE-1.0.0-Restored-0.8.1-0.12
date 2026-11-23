@@ -33,6 +33,7 @@
 //#include "network/packet/LevelSoundEventPacket.h"
 //#include "world/level/dimension/Dimension.h"
 #include "world/entity/EntityDamageSource.h"
+#include "world/entity/ParticleType.h"
 #include "world/level/block/Block.h"
 //#include "client/particle/BlockForceFieldParticle.h"
 //#include "world/entity/EntityInteraction.h"
@@ -2436,32 +2437,29 @@ void Entity::feed(int itemId) {
 	UNUSED_PARAMETER(itemId);
 }
 //
-//void Entity::spawnEatParticles(const ItemInstance& itemInUse, int count) {
-//	if (itemInUse.getUseAnimation() == UseAnimation::Drink) {
-//		playSound(LevelSoundEvent::Drink, getAttachPos(EntityLocation::Head));
-//	}
-//	else {
-//		for (int i = 0; i < count; i++) {
-//			const float xx = -mRot.x * Math::DEGRAD;
-//			const float yy = -mRot.y * Math::DEGRAD;
-//			Vec3 d((mRandom.nextFloat() - 0.5f) * 0.1f, Math::random() * 0.1f + 0.1f, 0);
-//			d.xRot(xx);
-//			d.yRot(yy);
-//
-//			const float posx = (mRandom.nextFloat() - 0.5f) * 0.3f;
-//			const float posy = -mRandom.nextFloat() * 0.6f - 0.3f;
-//			Vec3 pos(posx, posy, 0.6f);
-//			pos.xRot(xx);
-//			pos.yRot(yy);
-//			pos = pos.add(mPos.x, mPos.y + getHeadHeight(), mPos.z);
-//
-//			Vec3 dir(d.x, d.y + 0.05f, d.z);
-//
-//			getLevel().addParticle(ParticleType::IconCrack, pos, dir, itemInUse.getIdAux());
-//		}
-//		playSound(LevelSoundEvent::Eat, getAttachPos(EntityLocation::Head));
-//	}
-//}
+void Entity::spawnEatParticles(const ItemInstance& itemInUse, int count) {
+	if (itemInUse.getUseAnimation() == UseAnimation::Drink) {
+		return;
+	}
+	for (int i = 0; i < count; i++) {
+		const float xx = -mRot.x * Math::DEGRAD;
+		const float yy = -mRot.y * Math::DEGRAD;
+		Vec3 d((mRandom.nextFloat() - 0.5f) * 0.1f, Math::random() * 0.1f + 0.1f, 0);
+		d.xRot(xx);
+		d.yRot(yy);
+
+		const float posx = (mRandom.nextFloat() - 0.5f) * 0.3f;
+		const float posy = -mRandom.nextFloat() * 0.6f - 0.3f;
+		Vec3 pos(posx, posy, 0.6f);
+		pos.xRot(xx);
+		pos.yRot(yy);
+		pos = pos.add(mPos.x, mPos.y + getHeadHeight(), mPos.z);
+
+		Vec3 dir(d.x, d.y + 0.05f, d.z);
+
+		getLevel().addParticle(ParticleType::IconCrack, pos, dir, itemInUse.getIdAux());
+	}
+}
 //
 //void Entity::spawnDeathParticles() {
 //	for (auto i : range(20)) {

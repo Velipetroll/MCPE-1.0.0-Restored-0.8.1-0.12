@@ -741,7 +741,7 @@ public:
 //	};
 //
 	virtual void feed(int itemId);
-//	void spawnEatParticles(const ItemInstance& itemInUse, int count);
+	void spawnEatParticles(const ItemInstance& itemInUse, int count);
 //	void spawnDeathParticles();
 //	void spawnDustParticles();
 //

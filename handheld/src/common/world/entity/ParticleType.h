@@ -18,6 +18,7 @@ enum class ParticleType : int {
 	RisingRedDust = 10,
 	ItemBreak = 11,
 	SnowballPoof = 12,
+	IconCrack = 12,
 	LargeExplode = 13,
 	HugeExplosion = 14,
 	MobFlame = 15,

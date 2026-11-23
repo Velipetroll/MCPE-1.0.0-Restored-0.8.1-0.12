@@ -769,8 +769,14 @@ void Player::tickItemInUse() {
 	if (!isUsingItem()) {
 		return;
 	}
+	const int prev = mItemInUseDuration;
 	if (--mItemInUseDuration <= 0) {
 		completeUsingItem();
+		return;
+	}
+	if (prev <= 26 && (mItemInUseDuration & 3) == 0 &&
+	    (mItemInUse.getUseAnimation() == UseAnimation::Eat || mItemInUse.getUseAnimation() == UseAnimation::Drink)) {
+		spawnEatParticles(mItemInUse, 5);
 	}
 }
 
