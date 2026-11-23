@@ -227,6 +227,7 @@ namespace {
 		if (!Item::mApple) {
 			Item::registerItems();
 		}
+		Item::initServerData();
 
 		// Register items that are commented out in Item::registerItems()
 		ensureItem(Item::mFlintAndSteel, "flint_and_steel", 3, 1)->setMaxDamage(64);
@@ -903,6 +904,10 @@ namespace {
 			regItem(Item::mFish_cooked_cod, "Cooked Fish", "textures/items/fish_cooked.png");
 			regItem(Item::mFish_raw_salmon, "Raw Salmon", "textures/items/fish_salmon_raw.png");
 			regItem(Item::mFish_cooked_salmon, "Cooked Salmon", "textures/items/fish_salmon_cooked.png");
+			regItem(Item::mFish_raw_clownfish, "Clownfish", "textures/items/fish_clownfish_raw.png");
+			regItem(Item::mFish_raw_pufferfish, "Pufferfish", "textures/items/fish_pufferfish_raw.png");
+			regItem(Item::mChorusFruit, "Chorus Fruit", "textures/items/chorus_fruit.png");
+			regItem(Item::mChorusFruitPopped, "Popped Chorus Fruit", "textures/items/chorus_fruit_popped.png");
 			regItem(Item::mCookie, "Cookie", "textures/items/cookie.png");
 			regItem(Item::mMelon, "Melon", "textures/items/melon.png");
 			regItem(Item::mBeef_raw, "Raw Beef", "textures/items/beef_raw.png");
@@ -1393,60 +1398,24 @@ FoodInfo getFoodInfo(const ItemInstance& item) {
 	FoodInfo info;
 	if (item.isNull()) return info;
 	Recipes::getInstance()->init();
-	int id = item.getId();
+	const Item* it = item.getItem();
+	if (!it) return info;
 
-	struct FoodEntry {
-		const Item* item;
-		int nutrition;
-		float saturation;
-		int healHealth;
-		bool alwaysEdible;
-		bool returnsBowl;
-	};
-	static const FoodEntry foods[] = {
-		{ Item::mApple, 4, 2.4f, 0, false, false },
-		{ Item::mApple_gold, 4, 9.6f, 4, true, false },
-		{ Item::mApple_enchanted, 4, 9.6f, 10, true, false },
-		{ Item::mBread, 5, 6.0f, 0, false, false },
-		{ Item::mPorkChop_raw, 3, 1.8f, 0, false, false },
-		{ Item::mPorkChop_cooked, 8, 12.8f, 0, false, false },
-		{ Item::mBeef_raw, 3, 1.8f, 0, false, false },
-		{ Item::mBeef_cooked, 8, 12.8f, 0, false, false },
-		{ Item::mChicken_raw, 2, 1.2f, 0, false, false },
-		{ Item::mChicken_cooked, 6, 7.2f, 0, false, false },
-		{ Item::mMutton_raw, 2, 1.2f, 0, false, false },
-		{ Item::mMutton_cooked, 6, 9.6f, 0, false, false },
-		{ Item::mRabbitRaw, 3, 1.8f, 0, false, false },
-		{ Item::mRabbitCooked, 5, 6.0f, 0, false, false },
-		{ Item::mRabbitStew, 10, 12.0f, 0, false, true },
-		{ Item::mMushroomStew, 6, 7.2f, 0, false, true },
-		{ Item::mBeetroot, 1, 1.2f, 0, false, false },
-		{ Item::mBeetrootSoup, 6, 7.2f, 0, false, true },
-		{ Item::mFish_raw_cod, 2, 0.4f, 0, false, false },
-		{ Item::mFish_cooked_cod, 5, 6.0f, 0, false, false },
-		{ Item::mFish_raw_salmon, 2, 0.4f, 0, false, false },
-		{ Item::mFish_cooked_salmon, 6, 9.6f, 0, false, false },
-		{ Item::mCookie, 2, 0.4f, 0, false, false },
-		{ Item::mMelon, 2, 1.2f, 0, false, false },
-		{ Item::mCarrot, 3, 3.6f, 0, false, false },
-		{ Item::mGoldenCarrot, 6, 14.4f, 0, false, false },
-		{ Item::mPotato, 1, 0.6f, 0, false, false },
-		{ Item::mPotatoBaked, 5, 6.0f, 0, false, false },
-		{ Item::mPoisonous_potato, 2, 1.2f, 0, false, false },
-		{ Item::mPumpkinPie, 8, 4.8f, 0, false, false },
-		{ Item::mRotten_flesh, 4, 0.8f, 0, false, false },
-		{ Item::mSpider_eye, 2, 3.2f, 0, false, false },
-	};
-	for (const auto& f : foods) {
-		if (f.item && id == f.item->getId()) {
-			info.isFood = true;
-			info.nutrition = f.nutrition;
-			info.saturation = f.saturation;
-			info.healHealth = f.healHealth;
-			info.alwaysEdible = f.alwaysEdible;
-			info.returnsBowl = f.returnsBowl;
-			return info;
-		}
+	if (FoodItemComponent* food = it->getFood()) {
+		info.isFood = true;
+		info.nutrition = food->getNutrition();
+		info.saturation = static_cast<float>(food->getNutrition()) * food->getSaturationModifier() * 2.0f;
+		info.healHealth = 0;
+		info.alwaysEdible = (it == Item::mApple_gold || it == Item::mApple_enchanted);
+		info.returnsBowl = (food->getUsingConvertsTo() == "bowl");
+		return info;
+	}
+	if (Item::mChorusFruit && it == Item::mChorusFruit) {
+		info.isFood = true;
+		info.nutrition = 4;
+		info.saturation = 4.0f * 0.3f * 2.0f;
+		info.alwaysEdible = true;
+		return info;
 	}
 	return info;
 }

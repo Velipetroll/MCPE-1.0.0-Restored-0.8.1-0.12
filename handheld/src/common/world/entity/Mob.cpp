@@ -10,7 +10,7 @@
 //#include "world/entity/EntityEvent.h"
 #include "world/level/Level.h"
 #include "world/level/material/Material.h"
-//#include "world/effect/MobEffect.h"
+#include "world/effect/MobEffect.h"
 //#include "util/PerfTimer.h"
 //#include "world/entity/ai/control/MoveControl.h"
 //#include "world/entity/ai/control/JumpControl.h"
@@ -20,18 +20,24 @@
 //#include "world/entity/ai/Sensing.h"
 //#include "world/entity/item/ExperienceOrb.h"
 //#include "world/entity/EntityDefinition.h"
-//#include "world/attribute/Attribute.h"
-//#include "world/attribute/SharedAttributes.h"
-//#include "world/attribute/HealthAttributeDelegate.h"
-//#include "world/attribute/AttributeMap.h"
-//#include "world/attribute/AttributeInstance.h"
+#include "world/attribute/Attribute.h"
+#include "world/attribute/SharedAttributes.h"
+#include "world/attribute/HealthAttributeDelegate.h"
+#include "world/attribute/AttributeMap.h"
+#include "world/attribute/AttributeInstance.h"
 //#include "network/packet/SetEntityDataPacket.h"
 //#include "network/packet/EntityEventPacket.h"
 //#include "network/packet/EventPacket.h"
 //#include "network/PacketSender.h"
 //#include "network/packet/UpdateAttributesPacket.h"
 //#include "EntityClassTree.h"
-//#include "world/effect/MobEffectInstance.h"
+#include "world/effect/MobEffectInstance.h"
+#include "world/entity/EntityDamageSource.h"
+#include "world/entity/ParticleType.h"
+#include "world/entity/player/Player.h"
+#include "world/level/BlockSource.h"
+#include "world/level/block/Block.h"
+#include "client/renderer/block/BlockGraphics.h"
 //#include "Events/MinecraftEventing.h"
 //#include "world/level/Spawner.h"
 //
@@ -93,28 +99,18 @@ const int Mob::PLAYER_HURT_EXPERIENCE_TIME = SharedConstants::TicksPerSecond * 5
 
 // Called only for Player
 Mob::Mob(Level& level) : Entity(level) {
-	//mCategories |= EntityCategory::Mob;
+	mCategories |= EntityCategory::Mob;
 
 	//enableAutoSendPosRot(true);
 
 	//_defineMobData(mEntityData);
-	//mAttributes = make_unique<BaseAttributeMap>();
-	//registerAttributes();
+	mAttributes = make_unique<BaseAttributeMap>();
+	registerAttributes();
 
-	//mLookControl = make_unique<LookControl>(*this);
-	//mMoveControl = make_unique<MoveControl>(*this);
-	//mJumpControl = make_unique<JumpControl>(*this);
-	//if (!mBodyControl) {
-	//	mBodyControl = make_unique<BodyControl>(*this);
-	//}
-	//mNavigation = make_unique<PathNavigation>(*this, 16.f);
-	//mSensing = make_unique<Sensing>(*this);
-
-	//mMaxAutoStep = 0.5f + (1.0f / 16.0f);
-
-	//mOTilt = mTilt = 0.0f;
-
+	mMaxAutoStep = 0.5f + (1.0f / 16.0f);
 }
+
+Mob::~Mob() = default;
 
 //void Mob::reloadHardcodedClient(InitializationMethod method, const VariantParameterList &params) {
 //	// Used for clients to determine if their bounding box prevents construction of blocks
@@ -450,9 +446,39 @@ Mob::Mob(Level& level) : Entity(level) {
 //	playSynchronizedSound(ambientSoundEvent, getAttachPos(EntityLocation::Head));
 //}
 //
-//void Mob::baseTick() {
-//	mOAttackAnim = mAttackAnim;
-//	Entity::baseTick();
+void Mob::baseTick() {
+	Entity::baseTick();
+
+	if (mHurtTime > 0) {
+		mHurtTime--;
+	}
+
+	if (getHealth() <= 0) {
+		mDeathTime++;
+	}
+
+	if (getAttribute(SharedAttributes::HEALTH).getCurrentValue() > 0.f) {
+		tickAttributes();
+	}
+
+	// update effects
+	tickEffects();
+
+	// Sprint particles
+	_updateSprintingState();
+}
+
+void Mob::normalTick() {
+	Entity::normalTick();
+	aiStep();
+}
+
+void Mob::travel(float xa, float ya) {
+	UNUSED_PARAMETER(xa, ya);
+}
+
+void Mob::aiStep() {
+}
 //
 //	ScopedProfile("mobBaseTick");
 //
@@ -701,22 +727,23 @@ Mob::Mob(Level& level) : Entity(level) {
 //	
 //}
 //
-//void Mob::heal(int heal) {
-//	if (getHealth() > 0 && !isInvertedHealAndHarm()) {
-//		getMutableAttribute(SharedAttributes::HEALTH)->addBuff(InstantaneousAttributeBuff((float)heal, AttributeBuffType::Heal));
-//	}
-//	else if (getHealth() > 0) {
-//		getMutableAttribute(SharedAttributes::HEALTH)->addBuff(InstantaneousAttributeBuff((float)heal, AttributeBuffType::Harm));
-//	}
-//}
-//
-//void Mob::healEffects(int amountHealed) {
-//	mInvulnerableTime = INVULNERABLE_DURATION / 2;
-//}
-//
-//bool Mob::isInvertedHealAndHarm() const {
-//	return EntityClassTree::isTypeInstanceOf(getEntityTypeId(), EntityType::UndeadMob);
-//}
+void Mob::heal(int heal) {
+	if (getHealth() > 0 && !isInvertedHealAndHarm()) {
+		getMutableAttribute(SharedAttributes::HEALTH)->addBuff(InstantaneousAttributeBuff((float)heal, AttributeBuffType::Heal));
+	}
+	else if (getHealth() > 0) {
+		getMutableAttribute(SharedAttributes::HEALTH)->addBuff(InstantaneousAttributeBuff((float)heal, AttributeBuffType::Harm));
+	}
+}
+
+void Mob::healEffects(int amountHealed) {
+	UNUSED_PARAMETER(amountHealed);
+	mInvulnerableTime = INVULNERABLE_DURATION / 2;
+}
+
+bool Mob::isInvertedHealAndHarm() const {
+	return hasCategory(EntityCategory::UndeadMob);
+}
 //
 //bool Mob::doFireHurt(int amount) {
 //	if (hasEffect(*MobEffect::FIRE_RESISTANCE)) {
@@ -752,179 +779,83 @@ Mob::Mob(Level& level) : Entity(level) {
 //	return EnchantUtils::getEnchantLevel(Enchant::Type::WEAPON_KNOCKBACK, *weapon);
 //}
 //
-//bool Mob::_hurt(const EntityDamageSource& source, int dmg, bool knock, bool ignite) {
-//	if (getLevel().isClientSide()) {
-//		return false;
-//	}
-//
-//	mNoActionTime = 0;
-//
-//	mWalkAnimSpeed = 1.5f;
-//
-//	// reduce damage by enchanted armor values
-//	dmg = Math::floor(EnchantUtils::getDamageReduction(source, *this) * static_cast<float>(dmg));
-//
-//	//mobs that interact with the player become persistent
-//	if (source.isEntitySource()) {
-//		Entity* entity = ((EntityDamageByEntitySource&)source).getEntity();
-//
-//		if (entity && entity->hasCategory(EntityCategory::Mob)) {
-//
-//			// if it's not a mob, it can't be a player
-//			if (entity->hasCategory(EntityCategory::Player)) {
-//				setLastHurtByPlayer(static_cast<Player*>(entity));
-//			}
-//			else {
-//				setLastHurtByMob(static_cast<Mob*>(entity));
-//			}
-//
-//			// if enchanted armor has a reactive effect (basically just thorns) apply it here
-//			EnchantUtils::doPostHurtEffects(*this, (Mob&)*entity);
-//		}
-//	}
-//
-//	if (mInvulnerableTime == INVULNERABLE_DURATION && getChainedDamageEffects()) {
-//		dmg += mLastHurt;
-//	}
-//	else if (mInvulnerableTime > INVULNERABLE_DURATION / 2.0f) {
-//		if (dmg <= mLastHurt) {
-//			return false;
-//		}
-//	}
-//	else {
-//		mLastHurt = 0;
-//	}
-//
-//
-//	if (!getLevel().isClientSide()) {
-//		if (getDamageSensorComponent()) {
-//			if (!getDamageSensorComponent()->recordDamage(source.getEntity(), source.getCause(), dmg - mLastHurt, (getHealth() - dmg - mLastHurt) <= 0)) {
-//				return false;
-//			}
-//		}
-//		actuallyHurt(dmg - mLastHurt, &source);
-//	}
-//
-//	return hurtEffects(source, dmg, knock, ignite);
-//}
-//
-//bool Mob::hurtEffects(const EntityDamageSource& source, int damage, bool knock, bool ignite) {
-//	if (getLevel().isClientSide()) {
-//		return false;
-//	}
-//
-//	if (hasCategory(EntityCategory::Player)) {
-//		if (static_cast<Player*>(this)->mAbilities.mInvulnerable) {
-//			return false;
-//		}
-//	}
-//
-//	bool hurt = false;
-//	bool chainedHurt = false;
-//	if (mInvulnerableTime == INVULNERABLE_DURATION && getChainedDamageEffects()) {
-//		chainedHurt = true;
-//		mLastHurt = damage;
-//		mLastHealth = getHealth();
-//	}
-//	else if (mInvulnerableTime > INVULNERABLE_DURATION / 2.0f) {
-//		if (damage <= mLastHurt) {
-//			return false;
-//		}
-//
-//		mLastHurt = damage;
-//	}
-//	else {
-//		hurt = true;
-//		mLastHurt = damage;
-//		mLastHealth = getHealth();
-//		mInvulnerableTime = INVULNERABLE_DURATION;
-//		mHurtTime = 10;
-//		mHurtDuration = 10;
-//	}
-//
-//	Entity* srcEntity = source.getEntity();
-//	Entity* childEntity = source.getDamagingEntity();
-//	if ((srcEntity != nullptr && ignite) ||
-//		(childEntity != nullptr && (childEntity->isOnFire() || (childEntity->getProjectileComponent() != nullptr && childEntity->getProjectileComponent()->getCatchFire())))) {
-//		if (!(childEntity->getProjectileComponent() != nullptr && !childEntity->getProjectileComponent()->getCatchFire())) {
-//			setOnFire(2 * DifficultyUtils::getMultiplier(getLevel().getDifficulty()));
-//		}
-//	}
-//
-//	mHurtDir = 0;
-//
-//
-//	if (hurt){
-//
-//		getLevel().broadcastEntityEvent(this, EntityEvent::HURT);	// note: handles playSound for all clients (including
-//																// this one)
-//
-//		markHurt();
-//
-//		if (source.isEntitySource()) {
-//
-//			Entity* entity = source.getEntity();
-//			float xd = entity->mPos.x - mPos.x;
-//			float zd = entity->mPos.z - mPos.z;
-//
-//			if (knock) {
-//
-//				while (xd * xd + zd * zd < 0.0001) {
-//					xd = (Math::random() - Math::random()) * 0.01f;
-//					zd = (Math::random() - Math::random()) * 0.01f;
-//				}
-//
-//				mHurtDir = (float)(std::atan2(zd, xd) * Math::RADDEG) - mRot.y;
-//
-//
-//				knockback(entity, damage, xd, zd);
-//			}
-//			if (entity->hasCategory(EntityCategory::Player)) {
-//				setLastHurtByPlayer(static_cast<Player*>(entity));
-//			}
-//			else if (entity->hasCategory(EntityCategory::Mob)) {
-//				setLastHurtByMob(static_cast<Mob*>(entity));
-//			}
-//		}
-//		else {
-//			mHurtDir = (int)(Math::random() * 2.0f) * 180.0f;
-//		}
-//
-//		
-//	}
-//
-//	if (getHealth() <= 0) {
-//		die(source);
-//	}
-//
-//	return hurt || chainedHurt;
-//}
-//
-//void Mob::actuallyHurt(int dmg, const EntityDamageSource* source, bool bypassArmor) {
-//	if (isInvulnerableTo(*source)) {
-//		return;
-//	}
-//
-//	if (!bypassArmor) {
-//		dmg = getDamageAfterArmorAbsorb(*source, dmg);
-//	}
-//	dmg = getDamageAfterMagicAbsorb(*source, dmg);
-//
-//	// Check Absorption
-//	auto absorption = getMutableAttribute(SharedAttributes::ABSORPTION);
-//	int originalDamage = dmg;
-//	dmg = (int) std::max((float) dmg - absorption->getCurrentValue(), 0.f);
-//	absorption->addBuff(InstantaneousAttributeBuff((float)-(originalDamage - dmg)));
-//
-//	if (dmg == 0) {
-//		return;
-//	}
-//
-//	AttributeInstance *health = getMutableAttribute(SharedAttributes::HEALTH);
-//
-//	health->addBuff(InstantaneousAttributeBuff((float)-dmg, AttributeBuffType::None));
-//	absorption->addBuff(InstantaneousAttributeBuff((float)-dmg));
-//}
+bool Mob::_hurt(const EntityDamageSource& source, int dmg, bool knock, bool ignite) {
+	if (getLevel().isClientSide()) {
+		return false;
+	}
+
+	if (mInvulnerableTime > INVULNERABLE_DURATION / 2.0f) {
+		if (dmg <= mLastHurt) {
+			return false;
+		}
+	} else {
+		mLastHurt = 0;
+	}
+
+	actuallyHurt(dmg - mLastHurt, &source);
+	return hurtEffects(source, dmg, knock, ignite);
+}
+
+bool Mob::hurtEffects(const EntityDamageSource& source, int damage, bool knock, bool ignite) {
+	UNUSED_PARAMETER(knock, ignite);
+	if (getLevel().isClientSide()) {
+		return false;
+	}
+
+	if (hasCategory(EntityCategory::Player)) {
+		if (static_cast<Player*>(this)->mAbilities.mInvulnerable) {
+			return false;
+		}
+	}
+
+	bool hurt = false;
+	if (mInvulnerableTime > INVULNERABLE_DURATION / 2.0f) {
+		if (damage <= mLastHurt) {
+			return false;
+		}
+		mLastHurt = damage;
+	} else {
+		hurt = true;
+		mLastHurt = damage;
+		mLastHealth = getHealth();
+		mInvulnerableTime = INVULNERABLE_DURATION;
+		mHurtTime = 10;
+		mHurtDuration = 10;
+	}
+
+	if (hurt) {
+		mHurtDir = (int)(Math::random() * 2.0f) * 180.0f;
+	}
+
+	if (getHealth() <= 0) {
+		die(source);
+	}
+
+	return hurt;
+}
+
+void Mob::actuallyHurt(int dmg, const EntityDamageSource* source, bool bypassArmor) {
+	if (source && isInvulnerableTo(*source)) {
+		return;
+	}
+	UNUSED_PARAMETER(bypassArmor);
+
+	auto absorption = getMutableAttribute(SharedAttributes::ABSORPTION);
+	if (absorption) {
+		int originalDamage = dmg;
+		dmg = (int)std::max((float)dmg - absorption->getCurrentValue(), 0.f);
+		absorption->addBuff(InstantaneousAttributeBuff((float)-(originalDamage - dmg)));
+	}
+
+	if (dmg <= 0) {
+		return;
+	}
+
+	AttributeInstance* health = getMutableAttribute(SharedAttributes::HEALTH);
+	if (health) {
+		health->addBuff(InstantaneousAttributeBuff((float)-dmg, AttributeBuffType::None));
+	}
+}
 //
 //void Mob::_playStepSound(const BlockPos& pos, int t) {
 //	if (onLadder(false)) {
@@ -957,44 +888,11 @@ Mob::Mob(Level& level) : Entity(level) {
 //	}
 //}
 //
-//void Mob::die(const EntityDamageSource& source) {
-//	if (mDead) { return; }
-//	mDead = true;
-//
-//	if (getTransformationComponent()) {
-//		getTransformationComponent()->transformIfAble();
-//	}
-//	
-//	Entity* sourceEntity = source.getEntity();
-//	/*
-//	final LivingEntity killer = getKillCredit();
-//	if (deathScore >= 0 && killer != null) {
-//	killer.awardKillScore(this, deathScore);
-//	}	*/
-//
-//	if (sourceEntity != nullptr) {
-//		sourceEntity->killed(this);
-//	}
-//
-//	if (!getLevel().isClientSide()) {
-//		int lootBonusLevel = 0;
-//		if (sourceEntity != nullptr && sourceEntity->hasCategory(EntityCategory::Mob)) {
-//			lootBonusLevel = EnchantUtils::getBestEnchantLevel(Enchant::Type::WEAPON_LOOT, *static_cast<const Mob*>(sourceEntity), EquipmentFilter::HANDS);
-//		}
-//		resolveDeathLoot((sourceEntity != nullptr && sourceEntity->hasCategory(EntityCategory::Player)), lootBonusLevel, source);
-//		dropLeash(true);
-//		getLevel().broadcastEntityEvent(this, EntityEvent::DEATH);
-//	}
-//
-//	// Send MobKilled event
-//	Player* player = getLastHurtByPlayer();
-//	if (player != nullptr && sourceEntity != nullptr) {
-//		EventPacket killedMobPacket(player, sourceEntity, this, source.getCause());
-//		player->sendEventPacket(killedMobPacket);
-//	}
-//
-//	removeAllRiders(true);
-//}
+void Mob::die(const EntityDamageSource& source) {
+	UNUSED_PARAMETER(source);
+	if (mDead) { return; }
+	mDead = true;
+}
 //
 //void Mob::resolveDeathLoot(bool wasKilledByPlayer, int lootBonusLevel, const EntityDamageSource& source) {
 //	auto lootTable = mLootDropped ? getDefaultLootTable() : getLootTable();
@@ -1466,9 +1364,9 @@ Mob::Mob(Level& level) : Entity(level) {
 //	mHurtDir = 0;
 //}
 //
-//bool Mob::isAlive() const {
-//	return !isRemoved() && getHealth() > 0;
-//}
+bool Mob::isAlive() const {
+	return !isRemoved() && getHealth() > 0;
+}
 //
 //void Mob::_applyRidingRotationLimits() {
 //	if ((nullptr != mRiding) && enforceRiderRotationLimit()) {
@@ -1705,25 +1603,19 @@ Mob::Mob(Level& level) : Entity(level) {
 //	return mImmobile || getHealth() <= 0 || getStatusFlag(EntityFlags::NOAI);
 //}
 //
-//void Mob::jumpFromGround() {
-//	mPosDelta.y = getJumpPower();
-//	if (hasEffect(*MobEffect::JUMP)) {
-//		mPosDelta.y += (getEffect(*MobEffect::JUMP)->getAmplifier() + 1) * .1f;
-//	}
-//
-//	if (isSprinting()) {
-//		float rr = mRot.y * Math::DEGRAD;
-//
-//		mPosDelta.x -= Math::sin(rr) * 0.2f;
-//		mPosDelta.z += Math::cos(rr) * 0.2f;
-//	}
-//
-//	//play the jump sound
-//	if (!isSilent()) {
-//		BlockID blockID = getRegion().getBlockID(_getBlockOnPos());
-//		playSound(LevelSoundEvent::Jump, getAttachPos(EntityLocation::Feet), blockID);
-//	}
-//}
+void Mob::jumpFromGround() {
+	mPosDelta.y = getJumpPower();
+	if (MobEffect::JUMP && hasEffect(*MobEffect::JUMP)) {
+		mPosDelta.y += (getEffect(*MobEffect::JUMP)->getAmplifier() + 1) * .1f;
+	}
+
+	if (isSprinting()) {
+		float rr = mRot.y * Math::DEGRAD;
+
+		mPosDelta.x -= Math::sin(rr) * 0.2f;
+		mPosDelta.z += Math::cos(rr) * 0.2f;
+	}
+}
 //
 //void Mob::stopRiding(bool exitFromRider, bool entityIsBeingDestroyed) {
 //	mRiderYRotLimit = 181.0f; //reset this value, for safety
@@ -1844,110 +1736,72 @@ Mob::Mob(Level& level) : Entity(level) {
 //	return 0;
 //}
 //
-//void Mob::setYya(float yya) {
-//	mYya = yya;
-//}
-//
-//float Mob::getSpeed() const {
-//	if (useNewAi()) {
-//		return mSpeed;
-//	}
-//
-//	return getAttribute(SharedAttributes::MOVEMENT_SPEED).getCurrentValue();
-//}
-//
-//void Mob::setSpeed(float speed) {
-//	mSpeed = speed;
-//	mYya = speed;
-//}
-//
-//float Mob::getYHeadRot() const {
-//	return mYHeadRot;
-//}
-//
-//void Mob::setYHeadRot(float yHeadRot) {
-//	mYHeadRotO = mYHeadRot = yHeadRot;
-//}
-//
-//void Mob::setRiderLockedBodyRot(float degreesAngle) {
-//	mLockedBodyYRot = degreesAngle;
-//}
-//
-//void Mob::setRiderRotLimit(float degreesLimit) {
-//	mRiderYRotLimit = degreesLimit;
-//}
-//
-//bool Mob::isGliding() const {
-//	return getStatusFlag(EntityFlags::GLIDING);
-//}
-//
-//int Mob::getGlidingTicks() const {
-//	return mFallFlyTicks;
-//}
-//
-//void Mob::setWantsToBeJockey(bool jockey) {
-//	mWantsToBeJockey = jockey;
-//}
-//
-//bool Mob::wantsToBeJockey() const {
-//	return mWantsToBeJockey;
-//}
-//
-//void Mob::setJumping(bool jump) {
-//	mJumping = jump;
-//}
-//
-//void Mob::setJumpVelRedux(bool val) {
-//	mJumpVelRedux = val;
-//}
-//
-//
-//float Mob::getJumpPower() const {
-//	return 0.42f;
-//}
-//
-//void Mob::setSprinting(bool shouldSprint) {
-//	setStatusFlag(EntityFlags::SPRINTING, shouldSprint);
-//
-//	if (auto speed = getMutableAttribute(SharedAttributes::MOVEMENT_SPEED)) {
-//		if (shouldSprint && !speed->hasModifier(SharedModifiers::SPRINTING_BOOST)) {
-//			speed->addModifier(SharedModifiers::SPRINTING_BOOST);
-//		} else if (!shouldSprint && speed->hasModifier(SharedModifiers::SPRINTING_BOOST)) {
-//			speed->removeModifier(SharedModifiers::SPRINTING_BOOST);
-//		}
-//	}
-//}
-//
-//bool Mob::isSprinting() const {
-//	return getStatusFlag(EntityFlags::SPRINTING);
-//}
-//
-//void Mob::_updateSprintingState() {
-//	if (isSprinting() && !isInWater()) {
-//		_doSprintParticleEffect();
-//	}
-//}
-//
-//void Mob::_doSprintParticleEffect() {
-//	int xt = Math::floor(mPos.x);
-//	int yt = Math::floor(mPos.y - 0.2f - mHeightOffset);
-//	int zt = Math::floor(mPos.z);
-//	BlockPos pos = BlockPos(xt, yt, zt);
-//
-//	auto &region = this->getRegion();
-//	auto fullBlock = region.getBlockAndData(pos);
-//	const Block* baseBlock = Block::mBlocks[fullBlock.id];
-//
-//	if (baseBlock) {
-//		const BlockGraphics* blockGraphics = BlockGraphics::mBlocks[baseBlock->getId()];
-//		if (blockGraphics && blockGraphics->getBlockShape() != BlockShape::INVISIBLE) {
-//			float posx = mPos.x + (getLevel().getRandom().nextFloat() - 0.5f) * mBBDim.x;
-//			float posy = mBB.min.y + 0.1f;
-//			float posz = mPos.z + (getLevel().getRandom().nextFloat() - 0.5f) * mBBDim.x;
-//			getLevel().addParticle(ParticleType::Terrain, Vec3(posx, posy, posz), Vec3(-mPosDelta.x * 4, 0.15f, -mPosDelta.z * 4), fullBlock.toInt());
-//		}
-//	}
-//}
+void Mob::setYya(float yya) {
+	mYya = yya;
+}
+
+float Mob::getSpeed() const {
+	return mSpeed;
+}
+
+void Mob::setSpeed(float speed) {
+	mSpeed = speed;
+	mYya = speed;
+}
+
+void Mob::setJumping(bool jump) {
+	mJumping = jump;
+}
+
+float Mob::getJumpPower() const {
+	return 0.42f;
+}
+
+void Mob::setSprinting(bool shouldSprint) {
+	setStatusFlag(EntityFlags::SPRINTING, shouldSprint);
+
+	if (auto speed = getMutableAttribute(SharedAttributes::MOVEMENT_SPEED)) {
+		if (shouldSprint && !speed->hasModifier(SharedModifiers::SPRINTING_BOOST)) {
+			speed->addModifier(SharedModifiers::SPRINTING_BOOST);
+		} else if (!shouldSprint && speed->hasModifier(SharedModifiers::SPRINTING_BOOST)) {
+			speed->removeModifier(SharedModifiers::SPRINTING_BOOST);
+		}
+	}
+}
+
+bool Mob::isSprinting() const {
+	return getStatusFlag(EntityFlags::SPRINTING);
+}
+
+void Mob::_updateSprintingState() {
+	if (isSprinting() && !isInWater()) {
+		_doSprintParticleEffect();
+	}
+}
+
+void Mob::_doSprintParticleEffect() {
+	if (!mRegion) {
+		return;
+	}
+	int xt = Math::floor(mPos.x);
+	int yt = Math::floor(mPos.y - 0.2f - mHeightOffset);
+	int zt = Math::floor(mPos.z);
+	BlockPos pos = BlockPos(xt, yt, zt);
+
+	auto &region = this->getRegion();
+	auto fullBlock = region.getBlockAndData(pos);
+	const Block* baseBlock = Block::mBlocks[fullBlock.id];
+
+	if (baseBlock) {
+		const BlockGraphics* blockGraphics = BlockGraphics::mBlocks[baseBlock->getId()];
+		if (blockGraphics && blockGraphics->getBlockShape() != BlockShape::INVISIBLE) {
+			float posx = mPos.x + (getLevel().getRandom().nextFloat() - 0.5f) * mBBDim.x;
+			float posy = mBB.min.y + 0.1f;
+			float posz = mPos.z + (getLevel().getRandom().nextFloat() - 0.5f) * mBBDim.x;
+			getLevel().addParticle(ParticleType::Terrain, Vec3(posx, posy, posz), Vec3(-mPosDelta.x * 4, 0.15f, -mPosDelta.z * 4), fullBlock.toInt());
+		}
+	}
+}
 //
 //bool Mob::useNewAi() const {
 //	return true;
@@ -2535,11 +2389,11 @@ Mob::Mob(Level& level) : Entity(level) {
 //	return mob;
 //}
 //
-//void Mob::resetAttributes() {
-//	for (auto& i : *mAttributes) {
-//		i.second.resetToDefaultValue();
-//	}
-//}
+void Mob::resetAttributes() {
+	for (auto& i : *mAttributes) {
+		i.second.resetToDefaultValue();
+	}
+}
 //
 //void Mob::pushEntities() {
 //	ScopedProfile("push");
@@ -2598,284 +2452,191 @@ Mob::Mob(Level& level) : Entity(level) {
 //	setStatusFlag(EntityFlags::INVISIBLE, value);
 //}
 //
-//void Mob::addEffect(const MobEffectInstance& effect) {
-//	if (!canBeAffected(effect)) {
-//		return;
-//	}
+void Mob::addEffect(const MobEffectInstance& effect) {
+	if (!canBeAffected(effect)) {
+		return;
+	}
+
+	mMobEffects.resize(std::max(mMobEffects.size(), (size_t)effect.getId() + 1), MobEffectInstance::NO_EFFECT);
+
+	if (mMobEffects[effect.getId()] != MobEffectInstance::NO_EFFECT) {
+		mMobEffects[effect.getId()].update(effect);
+		onEffectUpdated(mMobEffects[effect.getId()]);
+	} else {
+		mMobEffects[effect.getId()] = effect;
+		onEffectAdded(mMobEffects[effect.getId()]);
+	}
+}
+
+void Mob::removeEffectNoUpdate(int effectId) {
+	if (effectId < 0 || effectId >= (int)mMobEffects.size()) {
+		return;
+	}
+	mMobEffects[effectId] = MobEffectInstance::NO_EFFECT;
+}
+
+int Mob::getActiveEffectCount() const {
+	int effectCount = 0;
+	for (unsigned i = 0; i < mMobEffects.size(); i++) {
+		if (mMobEffects[i] != MobEffectInstance::NO_EFFECT) {
+			++effectCount;
+		}
+	}
+	return effectCount;
+}
+
+void Mob::removeEffect(int effectId) {
+	if (effectId < 0 || effectId >= (int)mMobEffects.size()) {
+		return;
+	}
+	if (mMobEffects[effectId] != MobEffectInstance::NO_EFFECT) {
+		onEffectRemoved(mMobEffects[effectId]);
+		mMobEffects[effectId] = MobEffectInstance::NO_EFFECT;
+	}
+}
+
+void Mob::removeAllEffects() {
+	for (int i = 0; i < MobEffect::NUM_EFFECTS; i++) {
+		removeEffect(i);
+	}
+}
+
+bool Mob::canBeAffected(const MobEffectInstance& effect) {
+	if (!isAlive()) {
+		return false;
+	}
+	if (hasCategory(EntityCategory::UndeadMob)) {
+		int id = effect.getId();
+		if ((MobEffect::REGENERATION && id == MobEffect::REGENERATION->getId()) ||
+		    (MobEffect::POISON && id == MobEffect::POISON->getId())) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void Mob::tickEffects() {
+	for (size_t i = 0; i < mMobEffects.size(); ++i) {
+		if (mMobEffects[i] != MobEffectInstance::NO_EFFECT && !mMobEffects[i].tick(this)) {
+			removeEffect(static_cast<int>(i));
+		}
+	}
+	mEffectsDirty = false;
+}
+
+void Mob::onEffectAdded(MobEffectInstance& effect) {
+	mEffectsDirty = true;
+	if (mLevel && !getLevel().isClientSide() && effect.getId() != MobEffectInstance::NO_EFFECT.getId()) {
+		if (MobEffect* eff = MobEffect::getById(effect.getId())) {
+			eff->applyEffects(this, effect.getDuration(), effect.getAmplifier());
+		}
+	}
+	if (MobEffect::FIRE_RESISTANCE && effect.getId() == MobEffect::FIRE_RESISTANCE->getId() && !mAlwaysFireImmune) {
+		mFireImmune = true;
+	}
+}
+
+void Mob::onEffectUpdated(const MobEffectInstance& effect) {
+	mEffectsDirty = true;
+	if (mLevel && !getLevel().isClientSide()) {
+		if (MobEffect* eff = MobEffect::getById(effect.getId())) {
+			eff->removeEffects(this);
+			eff->applyEffects(this, effect.getDuration(), effect.getAmplifier());
+		}
+	}
+}
+
+void Mob::onEffectRemoved(MobEffectInstance& effect) {
+	mEffectsDirty = true;
+	if (mLevel && !getLevel().isClientSide()) {
+		if (MobEffect* eff = MobEffect::getById(effect.getId())) {
+			eff->removeEffects(this);
+		}
+	}
+	if (MobEffect::FIRE_RESISTANCE && effect.getId() == MobEffect::FIRE_RESISTANCE->getId() && !mAlwaysFireImmune) {
+		mFireImmune = false;
+	}
+}
+
+bool Mob::hasEffect(const MobEffect& effect) const {
+	return getEffect(effect) != nullptr;
+}
+
+const MobEffectInstance* Mob::getEffect(const MobEffect& effect) const {
+	if (effect.getId() >= 0 && mMobEffects.size() > static_cast<size_t>(effect.getId())) {
+		if (mMobEffects[effect.getId()] != MobEffectInstance::NO_EFFECT) {
+			return &mMobEffects[effect.getId()];
+		}
+	}
+	return nullptr;
+}
+
+bool Mob::hasAnyEffects() {
+	for (auto&& effect : mMobEffects) {
+		if (effect != MobEffectInstance::NO_EFFECT) {
+			return true;
+		}
+	}
+	return false;
+}
+
+const MobEffectInstanceList& Mob::getAllEffects() {
+	return mMobEffects;
+}
 //
-//	mMobEffects.resize(std::max(mMobEffects.size(), (size_t)effect.getId() + 1), MobEffectInstance::NO_EFFECT);
-//
-//	if (mMobEffects[effect.getId()] != MobEffectInstance::NO_EFFECT) {
-//		// replace effect and update
-//		mMobEffects[effect.getId()].update(effect);
-//		onEffectUpdated(mMobEffects[effect.getId()]);
-//	}
-//	else {
-//		//TODO this new seems entirely useless
-//		mMobEffects[effect.getId()] = effect;
-//		onEffectAdded(mMobEffects[effect.getId()]);
-//	}
-//}
-//
-//void Mob::removeEffectNoUpdate(int effectId) {
-//	if (effectId >= (int)mMobEffects.size()) {
-//		return;
-//	}
-//
-//	mMobEffects[effectId] = MobEffectInstance::NO_EFFECT;
-//}
-//
-//int Mob::getActiveEffectCount() const {
-//	int effectCount = 0;
-//
-//	for (unsigned i = 0; i < mMobEffects.size(); i++) {
-//		if (mMobEffects[i] != MobEffectInstance::NO_EFFECT) {
-//			++effectCount;
-//		}
-//	}
-//	return effectCount;
-//}
-//
-//void Mob::removeEffect(int effectId) {
-//	if (effectId >= (int)mMobEffects.size()) {
-//		return;
-//	}
-//
-//	if (mMobEffects[effectId] != MobEffectInstance::NO_EFFECT) {
-//		onEffectRemoved(mMobEffects[effectId]);
-//
-//		mMobEffects[effectId] = MobEffectInstance::NO_EFFECT;
-//	}
-//}
-//
-//void Mob::removeAllEffects() {
-//	removeEffectParticles();
-//
-//	for (int i = 0; i < MobEffect::NUM_EFFECTS; i++) {
-//		removeEffect(i);
-//	}
-//
-//	removeEffectParticles();
-//}
-//
-//bool Mob::canBeAffected(const MobEffectInstance& effect) {
-//	// For when posion damage is added to an entity basicly the same frame as it died,
-//	// for more info, see how the spiders adds poison:
-//	// playerHurt -> playerDie -> addPosition
-//	if(!isAlive()) {
-//		return false;
-//	}
-//			
-//	if (hasFamily("undead")) {
-//		int id = effect.getId();
-//		if (id == MobEffect::REGENERATION->getId() || id == MobEffect::POISON->getId()) {
-//			return false;
-//		}
-//	}
-//	return true;
-//}
-//
-//void Mob::tickEffects() {
-//
-//	for(auto i : range(mMobEffects.size())) {
-//		if (!mMobEffects[i].tick(this)) {
-//			removeEffect(i);
-//		}
-//	}
-//
-//	if (mEffectsDirty) {
-//		if (!getLevel().isClientSide()) {
-//			updateInvisibilityStatus();
-//		}
-//
-//		mEffectsDirty = false;
-//	}
-//
-//	int colorValue = mEntityData.getInt(enum_cast(EntityDataIDs::EFFECT_COLOR));
-//	bool ambient = mEntityData.getInt8(enum_cast(EntityDataIDs::EFFECT_AMBIENCE)) > 0;
-//	
-//	// colorValue is only non-zero when there are effects on the mob, and the blended color is always correct given a collection of effects
-//	if (hasAnyEffects() || colorValue != 0) {
-//		bool doParticle = false;
-//
-//		if (!isInvisible()) {
-//			doParticle = mRandom.nextBoolean();
-//		}
-//		else {
-//			doParticle = mRandom.nextInt(15) == 0;	// much fewer particles when invisible
-//		}
-//
-//		if (ambient) {
-//			doParticle &= mRandom.nextInt(5) == 0;
-//		}
-//
-//		if (doParticle) {
-//			float posx = mPos.x + (mRandom.nextFloat() - 0.5f) * mBBDim.x;
-//			float posy = mPos.y + mRandom.nextFloat() * mBBDim.y - mHeightOffset;
-//			float posz = mPos.z + (mRandom.nextFloat() - 0.5f) * mBBDim.x;
-//
-//			getLevel().addParticle(ambient ? ParticleType::MobSpellAmbient
-//				: ParticleType::MobSpell,
-//				Vec3(posx, posy, posz),
-//				Vec3::ZERO,
-//				colorValue);
-//		}
-//	}
-//}
-//
-//void Mob::onEffectAdded(MobEffectInstance& effect) {
-//	mEffectsDirty = true;
-//	// Apply the effect if it will actually do something
-//	if (mLevel && !getLevel().isClientSide() && effect.getId() != MobEffectInstance::NO_EFFECT.getId()) {
-//		effect.applyEffects(this);
-//	}
-//
-//	// TODO: Move this, feels dirty.
-//	//   The reason this is here is because Entity has a burn() function, but
-//	//   it can't check MobEffects there because those are on Mob.
-//	//   Java gets away with this because burn() is on LivingEntity, as are MobEffects
-//	if (effect.getId() == MobEffect::FIRE_RESISTANCE->getId() && !mAlwaysFireImmune) {
-//		mFireImmune = true;
-//	}
-//}
-//
-//void Mob::onEffectUpdated(const MobEffectInstance& effect) {
-//	mEffectsDirty = true;
-//	if (/*doRefreshAttributes &&*/ !getLevel().isClientSide()) {
-//		// TODO: Implement timer override so we don't just restart mob effects here
-//		effect.removeEffects(this);
-//		effect.applyEffects(this);
-//	}
-//}
-//
-//void Mob::onEffectRemoved(MobEffectInstance& effect) {
-//	mEffectsDirty = true;
-//	if (!getLevel().isClientSide()) {
-//		effect.removeEffects(this);
-//	}
-//
-//	if (effect.getId() == MobEffect::FIRE_RESISTANCE->getId() && !mAlwaysFireImmune) {
-//		mFireImmune = false;
-//	}
-//}
-//
-//void Mob::updateInvisibilityStatus() {
-//	if (!hasAnyEffects() || mMobEffects.empty()) {
-//		removeEffectParticles();
-//		setInvisible(false);
-//	}
-//	else {
-//		auto colorValue = MobEffectInstance::getColorValue(mMobEffects);
-//		auto effect = (SynchedEntityData::TypeInt8)(MobEffectInstance::areAllEffectsAmbient(mMobEffects) ? 1 : 0);
-//		mEntityData.set(enum_cast(EntityDataIDs::EFFECT_AMBIENCE), effect);
-//		mEntityData.set(enum_cast(EntityDataIDs::EFFECT_COLOR), colorValue.toARGB());
-//		setInvisible(hasEffect(*MobEffect::INVISIBILITY));
-//	}
-//
-//	mEntityData.markDirty(enum_cast(EntityDataIDs::EFFECT_AMBIENCE));
-//	mEntityData.markDirty(enum_cast(EntityDataIDs::EFFECT_COLOR));
-//}
-//
-//void Mob::removeEffectParticles() {
-//	mEntityData.set(enum_cast(EntityDataIDs::EFFECT_AMBIENCE), (SynchedEntityData::TypeInt8)0);
-//	mEntityData.set(enum_cast(EntityDataIDs::EFFECT_COLOR), (SynchedEntityData::TypeInt)0);
-//}
-//
-//bool Mob::hasEffect(const MobEffect& effect) const {
-//	return getEffect(effect) != nullptr;
-//}
-//
-//const MobEffectInstance* Mob::getEffect(const MobEffect& effect) const {
-//	if (mMobEffects.size() > effect.getId()) {
-//		if (mMobEffects[effect.getId()] != MobEffectInstance::NO_EFFECT) {
-//			return &mMobEffects[effect.getId()];
-//		}
-//	}
-//
-//	return nullptr;
-//}
-//
-//bool Mob::hasAnyEffects() {
-//	for (auto&& effect : mMobEffects) {
-//		if (effect != MobEffectInstance::NO_EFFECT) {
-//			return true;
-//		}
-//	}
-//	return false;
-//}
-//
-//const MobEffectInstanceList& Mob::getAllEffects() {
-//	return mMobEffects;
-//}
-//
-//void Mob::registerAttributes() {
-//	/*
-//	adors
-//	This is going to need to be moved into some sort of base mob.shared definition
-//	before we remove it here.
-//	*/
-//	auto& health = mAttributes->registerAttribute(SharedAttributes::HEALTH);
-//	health.setDelegate(make_unique<HealthAttributeDelegate>(health, this));
-//	health.setDefaultValue(20.0f, enum_cast(AttributeOperands::OPERAND_CURRENT));
-//
-//	mAttributes->registerAttribute(SharedAttributes::ABSORPTION).setMaxValue(16.0f);
-//	mAttributes->registerAttribute(SharedAttributes::KNOCKBACK_RESISTANCE).setDefaultValue(1.0f, enum_cast(AttributeOperands::OPERAND_MAX));
-//	mAttributes->registerAttribute(SharedAttributes::MOVEMENT_SPEED).setDefaultValue(0.7f, enum_cast(AttributeOperands::OPERAND_CURRENT));
-//	mAttributes->registerAttribute(SharedAttributes::LUCK).setRange(-1024.0f, 0.0f, 1024.0f);
-//	mAttributes->registerAttribute(SharedAttributes::FALL_DAMAGE).setDefaultValue(1.0f, enum_cast(AttributeOperands::OPERAND_CURRENT));
-//	mAttributes->registerAttribute(SharedAttributes::FOLLOW_RANGE).setRange(0.0f, 16.0f, 2048.0f);
-//}
-//
-//void Mob::teleportTo(const Vec3& pos, int cause /*= 0*/, int sourceEntityType /*= enum_cast(EntityType::Undefined)*/) {
-//	Entity::teleportTo(pos);
-//	mInterpolation.stop();
-//}
-//
-//AttributeInstance* Mob::getMutableAttribute(const Attribute& attribute) {
-//	return mAttributes->getMutableInstance((attribute));
-//}
-//
-//const AttributeInstance& Mob::getAttribute(const Attribute& attribute) const {
-//	return mAttributes->getInstance(attribute);
-//}
-//
-//bool Mob::hasAttributeBuff(AttributeBuffType type) const {
-//	for (auto& instance : * mAttributes) {
-//		for (auto& buff : instance.second.getBuffs()) {
-//			if (buff.getType() == type) {
-//				return true;
-//			}
-//		}
-//	}
-//
-//	return false;
-//}
-//
-//int Mob::getHealth() const {
-//	return (int)getAttribute(SharedAttributes::HEALTH).getCurrentValue();
-//}
-//
-//int Mob::getMaxHealth() const {
-//	return (int)getAttribute(SharedAttributes::HEALTH).getMaxValue();
-//}
-//
-//void Mob::serializationSetHealth(int newHealth) {
-//	getMutableAttribute(SharedAttributes::HEALTH)->serializationSetValue((float)newHealth, enum_cast(AttributeOperands::OPERAND_CURRENT));
-//}
-//
-//void Mob::setCanPickUpLoot(bool canPickUp) {
-//	mCanPickUpLoot = canPickUp;
-//}
-//
-//bool Mob::canPickickUpLoot() const {
-//	return mCanPickUpLoot;
-//}
-//
-//void Mob::tickAttributes() {
-//	for (auto& attribute : *mAttributes) {
-//		attribute.second.tick();
-//	}
-//}
+void Mob::registerAttributes() {
+	auto& health = mAttributes->registerAttribute(SharedAttributes::HEALTH);
+	health.setDelegate(make_shared<HealthAttributeDelegate>(health, this));
+	health.setRange(0.0f, 20.0f, 20.0f);
+
+	mAttributes->registerAttribute(SharedAttributes::ABSORPTION).setMaxValue(16.0f);
+	mAttributes->registerAttribute(SharedAttributes::KNOCKBACK_RESISTANCE).setDefaultValue(1.0f, enum_cast(AttributeOperands::OPERAND_MAX));
+	mAttributes->registerAttribute(SharedAttributes::MOVEMENT_SPEED).setDefaultValue(0.7f, enum_cast(AttributeOperands::OPERAND_CURRENT));
+	mAttributes->registerAttribute(SharedAttributes::LUCK).setRange(-1024.0f, 0.0f, 1024.0f);
+	mAttributes->registerAttribute(SharedAttributes::FALL_DAMAGE).setDefaultValue(1.0f, enum_cast(AttributeOperands::OPERAND_CURRENT));
+	mAttributes->registerAttribute(SharedAttributes::FOLLOW_RANGE).setRange(0.0f, 16.0f, 2048.0f);
+}
+
+AttributeInstance* Mob::getMutableAttribute(const Attribute& attribute) {
+	return mAttributes->getMutableInstance(attribute);
+}
+
+const AttributeInstance& Mob::getAttribute(const Attribute& attribute) const {
+	return mAttributes->getInstance(attribute);
+}
+
+bool Mob::hasAttributeBuff(AttributeBuffType type) const {
+	for (auto& instance : *mAttributes) {
+		for (auto& buff : instance.second.getBuffs()) {
+			if (buff.mType == type) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+BaseAttributeMap* Mob::getAttributes() {
+	return mAttributes.get();
+}
+
+int Mob::getHealth() const {
+	return (int)getAttribute(SharedAttributes::HEALTH).getCurrentValue();
+}
+
+int Mob::getMaxHealth() const {
+	return (int)getAttribute(SharedAttributes::HEALTH).getMaxValue();
+}
+
+void Mob::serializationSetHealth(int newHealth) {
+	getMutableAttribute(SharedAttributes::HEALTH)->serializationSetValue((float)newHealth, enum_cast(AttributeOperands::OPERAND_CURRENT));
+}
+
+void Mob::tickAttributes() {
+	for (auto& attribute : *mAttributes) {
+		attribute.second.tick();
+	}
+}
 //
 //void Mob::buildDebugInfo(std::string& out) const {
 //	if (mCurrentDescription) {
@@ -2918,21 +2679,19 @@ Mob::Mob(Level& level) : Entity(level) {
 //	return getLevel().isClientSide();
 //}
 //
-//void Mob::_addSpeedBonus(const mce::UUID & attributeID, const std::string& attributeName, float speedModifier) {
-//
-//	// Make sure we don't apply the same bonus twice
-//	_removeSpeedBonus(attributeID);
-//
-//	AttributeInstance* speedAttribute = getMutableAttribute(SharedAttributes::MOVEMENT_SPEED);
-//	speedAttribute->addModifier(std::make_shared<AttributeModifier>(attributeID, attributeName, speedModifier,
-//		enum_cast(AttributeModifierOperation::OPERATION_MULTIPLY_TOTAL),
-//		enum_cast(AttributeOperands::OPERAND_CURRENT)));
-//}
-//
-//void Mob::_removeSpeedBonus(const mce::UUID & attributeID) {
-//	AttributeInstance* speedAttribute = getMutableAttribute(SharedAttributes::MOVEMENT_SPEED);
-//	speedAttribute->removeModifier(attributeID);
-//}
+void Mob::_addSpeedBonus(const mce::UUID& attributeID, const std::string& attributeName, float speedModifier) {
+	_removeSpeedBonus(attributeID);
+
+	AttributeInstance* speedAttribute = getMutableAttribute(SharedAttributes::MOVEMENT_SPEED);
+	speedAttribute->addModifier(std::make_shared<AttributeModifier>(attributeID, attributeName, speedModifier,
+		enum_cast(AttributeModifierOperation::OPERATION_MULTIPLY_TOTAL),
+		enum_cast(AttributeOperands::OPERAND_CURRENT)));
+}
+
+void Mob::_removeSpeedBonus(const mce::UUID& attributeID) {
+	AttributeInstance* speedAttribute = getMutableAttribute(SharedAttributes::MOVEMENT_SPEED);
+	speedAttribute->removeModifier(attributeID);
+}
 //
 //float Mob::getFlightSpeed() {
 //	return mFlyingSpeed;

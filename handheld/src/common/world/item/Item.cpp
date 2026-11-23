@@ -110,13 +110,13 @@
 // #include "world/item/EndCrystalItem.h"
 // #include "world/item/PortfolioBookItem.h"
 // 
-// #include "world/item/FoodItemComponent.h"
+#include "world/item/FoodItemComponent.h"
 // #include "world/item/SeedItemComponent.h"
 // #include "world/item/CameraItemComponent.h"
 // #include "platform/AppPlatform.h"
 // #include "world/item/MapItem.h"
 // #include "world/item/EmptyMapItem.h"
-// #include "world/item/ChorusFruit.h"
+#include "world/item/ChorusFruit.h"
 // #include "world/item/LeadItem.h"
 // #include "world/item/ChalkboardItem.h"
 // #include "world/level/block/entity/ChalkboardBlockEntity.h"
@@ -485,7 +485,10 @@ bool Item::initServer(Json::Value & data)
 		m_maxStackSize = data["max_stack_size"].asInt(MAX_STACK_SIZE);
 
 		// Register Components
-// 		mFoodComponent = registerComponent<FoodItemComponent>(*this, data, "food");
+		mFoodComponent = registerComponent<FoodItemComponent>(*this, data, "food");
+		if (mFoodComponent && mUseAnim == UseAnimation::None) {
+			mUseAnim = UseAnimation::Eat;
+		}
 // 		mSeedComponent = registerComponent<SeedItemComponent>(*this, data, "seed");
 // 		mCameraComponent = registerComponent<CameraItemComponent>(*this, data, "camera");
 	}
@@ -517,9 +520,15 @@ bool Item::initClient(Json::Value & data, Json::Value & offsetsList)
 		}
 
 		std::string useAnimStr = data["use_animation"].asString("");
-// 		if (!useAnimStr.empty()) {
-// 			mUseAnim = UseAnimationFromString(useAnimStr);
-// 		}
+		if (!useAnimStr.empty()) {
+			std::string lower = Util::toLower(useAnimStr);
+			if (lower == "eat") mUseAnim = UseAnimation::Eat;
+			else if (lower == "drink") mUseAnim = UseAnimation::Drink;
+			else if (lower == "block") mUseAnim = UseAnimation::Block;
+			else if (lower == "bow") mUseAnim = UseAnimation::Bow;
+			else if (lower == "camera") mUseAnim = UseAnimation::Camera;
+			else mUseAnim = UseAnimation::None;
+		}
 
 		// Color Format
 		std::string color_format = data["hover_text_color"].asString("");
@@ -644,7 +653,7 @@ void Item::registerItems() {
 // 	Item::mPickAxe_diamond = &registerItem<PickaxeItem>("diamond_pickaxe", 22, Tier::DIAMOND);
 // 	Item::mHatchet_diamond = &registerItem<HatchetItem>("diamond_axe", 23, Tier::DIAMOND);
 // 	Item::mStick = &registerItem<Item>("stick", 24).setHandEquipped();
-// 	Item::mBowl = &registerItem<Item>("bowl", 25);
+	Item::mBowl = &registerItem<Item>("bowl", 25);
 // 
 // 	Item::mSword_gold = &registerItem<WeaponItem>("golden_sword", 27, Tier::GOLD);
 // 	Item::mShovel_gold = &registerItem<ShovelItem>("golden_shovel", 28, Tier::GOLD);
@@ -796,8 +805,8 @@ void Item::registerItems() {
 // 	Item::mDoor_jungle = &registerItem<DoorItem>("jungle_door", 173, Material::getMaterial(MaterialType::Wood), DoorBlock::JUNGLE);
 // 	Item::mDoor_acacia = &registerItem<DoorItem>("acacia_door", 174, Material::getMaterial(MaterialType::Wood), DoorBlock::ACACIA);
 // 	Item::mDoor_darkoak = &registerItem<DoorItem>("dark_oak_door", 175, Material::getMaterial(MaterialType::Wood), DoorBlock::DARKOAK);
-// 	Item::mChorusFruit = &registerItem<ChorusFruit>("chorus_fruit", 176);
-// 	Item::mChorusFruitPopped = &registerItem<Item>("chorus_fruit_popped", 177);
+	Item::mChorusFruit = &registerItem<ChorusFruit>("chorus_fruit", 176);
+	Item::mChorusFruitPopped = &registerItem<Item>("chorus_fruit_popped", 177);
 // 
 // 	Item::mDragon_breath = &registerItem<Item>("dragon_breath", 181);
 // 	Item::mSplash_potion = &registerItem<SplashPotionItem>("splash_potion", 182);
@@ -821,34 +830,53 @@ void Item::registerItems() {
 	initCreativeItems();
 }
 
-// void Item::initServerData(ResourcePackManager& loader) {
-// 	// ------------------------------------------------------------------------------
-// 	// Load Items from Json
-// 	// ------------------------------------------------------------------------------
-// 	Json::Value list;
-// 	Json::Reader reader;
-// 	std::string nameId;
-// 	std::string fileContent;
-// 
-// 	// If we have a server file, then load it here
-// 	if (loader.load(ResourceLocation("items.json", ResourceFileSystem::ServerPackage), fileContent)) {
-// 		if (reader.parse(fileContent, list)) {
-// 			Json::Value root = list["items"];
-// 
-// 			if (!root.isNull()) {
-// 				for (int itemIndex = 0; itemIndex < MAX_ITEMS; ++itemIndex) {
-// 					if (mItems[itemIndex]) {
-// 						Item* item = mItems[itemIndex];
-// 						Json::Value itemJson = root[item->getRawNameId()];
-// 						if (!itemJson.isNull() && itemJson.isObject()) {
-// 							item->initServer(itemJson);
-// 						}
-// 					}
-// 				}
-// 			}
-// 		}
-// 	}
-// }
+void Item::initServerData() {
+	static bool sServerDataLoaded = false;
+	if (sServerDataLoaded) {
+		return;
+	}
+
+	std::string fileContent;
+	bool loaded = Resource::load(ResourceLocation("items.json", ResourceFileSystem::ServerPackage), fileContent);
+	if (!loaded) {
+		const char* fallbackPaths[] = {
+			"./behavior_packs/vanilla/items.json",
+			"./assets/behavior_packs/vanilla/items.json",
+			"../assets/behavior_packs/vanilla/items.json"
+		};
+		for (const char* path : fallbackPaths) {
+			std::ifstream ifs(path);
+			if (ifs.is_open()) {
+				std::stringstream ss;
+				ss << ifs.rdbuf();
+				fileContent = ss.str();
+				loaded = true;
+				break;
+			}
+		}
+	}
+
+	if (!loaded) {
+		return;
+	}
+
+	Json::Value list;
+	Json::Reader reader;
+	if (reader.parse(fileContent, list)) {
+		Json::Value root = list["items"];
+		if (!root.isNull() && root.isObject()) {
+			for (int itemIndex = 0; itemIndex < MAX_ITEMS; ++itemIndex) {
+				if (Item* item = mItems[itemIndex]) {
+					Json::Value itemJson = root[item->getRawNameId()];
+					if (!itemJson.isNull() && itemJson.isObject()) {
+						item->initServer(itemJson);
+					}
+				}
+			}
+			sServerDataLoaded = true;
+		}
+	}
+}
 
 void Item::initClientData() {
 
@@ -1804,7 +1832,7 @@ Item::Item(const std::string & nameId, short id)
 	, mRequiresWorldBuilder(false)
 	, mMaxUseDuration(0)
 	, mBlockId(BlockID::AIR)
-// 	, mUseAnim(UseAnimation::None)
+	, mUseAnim(UseAnimation::None)
 	, mHoverTextColorFormat(nullptr)
 	, mExplodable(true)
 	, mUsesRenderingAdjustment(false)
@@ -1897,39 +1925,17 @@ Item& Item::setIsMirroredArt(bool val) {
 }
 
 ItemInstance& Item::use(ItemInstance& itemInstance, Player& player) {
-	
-// 	if (mFoodComponent) {
-// 		mFoodComponent->use(itemInstance, player);
-// 	}
-// 	
-// 	if (mCameraComponent) {
-// 		mCameraComponent->use(itemInstance, player);
-// 	}
-// 
-// 	//rideable component check
-// 	if (player.isRiding() && player.mRiding->getBoostableComponent()) {
-// 		player.mRiding->getBoostableComponent()->onItemInteract(itemInstance, player);
-// 	}
-// 	itemInstance.startCoolDown(&player);
+	if (mFoodComponent) {
+		mFoodComponent->use(itemInstance, player);
+	}
 	return itemInstance;
 }
 
 bool Item::useOn(ItemInstance& instance, Entity& entity, int x, int y, int z, FacingID face, float clickX, float clickY, float clickZ) {
-
 	bool ret = false;
-
-// 	if (mFoodComponent && mFoodComponent->useOn(instance, entity, BlockPos(x, y, z), face, Vec3(clickX, clickY, clickZ))) {
-// 		ret = true;
-// 	}
-// 
-// 	if (mSeedComponent && mSeedComponent->useOn(instance, entity, BlockPos(x, y, z), face, Vec3(clickX, clickY, clickZ))) {
-// 		ret = true;
-// 	}
-// 	
-// 	if (mCameraComponent && mCameraComponent->useOn(instance, entity, BlockPos(x, y, z), face, Vec3(clickX, clickY, clickZ))) {
-// 		ret = true;
-// 	}
-
+	if (mFoodComponent && mFoodComponent->useOn(instance, entity, BlockPos(x, y, z), face, Vec3(clickX, clickY, clickZ))) {
+		ret = true;
+	}
 	return ret;
 }
 
@@ -1938,12 +1944,11 @@ bool Item::dispense(BlockSource& region, Container& container, int slot, const V
 }
 
 void Item::useTimeDepleted(ItemInstance* inoutInstance, Level* level, Player* player) {
-	
-	// Its possible that useTimeDepleted() will return a new item that we need to instantiate.
-// 	if (mFoodComponent) {
-// 		if (Item* newItem = mFoodComponent->useTimeDepleted(*inoutInstance, *player, *level))
-// 			*inoutInstance = ItemInstance(newItem);
-// 	}
+	if (mFoodComponent && inoutInstance && level && player) {
+		if (Item* newItem = mFoodComponent->useTimeDepleted(*inoutInstance, *player, *level)) {
+			*inoutInstance = ItemInstance(newItem);
+		}
+	}
 }
 
 void Item::releaseUsing(ItemInstance* itemInstance, Player* player, int durationLeft) {

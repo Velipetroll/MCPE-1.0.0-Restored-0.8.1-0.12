@@ -17,14 +17,12 @@ class JumpControl;
 class BodyControl;
 class PathNavigation;
 class Sensing;
+class EntityDamageSource;
+class MobEffectInstance;
+class MobEffect;
 class BaseAttributeMap;
 class AttributeInstance;
 class Attribute;
-class MobEffectInstance;
-class MobEffect;
-class MovementInterpolator;
-class LootTable;
-class Village;
 
 enum class AttributeBuffType;
 
@@ -38,7 +36,98 @@ public:
 //	virtual void initializeComponents(InitializationMethod method, const VariantParameterList &params) override;
 //	virtual void reloadHardcodedClient(InitializationMethod method, const VariantParameterList &params) override;
 //
-//	static const int INVULNERABLE_DURATION = 20;
+	static const int INVULNERABLE_DURATION = 20;
+
+	int mLastHealth = 0;
+
+	int mHurtTime = 0;
+	int mHurtDuration = 0;
+	float mHurtDir = 0.f;
+
+	int mDeathTime = 0;
+	float mOTilt = 0.f, mTilt = 0.f;
+
+	virtual ~Mob();
+
+	void resetAttributes();
+	virtual void die(const EntityDamageSource& source);
+
+	bool isAlive() const override;
+	virtual bool isSprinting() const;
+	virtual void setSprinting(bool value);
+
+	void setYya(float yya);
+	virtual float getSpeed() const;
+	virtual void setSpeed(float speed);
+	float getFlyingSpeed() const { return mFlyingSpeed; }
+	void setJumping(bool jump);
+	virtual float getJumpPower() const;
+
+	void normalTick() override;
+	void baseTick() override;
+
+	virtual void heal(int heal);
+	void healEffects(int amountHealed);
+
+	virtual bool hurtEffects(const EntityDamageSource& source, int damage, bool knock = true, bool ignite = false);
+
+	virtual void actuallyHurt(int dmg, const EntityDamageSource* source = nullptr, bool bypassArmor = false);
+	virtual bool isInvertedHealAndHarm() const;
+
+	virtual void travel(float xa, float ya);
+	virtual void aiStep();
+
+	virtual AttributeInstance* getMutableAttribute(const Attribute& attribute);
+	virtual const AttributeInstance& getAttribute(const Attribute& attribute) const;
+
+	bool hasAttributeBuff(AttributeBuffType) const;
+	BaseAttributeMap* getAttributes();
+
+	void addEffect(const MobEffectInstance& effect);
+	void removeEffect(int effectId);
+	void removeAllEffects();
+	void removeEffectNoUpdate(int effectId);
+	int getActiveEffectCount() const;
+	virtual bool canBeAffected(const MobEffectInstance& effect);
+	bool hasEffect(const MobEffect& effect) const;
+	const MobEffectInstance* getEffect(const MobEffect& effect) const;
+	bool hasAnyEffects();
+	const MobEffectInstanceList& getAllEffects();
+
+	int getHealth() const;
+	int getMaxHealth() const;
+	void serializationSetHealth(int newHealth);
+
+protected:
+	bool _hurt(const EntityDamageSource& source, int damage, bool knock, bool ignite) override;
+	virtual void jumpFromGround();
+
+	void tickAttributes();
+	void tickEffects();
+	virtual void onEffectAdded(MobEffectInstance& effect);
+	virtual void onEffectUpdated(const MobEffectInstance& effect);
+	virtual void onEffectRemoved(MobEffectInstance& effect);
+	void registerAttributes();
+
+	void _addSpeedBonus(const mce::UUID& attributeID, const std::string& attributeName, float speedModifier);
+	void _removeSpeedBonus(const mce::UUID& attributeID);
+	void _doSprintParticleEffect();
+
+	std::unique_ptr<BaseAttributeMap> mAttributes;
+	MobEffectInstanceList mMobEffects;
+
+	float mFlyingSpeed = 0.02f;
+	int mLastHurt = 0;
+	bool mJumping = false;
+	float mSpeed = 0;
+	float mYya = 0;
+	bool mDead = false;
+	bool mEffectsDirty = false;
+
+private:
+	void _updateSprintingState();
+
+public:
 //
 //	//	@note: Find a better way to handle these public variables as they're touched and looked at by other classes
 //	//	but having them with both a getter and setter seems a waste since it just results in the same as them being

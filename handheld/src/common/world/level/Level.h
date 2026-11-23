@@ -322,7 +322,9 @@ public:
 	void saveBiomeData();
 	void saveDirtyChunks(bool sync = false);
 
-	//Particle* addParticle(ParticleType id, const Vec3& pos, const Vec3& dir, int data = 0);
+	using ParticleCallback = void(*)(ParticleType id, const Vec3& pos, const Vec3& dir, int data);
+	static void setParticleCallback(ParticleCallback cb);
+	Particle* addParticle(ParticleType id, const Vec3& pos, const Vec3& dir, int data = 0);
 
 	//void playSound(LevelSoundEvent type, Vec3 const& pos, int blockID = -1, EntityType entityType = EntityType::Undefined, bool isBabyMob = false, bool isGlobal = false);
 	// Restrict sound to be played only if the sound is from the same dimension that the local player is in 

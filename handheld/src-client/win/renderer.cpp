@@ -34,7 +34,18 @@
 #include "platform/threading/WorkerPool.h"
 #include "world/phys/HitResult.h"
 #include "world/Facing.h"
+#include "world/attribute/AttributeInstance.h"
+#include "world/attribute/SharedAttributes.h"
+#include "world/effect/MobEffect.h"
+#include "world/entity/EntityDamageSource.h"
+#include "world/entity/ParticleType.h"
+#include "world/entity/player/Player.h"
+#include "world/food/FoodConstants.h"
+#include "world/item/FoodItemComponent.h"
 #include "world/item/Item.h"
+#include "world/item/ItemInstance.h"
+#include "world/item/UseAnim.h"
+#include "world/level/block/CakeBlock.h"
 #include "SoundEngine.h"
 #include "ParticleSystem.h"
 #include "ProjectileTntSystem.h"
@@ -258,7 +269,11 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 			if (commandContext.level) {
 				commandContext.level->getLevelData().setGameType(gGuiContext.isCreative ? GameType::Creative : GameType::Survival);
 			}
-			if (!gGuiContext.isCreative && gGuiContext.health <= 0) {
+			if (gGuiContext.localPlayer) {
+				gGuiContext.localPlayer->setPlayerGameType(gGuiContext.isCreative ? GameType::Creative : GameType::Survival);
+			}
+			const int curHealth = gGuiContext.localPlayer ? gGuiContext.localPlayer->getHealth() : gGuiContext.health;
+			if (!gGuiContext.isCreative && curHealth <= 0) {
 				gGuiContext.resetSurvivalStats();
 			}
 			gGuiContext.addChatMessage(gGuiContext.isCreative ? "Mode: Creative (Double-Space to Fly)" : "Mode: Survival");
@@ -314,7 +329,6 @@ struct FallingBlockEnt {
 	bool creative;
 };
 static std::vector<FallingBlockEnt> sFallingBlocks;
-static float gItemUseSlowTimer = 0.0f;
 
 mce::TextureGroup texgroup;
 
@@ -385,7 +399,16 @@ public:
 	bool mWasInWater = false;
 	bool mWasJumpHeld = false;
 	int mFlyToggleTicks = 0;
+	int mSprintTriggerTime = 0;
+	float mLastForwardInput = 0.0f;
+	bool mWasSneaking = false;
+	int mAutoJumpTime = 0;
+	float mFov = 1.0f;
+	float mFovOld = 1.0f;
+	int mUsingSlot = -1;
+	int mEatSoundTicks = 0;
 	int ridingMinecartId = 0;
+	std::unique_ptr<Player> mPlayer;
 
 	void triggerSwing() {
 		mSwingProgress = 0.001f;
@@ -424,8 +447,97 @@ public:
 
 	void setWorld(Level* level, Dimension* dim)
 	{
+		gGuiContext.localPlayer = nullptr;
+		mPlayer.reset();
+		Level::setParticleCallback(nullptr);
+		mUsingSlot = -1;
+		mEatSoundTicks = 0;
+		mSprintTriggerTime = 0;
+		mLastForwardInput = 0.0f;
+		mWasSneaking = false;
+		mAutoJumpTime = 0;
+		mFov = 1.0f;
+		mFovOld = 1.0f;
+
 		mLevel = level;
 		mRegion = dim ? &dim->getBlockSourceDEPRECATEDUSEPLAYERREGIONINSTEAD() : nullptr;
+
+		if (mLevel && mRegion) {
+			Level::setParticleCallback([](ParticleType type, const Vec3& pos, const Vec3& dir, int data) {
+				if (type != ParticleType::Terrain) return;
+				auto& ps = ParticleSystem::getParticles();
+				if (ps.size() > 800) return;
+				FullBlock fb = FullBlock::fromInt(data);
+				const Block* blk = fb.id > 0 ? Block::mBlocks[fb.id] : nullptr;
+				if (!blk) return;
+				ParticleSystem::Particle p;
+				ParticleSystem::initParticleBase(p, pos.x, pos.y, pos.z, 0.0f, 0.0f, 0.0f);
+				p.vx = dir.x + ParticleSystem::randSigned() * 0.05f;
+				p.vy = dir.y;
+				p.vz = dir.z + ParticleSystem::randSigned() * 0.05f;
+				p.type = ParticleSystem::ParticleType::Terrain;
+				p.scale *= 0.5f;
+				p.initScale = p.scale;
+				p.gravity = 1.0f;
+				if (const BlockGraphics* bg = (fb.id > 0 && fb.id < 256) ? BlockGraphics::mBlocks[fb.id] : nullptr) {
+					const TextureUVCoordinateSet& uv = bg->getTexture(2, fb.data);
+					float du = (uv._u1 - uv._u0) * 0.25f;
+					float dv = (uv._v1 - uv._v0) * 0.25f;
+					p.u0 = uv._u0 + ParticleSystem::rand01() * 3.0f * du;
+					p.v0 = uv._v0 + ParticleSystem::rand01() * 3.0f * dv;
+					p.u1 = p.u0 + du;
+					p.v1 = p.v0 + dv;
+					p.hasTexture = true;
+				}
+				float shade = 0.65f + ParticleSystem::rand01() * 0.35f;
+				p.r = shade;
+				p.g = shade;
+				p.b = shade;
+				p.a = 1.0f;
+				ps.push_back(p);
+			});
+
+			mPlayer = std::make_unique<Player>(*mLevel, gGuiContext.isCreative ? GameType::Creative : GameType::Survival);
+			mPlayer->setRegion(*mRegion);
+			mPlayer->mOnCompleteUsingItem = [this](const ItemInstance& completedItem) {
+				if (mUsingSlot >= 0 && mUsingSlot < 9) {
+					ItemInstance& slot = gGuiContext.inventorySlots[static_cast<size_t>(mUsingSlot)];
+					if (completedItem.isNull() || completedItem.getStackSize() <= 0) {
+						slot.setNull();
+					} else {
+						slot = completedItem;
+					}
+				}
+				SoundEngine::play(SoundEngine::SND_EAT, 0.8f);
+				if (mPlayer) {
+					if (std::abs(mPlayer->mPos.x - mCurrPos.x) > 0.01f ||
+					    std::abs(mPlayer->mPos.y - mCurrPos.y) > 0.01f ||
+					    std::abs(mPlayer->mPos.z - mCurrPos.z) > 0.01f) {
+						teleportTo(mPlayer->mPos.x, mPlayer->mPos.y, mPlayer->mPos.z);
+					}
+				}
+				mUsingSlot = -1;
+			};
+			gGuiContext.localPlayer = mPlayer.get();
+		}
+	}
+
+	void syncPlayerTransform()
+	{
+		if (!mPlayer) return;
+		if (mRegion) mPlayer->mRegion = mRegion;
+		mPlayer->mPos = Vec3(mCurrPos.x, mCurrPos.y, mCurrPos.z);
+		mPlayer->mPosPrev = Vec3(mPrevPos.x, mPrevPos.y, mPrevPos.z);
+		mPlayer->mBB = mBB;
+		mPlayer->mHeightOffset = mHeightOffset;
+		mPlayer->mOnGround = mOnGround;
+		mPlayer->mWasInWater = mWasInWater;
+		mPlayer->mHorizontalCollision = mHorizontalCollision;
+		mPlayer->mVerticalCollision = mVerticalCollision;
+		mPlayer->mRot.y = static_cast<float>(yaw - 90.0);
+		mPlayer->mRot.x = static_cast<float>(pitch);
+		mPlayer->mPosDelta = mPosDelta;
+		mPlayer->mAbilities.mFlying = mIsFlying;
 	}
 
 	void setPositionAndLook(float x, float feetY, float z, double yawIn, double pitchIn)
@@ -443,6 +555,12 @@ public:
 		mWasInWater = false;
 		mWasJumpHeld = false;
 		mFlyToggleTicks = 0;
+		mSprintTriggerTime = 0;
+		mLastForwardInput = 0.0f;
+		mWasSneaking = false;
+		mAutoJumpTime = 0;
+		mUsingSlot = -1;
+		mEatSoundTicks = 0;
 		ridingMinecartId = 0;
 		mTickAccum = 0.0f;
 		mPosDelta = Vec3(0.0f, 0.0f, 0.0f);
@@ -464,6 +582,11 @@ public:
 		direction.z = sin(glm::radians(yaw));
 		cameraMoveFront = glm::normalize(direction);
 		firstMouse = true;
+		if (mPlayer) {
+			mPlayer->setSprinting(false);
+			mPlayer->stopUsingItem();
+			syncPlayerTransform();
+		}
 	}
 
 	void spawnAtSurface()
@@ -485,6 +608,12 @@ public:
 		mWasInWater = false;
 		mWasJumpHeld = false;
 		mFlyToggleTicks = 0;
+		mSprintTriggerTime = 0;
+		mLastForwardInput = 0.0f;
+		mWasSneaking = false;
+		mAutoJumpTime = 0;
+		mUsingSlot = -1;
+		mEatSoundTicks = 0;
 		ridingMinecartId = 0;
 		mTickAccum = 0.0f;
 		mPosDelta = Vec3(0.0f, 0.0f, 0.0f);
@@ -492,6 +621,11 @@ public:
 		mOnGround = false;
 		mIsFlying = false;
 		mSlideOffset = Vec3(0.0f, 0.0f, 0.0f);
+		if (mPlayer) {
+			mPlayer->setSprinting(false);
+			mPlayer->stopUsingItem();
+			syncPlayerTransform();
+		}
 	}
 
 	void teleportTo(float x, float eyeY, float z)
@@ -505,6 +639,7 @@ public:
 		mTickAccum = 0.0f;
 		mPosDelta = Vec3(0.0f, 0.0f, 0.0f);
 		mFallDistance = 0.0f;
+		syncPlayerTransform();
 	}
 
 	// Exact 1:1 MCPE 0.8.1 Entity::isInWater() + Level::checkAndHandleWater() (Entity.cpp L1167-1189, Level.cpp L173-234)
@@ -669,23 +804,65 @@ public:
 
 	void stepPhysicsTick()
 	{
+		++gGuiContext.hudTickCount;
 		mPrevPos = mCurrPos;
 		mPrevFeetY = mCurrFeetY;
 		mPrevWalkDist = mCurrWalkDist;
 		mPrevSmoothBob = mCurrSmoothBob;
 		mPrevTilt = mCurrTilt;
 		if (mHurtTime > 0) --mHurtTime;
-		if (gGuiContext.health <= 0) ++mDeathTime;
+		const int curHealth = mPlayer ? mPlayer->getHealth() : gGuiContext.health;
+		if (curHealth <= 0) ++mDeathTime;
 		else mDeathTime = 0;
 		mPrevWalkAnimPos = mCurrWalkAnimPos;
 		mPrevWalkAnimSpeed = mCurrWalkAnimSpeed;
 		mPrevBodyYaw = mCurrBodyYaw;
+
+		if (mLevel) {
+			mLevel->getLevelData().setGameDifficulty(static_cast<Difficulty>(gGuiOptions.difficulty));
+		}
+		if (mPlayer) {
+			syncPlayerTransform();
+			if (mPlayer->isUsingItem()) {
+				int heldSlotIdx = std::max(0, std::min(8, gGuiContext.selectedHotbarSlot));
+				if (mUsingSlot >= 0 && heldSlotIdx != mUsingSlot) {
+					mPlayer->stopUsingItem();
+					mUsingSlot = -1;
+					mEatSoundTicks = 0;
+				} else if (const ItemInstance* usingItem = mPlayer->getItemInUse()) {
+					if (usingItem->getUseAnimation() == UseAnimation::Eat && mPlayer->getTicksUsingItem() > 0) {
+						if ((mEatSoundTicks % 4) == 0) {
+							SoundEngine::play(SoundEngine::SND_EAT, 0.5f, 0.9f + ParticleSystem::rand01() * 0.2f);
+						}
+						++mEatSoundTicks;
+					} else {
+						mEatSoundTicks = 0;
+					}
+				}
+			} else {
+				mEatSoundTicks = 0;
+				mUsingSlot = -1;
+			}
+			const int prevHurt = mPlayer->mHurtTime;
+			mPlayer->normalTick();
+			gGuiContext.health = mPlayer->getHealth();
+			if (mPlayer->mHurtTime > prevHurt) {
+				mHurtTime = mPlayer->mHurtTime;
+				mHurtDuration = mPlayer->mHurtDuration;
+				mHurtDir = mPlayer->mHurtDir;
+				SoundEngine::play(SoundEngine::SND_HURT, 0.8f);
+			}
+			syncPlayerTransform();
+		}
 
 		if (ridingMinecartId != 0) {
 			MinecartSystem::MinecartEntity* rmc = MinecartSystem::findById(ridingMinecartId);
 			if (!rmc) {
 				ridingMinecartId = 0;
 			} else {
+				if (mPlayer && mPlayer->isSprinting()) {
+					mPlayer->setSprinting(false);
+				}
 				bool prevJumpHeld = mWasJumpHeld;
 				bool jumpHeld = (gGuiContext.currentScreen == nullptr) && glinput.KeyDown(GLFW_KEY_SPACE);
 				mWasJumpHeld = jumpHeld;
@@ -695,6 +872,8 @@ public:
 					rmc->riderForward = false;
 					ridingMinecartId = 0;
 					teleportTo(rmc->posX, (rmc->posY + 0.35f) + mHeightOffset, rmc->posZ);
+					mFovOld = mFov;
+					mFov += ((mPlayer ? mPlayer->getFieldOfViewModifier(false) : 1.0f) - mFov) * 0.5f;
 					return;
 				}
 				float moveForward = (gGuiContext.currentScreen == nullptr && glinput.KeyDown(GLFW_KEY_W)) ? 1.0f : 0.0f;
@@ -738,6 +917,9 @@ public:
 				mCurrBodyYaw = newBodyYaw;
 				while (mCurrBodyYaw - mPrevBodyYaw < -180.0f) mPrevBodyYaw -= 360.0f;
 				while (mCurrBodyYaw - mPrevBodyYaw >= 180.0f) mPrevBodyYaw += 360.0f;
+				syncPlayerTransform();
+				mFovOld = mFov;
+				mFov += ((mPlayer ? mPlayer->getFieldOfViewModifier(false) : 1.0f) - mFov) * 0.5f;
 				return;
 			}
 		}
@@ -750,8 +932,10 @@ public:
 			mWasInWater = false;
 		}
 
-		// LocalPlayer::aiStep() (LocalPlayer.cpp L400-458)
+		// LocalPlayer::aiStep() (1.0.2.1 sprinting + flight)
 		if (mFlyToggleTicks > 0) --mFlyToggleTicks;
+		if (mSprintTriggerTime > 0) --mSprintTriggerTime;
+		if (mAutoJumpTime > 0) --mAutoJumpTime;
 		bool prevJumpHeld = mWasJumpHeld;
 		bool jumpHeld = (gGuiContext.currentScreen == nullptr) && glinput.KeyDown(GLFW_KEY_SPACE);
 		mWasJumpHeld = jumpHeld;
@@ -770,15 +954,16 @@ public:
 			if (glinput.KeyDown(GLFW_KEY_D)) moveStrafe += 1.0f;
 		}
 
-		// KeyboardInput::tick() (KeyboardInput.cpp L38-41): sneaking multiplies strafeInput & forwardInput by 0.3f
-		if (sneaking) {
+		// MoveInputHandler::tick(): sneaking multiplies strafe & forward by 0.3f when not flying
+		if (sneaking && !(mPlayer && mPlayer->mAbilities.isFlying())) {
 			moveStrafe *= 0.3f;
 			moveForward *= 0.3f;
 		}
 
-		// LocalPlayer::aiStep() L413-447: fly toggle & flying vertical velocity
+		// LocalPlayer::aiStep(): fly toggle & flying vertical velocity
 		float flyIdleMod = 1.0f;
-		if (gGuiContext.isCreative) {
+		const bool canFly = mPlayer ? mPlayer->mAbilities.mMayfly : gGuiContext.isCreative;
+		if (canFly) {
 			if (!prevJumpHeld && jumpHeld) {
 				if (mFlyToggleTicks > 0) {
 					mIsFlying = !mIsFlying;
@@ -802,26 +987,73 @@ public:
 		} else {
 			mIsFlying = false;
 		}
+		if (mPlayer) {
+			mPlayer->mAbilities.mFlying = mIsFlying;
+		}
 		mNoGravity = mIsFlying;
 
-		// LocalPlayer::aiStep() L448-451: using item multiplies strafeInput & forwardInput by 0.35f
-		bool usingItemSlow = gBowPulling || (gItemUseSlowTimer > 0.0f);
+		// LocalPlayer::aiStep(): using item multiplies strafe & forward by 0.35f and resets sprint trigger timer
+		bool usingItemSlow = (mPlayer && mPlayer->isUsingItem()) || gBowPulling;
 		if (usingItemSlow) {
 			moveStrafe *= 0.35f;
 			moveForward *= 0.35f;
+			mSprintTriggerTime = 0;
 		}
 
-		// Mob::aiStep() (Mob.cpp L1117-1133)
+		// 1:1 1.0.2.1 LocalPlayer::aiStep() sprint start/stop
+		if (mPlayer) {
+			// Keyboard sprint key ("button.sprint" -> CONTROL); gamepad sprint binding intentionally unbound (UNVERIFIED)
+			bool sprintKeyDown = (gGuiContext.currentScreen == nullptr) &&
+			                     (glinput.KeyDown(GLFW_KEY_LEFT_CONTROL) || glinput.KeyDown(GLFW_KEY_RIGHT_CONTROL));
+			float hungerVal = mPlayer->getAttribute(Player::HUNGER).getCurrentValue();
+			bool hasEnoughFood = (hungerVal > FoodConstants::FOOD_SPRINT_LEVEL) || mPlayer->mAbilities.mMayfly;
+			bool blindness = MobEffect::BLINDNESS && mPlayer->hasEffect(*MobEffect::BLINDNESS);
+			bool riding = (ridingMinecartId != 0);
+
+			bool canDoubleTapStart = mOnGround
+				? (!riding && !mWasSneaking && mLastForwardInput < 0.8f && moveForward >= 0.8f)
+				: (mPlayer->mAbilities.mFlying && !riding && !mWasSneaking && mLastForwardInput < 0.8f && moveForward >= 0.8f);
+
+			if (canDoubleTapStart && !mPlayer->isSprinting() && hasEnoughFood && !usingItemSlow && !blindness) {
+				if (mSprintTriggerTime <= 0 && !sprintKeyDown) {
+					mSprintTriggerTime = 7;
+				} else {
+					mPlayer->setSprinting(true);
+				}
+			}
+
+			if (!mPlayer->isSprinting() && moveForward >= 0.8f && hasEnoughFood && !usingItemSlow && !blindness && !riding && sprintKeyDown) {
+				mPlayer->setSprinting(true);
+			}
+
+			bool allowAutoJumpSprint = !mPlayer->mAbilities.mFlying &&
+			                           (prevJumpHeld || jumpHeld || !mOnGround || mAutoJumpTime > 0);
+
+			if (mPlayer->isSprinting()) {
+				float moveLen = std::sqrt(moveForward * moveForward + moveStrafe * moveStrafe);
+				if (moveLen < 0.8f || std::abs(moveStrafe) > 0.8f || riding || !hasEnoughFood ||
+				    (mHorizontalCollision && !allowAutoJumpSprint)) {
+					mPlayer->setSprinting(false);
+				}
+			}
+		}
+		mLastForwardInput = moveForward;
+		mWasSneaking = sneaking;
+
+		// Mob::aiStep()
 		bool v7 = isInWater(true);
 		bool v8 = isInLava();
 		if (jumpHeld) {
 			if (v7 || v8) {
 				mPosDelta.y += 0.04f;
 			} else if (mOnGround) {
-				// Mob::jumpFromGround() (Mob.cpp L1355-1357)
-				mPosDelta.y = 0.42f;
-				if (!gGuiContext.isCreative) {
-					gGuiContext.exhaustion += 0.2f;
+				if (mPlayer) {
+					mPlayer->mPosDelta = mPosDelta;
+					mPlayer->mRot.y = static_cast<float>(yaw - 90.0);
+					mPlayer->jumpFromGround();
+					mPosDelta = mPlayer->mPosDelta;
+				} else {
+					mPosDelta.y = 0.42f;
 				}
 			}
 		}
@@ -829,6 +1061,7 @@ public:
 		moveForward *= 0.98f;
 
 		float prevX = mCurrPos.x;
+		float prevY = mCurrPos.y;
 		float prevZ = mCurrPos.z;
 
 		// Player::travel / Mob::travel (Player.cpp L789-800, Mob.cpp L930-1046)
@@ -876,8 +1109,7 @@ public:
 				}
 			}
 
-			// Player::getBaseSpeed() = 0.1f, Player::getWalkingSpeedModifier() = 1.0f
-			float speed = 0.1f;
+			float speed = mPlayer ? mPlayer->getAttribute(SharedAttributes::MOVEMENT_SPEED).getCurrentValue() : 0.1f;
 			float modifier = 1.0f;
 			float acc = mOnGround
 				? ((speed * modifier) * (0.16277f / (friction * friction * friction)))
@@ -922,26 +1154,29 @@ public:
 
 		if (mIsFlying) {
 			float savedMotionY = mPosDelta.y;
-			runMobTravel(0.05f);
+			float flyFactor = mPlayer ? (mPlayer->mAbilities.getFlyingSpeed() * (mPlayer->isSprinting() ? 2.0f : 1.0f)) : 0.05f;
+			runMobTravel(flyFactor);
 			mPosDelta.y = savedMotionY * 0.6f;
 		} else {
-			runMobTravel(0.02f);
+			float airFactor = mPlayer ? mPlayer->getFlyingSpeed() : 0.02f;
+			runMobTravel(airFactor);
 		}
 
 		float stepDx = mCurrPos.x - prevX;
 		float stepDz = mCurrPos.z - prevZ;
 		float horizStep = std::sqrt(stepDx * stepDx + stepDz * stepDz);
-		if (!gGuiContext.isCreative && !mIsFlying && horizStep > 0.0005f) {
-			float moveRate = v7 ? 0.09f : 0.07f;
-			gGuiContext.exhaustion += horizStep * moveRate;
+		if (mPlayer) {
+			syncPlayerTransform();
+			mPlayer->checkMovementStats(Vec3(stepDx, mCurrPos.y - prevY, stepDz));
 		}
 		// Player::aiStep() (Player.cpp L821-848)
 		float v2 = std::sqrt(mPosDelta.x * mPosDelta.x + mPosDelta.z * mPosDelta.z);
 		if (v2 > 0.1f) v2 = 0.1f;
-		if (!mOnGround || gGuiContext.health <= 0) v2 = 0.0f;
+		const int postHealth = mPlayer ? mPlayer->getHealth() : gGuiContext.health;
+		if (!mOnGround || postHealth <= 0) v2 = 0.0f;
 		mCurrSmoothBob += (v2 - mCurrSmoothBob) * 0.4f;
 		float v3 = std::atan(-(mPosDelta.y * 0.2f));
-		float v6 = (!mOnGround && gGuiContext.health > 0) ? (v3 * 15.0f) : 0.0f;
+		float v6 = (!mOnGround && postHealth > 0) ? (v3 * 15.0f) : 0.0f;
 		mCurrTilt += (v6 - mCurrTilt) * 0.8f;
 
 		// MCPE 0.8.1 Mob::tick (L358-406) body yaw tracking + Mob::updateWalkAnim (L1047-1088)
@@ -984,10 +1219,13 @@ public:
 		mCurrWalkAnimSpeed += (v9 * walkMult - mCurrWalkAnimSpeed) * 0.4f;
 		mCurrWalkAnimPos += mCurrWalkAnimSpeed;
 
-		if (mCurrPos.y < 0.0f && !gGuiContext.isCreative && gGuiContext.health > 0) {
-			// Mob::outOfWorld() (Entity.cpp L956-958, Mob.cpp L742-748): 4 damage per tick below Y=0
-			gGuiContext.applyDamage(4, true);
+		if (mCurrPos.y < 0.0f && mPlayer && !mPlayer->isCreative() && mPlayer->getHealth() > 0) {
+			EntityDamageSource voidSrc(EntityDamageCause::Void);
+			mPlayer->hurt(voidSrc, 4, true, false);
+			gGuiContext.health = mPlayer->getHealth();
 		}
+		mFovOld = mFov;
+		mFov += ((mPlayer ? mPlayer->getFieldOfViewModifier(false) : 1.0f) - mFov) * 0.5f;
 	}
 
 	void UpdateCam(float deltaTime)
@@ -1273,6 +1511,7 @@ void Camera::move(const Vec3& posIn) {
 			v43 = v64;
 			v36 = stepHeight;
 			mSlideOffset.y += 0.5f;
+			mAutoJumpTime = 2;
 		} else {
 			mBB = v96;
 		}
@@ -4079,7 +4318,6 @@ void renderThreadStuff()
 	BlockPos miningPos(0, -1, 0);
 	float miningProgress = 0.0f;
 	float hazardDamageCooldown = 0.0f;
-	float eatCooldown = 0.0f;
 	currentFrame = static_cast<float>(glfwGetTime());
 
 	auto applyFancyGraphicsMode = [&](bool fancy) {
@@ -4225,7 +4463,6 @@ void renderThreadStuff()
 		isMining = false;
 		miningProgress = 0.0f;
 		hazardDamageCooldown = 0.0f;
-		eatCooldown = 0.0f;
 		chunkBuilder.reset();
 		c.setWorld(nullptr, nullptr);
 		commandContext.dim = nullptr;
@@ -4255,10 +4492,20 @@ void renderThreadStuff()
 		level->getLevelData().setLevelName(meta.name);
 		level->getLevelData().setSeed(static_cast<RandomSeed>(meta.seed));
 		level->getLevelData().setGameType(meta.isCreative ? GameType::Creative : GameType::Survival);
+		level->getLevelData().setGameDifficulty(static_cast<Difficulty>(gGuiOptions.difficulty));
 		level->setTime(static_cast<int>(gGuiContext.worldTime));
 		commandContext.level = level;
 		commandContext.dim = &level->createDimension(Overworld);
 		c.setWorld(commandContext.level, commandContext.dim);
+		if (c.mPlayer && meta.health > 0) {
+			const int curOp = enum_cast(AttributeOperands::OPERAND_CURRENT);
+			c.mPlayer->serializationSetHealth(static_cast<float>(std::min(20, meta.health)));
+			c.mPlayer->getMutableAttribute(Player::HUNGER)->serializationSetValue(
+				static_cast<float>(std::max(0, std::min(FoodConstants::MAX_FOOD, meta.hunger))), curOp);
+			c.mPlayer->getMutableAttribute(Player::SATURATION)->serializationSetValue(
+				std::max(0.0f, std::min(FoodConstants::MAX_SATURATION, meta.saturation)), curOp);
+			gGuiContext.health = c.mPlayer->getHealth();
+		}
 		chunkBuilder = make_unique<RenderChunkBuilder>(commandContext.dim->getChunkSource());
 		asyncBuilderPool.clear();
 		asyncBuilderPool.reserve(kAsyncBuilderPoolSize);
@@ -4565,7 +4812,8 @@ void renderThreadStuff()
 			};
 
 			auto damagePlayer = [&](int rawDmg, const Vec3& knockDir) {
-				if (gGuiContext.isCreative || gGuiContext.health <= 0) return;
+				const int curHealth = c.mPlayer ? c.mPlayer->getHealth() : gGuiContext.health;
+				if (gGuiContext.isCreative || curHealth <= 0) return;
 				int dealt = gGuiContext.applyDamage(rawDmg, false);
 				if (dealt > 0) {
 					SoundEngine::play(SoundEngine::SND_HURT, 0.9f);
@@ -4610,39 +4858,10 @@ void renderThreadStuff()
 				c.UpdateCam(deltaTime);
 
 				float survDt = std::min(std::max(deltaTime, 0.0001f), 0.1f);
-				if (eatCooldown > 0.0f) eatCooldown = std::max(0.0f, eatCooldown - survDt);
-				if (gItemUseSlowTimer > 0.0f) gItemUseSlowTimer = std::max(0.0f, gItemUseSlowTimer - survDt);
 				if (hazardDamageCooldown > 0.0f) hazardDamageCooldown = std::max(0.0f, hazardDamageCooldown - survDt);
 
-				if (!gGuiContext.isCreative && gGuiContext.health > 0) {
-					while (gGuiContext.exhaustion >= 4.0f) {
-						gGuiContext.exhaustion -= 4.0f;
-						if (gGuiContext.saturation > 0.0f) {
-							gGuiContext.saturation = std::max(0.0f, gGuiContext.saturation - 1.0f);
-						} else if (gGuiContext.hunger > 0) {
-							gGuiContext.hunger = std::max(0, gGuiContext.hunger - 1);
-						}
-					}
-					if (gGuiContext.hunger >= 18 && gGuiContext.health < 20) {
-						gGuiContext.healTimer += survDt;
-						if (gGuiContext.healTimer >= 3.5f) {
-							gGuiContext.healTimer = 0.0f;
-							gGuiContext.health = std::min(20, gGuiContext.health + 1);
-							gGuiContext.exhaustion += 3.0f;
-						}
-					} else {
-						gGuiContext.healTimer = 0.0f;
-					}
-					if (gGuiContext.hunger <= 0 && gGuiContext.health > 1) {
-						gGuiContext.starveTimer += survDt;
-						if (gGuiContext.starveTimer >= 4.0f) {
-							gGuiContext.starveTimer = 0.0f;
-							gGuiContext.applyDamage(1, true);
-						}
-					} else {
-						gGuiContext.starveTimer = 0.0f;
-					}
-
+				const int playerHealth = c.mPlayer ? c.mPlayer->getHealth() : gGuiContext.health;
+				if (!gGuiContext.isCreative && playerHealth > 0) {
 					{
 						BlockSource& region = c.getRegion();
 						int fx = Math::floor(c.mPos.x);
@@ -4693,7 +4912,7 @@ void renderThreadStuff()
 					c.teleportTo(gGuiContext.pendingTpX, gGuiContext.pendingTpY, gGuiContext.pendingTpZ);
 					gGuiContext.pendingTeleport = false;
 				}
-				if (!gGuiContext.isCreative && gGuiContext.health <= 0 && !gGuiContext.currentScreen) {
+				if (!gGuiContext.isCreative && (c.mPlayer ? c.mPlayer->getHealth() : gGuiContext.health) <= 0 && !gGuiContext.currentScreen) {
 					triggerPlayerDeath();
 				}
 
@@ -4777,7 +4996,11 @@ void renderThreadStuff()
 							SoundEngine::play(SoundEngine::SND_HURT, 0.8f, 0.9f + (std::rand() % 20) * 0.01f);
 						}
 						if (landed && !gGuiContext.isCreative) {
-							gGuiContext.exhaustion += 0.3f;
+							if (c.mPlayer) {
+								c.mPlayer->mPosDelta = c.mPosDelta;
+								c.mPlayer->applySprintAttackEffects(true);
+								c.mPosDelta = c.mPlayer->mPosDelta;
+							}
 							int maxDur = getItemMaxDurability(held);
 							if (maxDur > 0 && !held.isNull()) {
 								int wear = (ti.type == ToolType::Sword) ? 1 : 2;
@@ -4871,7 +5094,9 @@ void renderThreadStuff()
 							block->spawnResources(region, hitPos, fb.data, 1.0f, 0);
 						}
 						if (!gGuiContext.isCreative && block->getDestroySpeed() > 0.0f) {
-							gGuiContext.exhaustion += 0.025f;
+							if (c.mPlayer) {
+								c.mPlayer->causeFoodExhaustion(FoodConstants::EXHAUSTION_MINE);
+							}
 							int maxDur = getItemMaxDurability(held);
 							if (maxDur > 0 && !held.isNull()) {
 								ToolInfo ti = getToolInfo(held);
@@ -5028,7 +5253,16 @@ void renderThreadStuff()
 					if (holdingBow && rightHeld && (gGuiContext.isCreative || findArrowSlot() >= 0)) {
 						gBowPulling = true;
 						gBowPullTime += deltaTime;
+						if (c.mPlayer && !c.mPlayer->isUsingItem()) {
+							c.mPlayer->startUsingItem(held, 72000);
+							c.mUsingSlot = heldSlotIdx;
+						}
 					} else if (gBowPulling) {
+						if (c.mPlayer && c.mPlayer->isUsingItem() && c.mPlayer->getItemInUse() &&
+						    c.mPlayer->getItemInUse()->getItem() == Item::mBow) {
+							c.mPlayer->stopUsingItem();
+							c.mUsingSlot = -1;
+						}
 						float t = gBowPullTime;
 						float launchPower = std::min(1.0f, (t * t + t * 2.0f) / 3.0f);
 						if (holdingBow && launchPower >= 0.1f) {
@@ -5190,17 +5424,9 @@ void renderThreadStuff()
 							c.triggerSwing();
 							handledRightClick = true;
 						} else if (Block::mCake && fb.id == Block::mCake->mID) {
-							if (!gGuiContext.isCreative && (gGuiContext.health < 20 || gGuiContext.hunger < 20)) {
-								gGuiContext.health = std::min(20, gGuiContext.health + 2);
-								gGuiContext.hunger = std::min(20, gGuiContext.hunger + 2);
-								int bites = Block::mCake->getBlockState(BlockState::BiteCounter).get<int>(fb.data) + 1;
-								if (bites > 5) {
-									region.removeBlock(hitPos);
-								} else {
-									DataID nd = fb.data;
-									Block::mCake->getBlockState(BlockState::BiteCounter).set(nd, bites);
-									region.setBlockAndData(hitPos, FullBlock(fb.id, nd), Block::UPDATE_ALL);
-								}
+							if (c.mPlayer && !c.mPlayer->mAbilities.mInstabuild && c.mPlayer->isHungry()) {
+								Block::mCake->use(*c.mPlayer, hitPos);
+								gGuiContext.health = c.mPlayer->getHealth();
 								rebuildChunksForBlock(hitPos, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
 								SoundEngine::play(SoundEngine::SND_EAT, 0.8f);
 								c.triggerSwing();
@@ -5291,39 +5517,23 @@ void renderThreadStuff()
 
 					if (!handledRightClick && !held.isNull() && held.getStackSize() > 0 &&
 					    Item::mBucket && held.getItem() == Item::mBucket && held.getAuxValue() == 1 &&
-					    !gGuiContext.isCreative && eatCooldown <= 0.0f) {
+					    !gGuiContext.isCreative) {
 						c.triggerSwing();
 						held = ItemInstance(Item::mBucket, 1, 0);
+						if (c.mPlayer) {
+							c.mPlayer->removeAllEffects();
+						}
 						SoundEngine::play(SoundEngine::SND_EAT, 0.8f);
-						eatCooldown = 0.25f;
 						handledRightClick = true;
 					}
 
-					if (!handledRightClick && !held.isNull() && held.getStackSize() > 0) {
-						FoodInfo food = getFoodInfo(held);
-						if (food.isFood && !gGuiContext.isCreative && eatCooldown <= 0.0f &&
-						    (gGuiContext.hunger < 20 || food.alwaysEdible)) {
-							c.triggerSwing();
-							gGuiContext.hunger = std::min(20, gGuiContext.hunger + food.nutrition);
-							gGuiContext.saturation = std::min(static_cast<float>(gGuiContext.hunger),
-							                                  gGuiContext.saturation + food.saturation);
-							if (food.healHealth > 0) {
-								gGuiContext.health = std::min(20, gGuiContext.health + food.healHealth);
-							}
-							held.remove(1);
-							if (held.getStackSize() <= 0) {
-								held.setNull();
-							}
-							if (food.returnsBowl && Item::mBowl) {
-								ItemInstance bowl(Item::mBowl, 1, 0);
-								ItemInstance rem = gGuiContext.addItemToInventoryRemainder(bowl);
-								if (!rem.isNull() && rem.getStackSize() > 0) {
-									gGuiContext.pendingWorldDrops.push_back(rem);
-								}
-							}
-							SoundEngine::play(SoundEngine::SND_EAT, 0.8f);
-							eatCooldown = 0.25f;
-							gItemUseSlowTimer = 0.35f;
+					if (!handledRightClick && c.mPlayer && !held.isNull() && held.getStackSize() > 0 &&
+					    (held.getItem()->isFood() ||
+					     (Item::mChorusFruit && held.getItem() == Item::mChorusFruit))) {
+						held.use(*c.mPlayer);
+						if (c.mPlayer->isUsingItem()) {
+							c.mUsingSlot = heldSlotIdx;
+							c.mEatSoundTicks = 0;
 							handledRightClick = true;
 						}
 					}
@@ -5880,11 +6090,35 @@ void renderThreadStuff()
 						}
 					}
 				}
+				// Hold right-click to use/eat food over 32 ticks (1.0.2.1)
+				if (c.mPlayer && !gBowPulling) {
+					bool rightHeldNow = allowWorldInput && (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS);
+					if (rightHeldNow) {
+						if (!c.mPlayer->isUsingItem() && !held.isNull() && held.getStackSize() > 0 &&
+						    (held.getItem()->isFood() ||
+						     (Item::mChorusFruit && held.getItem() == Item::mChorusFruit))) {
+							held.use(*c.mPlayer);
+							if (c.mPlayer->isUsingItem()) {
+								c.mUsingSlot = heldSlotIdx;
+								c.mEatSoundTicks = 0;
+							}
+						}
+					} else if (c.mPlayer->isUsingItem()) {
+						c.mPlayer->releaseUsingItem();
+						c.mUsingSlot = -1;
+						c.mEatSoundTicks = 0;
+					}
+				}
 			} else {
 				isMining = false;
 				miningProgress = 0.0f;
 				gBowPulling = false;
 				gBowPullTime = 0.0f;
+				if (c.mPlayer && c.mPlayer->isUsingItem()) {
+					c.mPlayer->releaseUsingItem();
+				}
+				c.mUsingSlot = -1;
+				c.mEatSoundTicks = 0;
 			}
 
 			syncFurnaceBlockStates(c.getRegion(), gGuiContext, rc, chunkBuilder, Vec3(c.mPos.x, c.mPos.y, c.mPos.z));
@@ -6474,10 +6708,24 @@ void renderThreadStuff()
 				}
 			}
 			float aspect = static_cast<float>(screenx) / static_cast<float>(std::max(1, screeny));
-			if (screenx != lastProjW || screeny != lastProjH) {
+			float interpFovMod = c.mFovOld + (c.mFov - c.mFovOld) * c.mAlpha;
+			float frameFov = interpFovMod * 85.0f;
+			if (c.mPlayer) {
+				if (c.mPlayer->isUnderLiquid(MaterialType::Water)) {
+					frameFov *= 0.85714287f; // 6/7 underwater FOV multiplier
+				}
+				if (c.mPlayer->getHealth() <= 0) {
+					float deathT = static_cast<float>(c.mDeathTime) + c.mAlpha;
+					frameFov /= (-1000.0f / (deathT + 500.0f) + 3.0f);
+				}
+			}
+			frameFov = std::max(30.0f, std::min(110.0f, frameFov));
+			static float lastProjFov = -1.0f;
+			if (screenx != lastProjW || screeny != lastProjH || std::abs(frameFov - lastProjFov) > 0.0001f) {
 				lastProjW = screenx;
 				lastProjH = screeny;
-				projection = glm::perspective(glm::radians(85.0f), aspect, 0.1f, 1000.0f);
+				lastProjFov = frameFov;
+				projection = glm::perspective(glm::radians(frameFov), aspect, 0.1f, 1000.0f);
 				for (mce::Shader* sh : uniqueTerrainShaders) {
 					sh->setMatrix4("PROJ", glm::value_ptr(projection));
 				}

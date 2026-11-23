@@ -8,6 +8,7 @@
 
 #include "Core/Utility/UUID.h"
 #include "world/entity/player/Abilities.h"
+#include "world/item/ItemInstance.h"
 #include "world/level/GameType.h"
 //#include "world/item/ClockItem.h"
 //#include "world/item/CompassItem.h"
@@ -113,9 +114,66 @@ public:
 	static const int SLOT_LEGGINGS = 2;
 	static const int SLOT_BOOTS = 3;
 
-	//players create their own blocksources, usually
-//	Player(Level& level, PacketSender& packetSender, GameType playerGameType, const NetworkIdentifier& owner, Unique<SkinInfoData> skin, mce::UUID uuid, Unique<Certificate> certificate);
-//	virtual ~Player();
+	Player(Level& level, GameType playerGameType = GameType::Survival);
+	virtual ~Player();
+
+	virtual void normalTick() override;
+	virtual void aiStep() override;
+	virtual void travel(float xa, float ya) override;
+	virtual void jumpFromGround() override;
+	void handleJumpEffects();
+	void checkMovementStats(const Vec3& d);
+
+	std::function<void(const ItemInstance&)> mOnCompleteUsingItem;
+
+	virtual void die(const EntityDamageSource& source) override;
+	virtual void resetPos(bool clearMore);
+
+	virtual void setSpeed(float speed) override;
+
+	bool isUsingItem() const;
+	ItemInstance* getItemInUse();
+	void startUsingItem(ItemInstance instance, int duration);
+	void stopUsingItem();
+	void releaseUsingItem();
+	virtual void completeUsingItem();
+	virtual int getItemUseDuration();
+	int getTicksUsingItem();
+	void tickItemInUse();
+
+	bool isHurt();
+	bool isHungry() const;
+
+	void attack(Entity& entity);
+	void applySprintAttackEffects(bool landedHit);
+
+	virtual void useItem(ItemInstance& instance) const override;
+
+	virtual bool isCreative() const override;
+	bool isSurvival() const;
+	virtual float getSpeed() const override;
+
+	virtual void setPlayerGameType(GameType gameType);
+	GameType getPlayerGameType() const { return mPlayerGameType; }
+
+	void eat(const ItemInstance& instance);
+	void eat(int nutrition, float saturationModifier);
+	void causeFoodExhaustion(float exhaustionAmount);
+
+	virtual void setFieldOfViewModifier(float modifier);
+	virtual float getFieldOfViewModifier(bool isVRMode = false) const;
+
+	virtual void actuallyHurt(int dmg, const EntityDamageSource* source = nullptr, bool bypassArmor = false) override;
+	virtual void feed(int itemId) override;
+
+protected:
+	virtual bool _hurt(const EntityDamageSource& source, int damage, bool knock, bool ignite) override;
+	void registerAttributes();
+
+private:
+	void _applyExhaustion(const Vec3& d);
+
+public:
 //
 //	void initializeComponents(InitializationMethod method, const VariantParameterList &params) override;
 //	void reloadHardcoded(InitializationMethod method, const VariantParameterList &params) override;
@@ -333,7 +391,7 @@ public:
 //	bool shouldUpdateBosGUIControls();
 //
 //
-	virtual bool isCreative() const override;
+//	virtual bool isCreative() const override;
 //	bool isSurvival() const;
 //
 //	bool isViewer() const;
@@ -498,6 +556,18 @@ public:
 //	EnderChestContainer* getEnderChestContainer() {
 //		return mEnderChestInventory.get();
 //	}
+
+	float mOBob = 0.0f, mBob = 0.0f;
+	ItemInstance mItemInUse;
+	int mItemInUseDuration = 0;
+	float mFOVModifier = 1.0f;
+	GameType mPlayerGameType = GameType::Survival;
+	int mScore = 0;
+	bool mPlayerIsSleeping = false;
+	short mSleepCounter = 0;
+	int mSprintTriggerTime = 0;
+	int mAutoJumpTime = 0;
+	bool mAutoJumpEnabled = true;
 
 	std::string mName;
 	Abilities mAbilities;

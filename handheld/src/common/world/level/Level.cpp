@@ -58,7 +58,7 @@
 //#include "world/entity/EntityFactory.h"
 #include "world/entity/EntityTypes.h"
 //#include "world/entity/monster/Zombie.h"
-//#include "world/entity/ParticleType.h"
+#include "world/entity/ParticleType.h"
 #include "world/entity/player/Player.h"
 //#include "world/entity/projectile/ProjectileFactory.h"
 //#include "world/entity/projectile/ThrownPotion.h"
@@ -1386,14 +1386,18 @@ void Level::handleLevelEvent(LevelEvent type, Vec3 const& pos, int data) {
 //	}
 //}
 //
-//Particle* Level::addParticle(ParticleType id, const Vec3& pos, const Vec3& dir, int data /* = 0*/) {
-//	for (unsigned int i = 0; i < m_Listeners.size(); i++) {
-//		if (auto p = m_Listeners[i]->addParticle(id, pos, dir, data)) {
-//			return p;
-//		}
-//	}
-//	return nullptr;
-//}
+static Level::ParticleCallback sParticleCallback = nullptr;
+
+void Level::setParticleCallback(ParticleCallback cb) {
+	sParticleCallback = cb;
+}
+
+Particle* Level::addParticle(ParticleType id, const Vec3& pos, const Vec3& dir, int data /* = 0*/) {
+	if (sParticleCallback) {
+		sParticleCallback(id, pos, dir, data);
+	}
+	return nullptr;
+}
 //
 //Entity * Level::addGlobalEntity(BlockSource &region, Unique<Entity> e) {
 //	DEBUG_ASSERT_MAIN_THREAD;

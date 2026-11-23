@@ -7,11 +7,11 @@
 // Physical Dependencies
 #include "locale/I18n.h"
 #include "util/Random.h"
-//#include "world/item/UseAnim.h"
+#include "world/item/UseAnim.h"
 #include "client/renderer/texture/TextureUVCoordinateSet.h"
 #include "client/renderer/block/BlockGraphics.h"
 #include "ItemCategory.h"
-// #include "world/item/FoodItemComponent.h"
+#include "world/item/FoodItemComponent.h"
 // #include "world/item/SeedItemComponent.h"
 // #include "world/item/CameraItemComponent.h"
 #include "Core/Math/Color.h"
@@ -339,7 +339,7 @@ public:
 	static void setTextureAtlas(std::shared_ptr<TextureAtlas> itemsTextureAtlas);
 
 	static void registerItems();		// Create all the items.
-// 	static void initServerData(ResourcePackManager& loader);		// Load in all the server overridden data
+	static void initServerData();		// Load in all the server overridden data (items.json)
 	static void initClientData();		// Load in all the client overridden data
 	static void initCreativeItems();
 	static void addCreativeItem(short id, short auxValue = 0);
@@ -382,11 +382,11 @@ public:
 	bool shouldDespawn() const { return mShouldDespawn; }
 
 	// Components Access
-// 	bool isFood() const { return mFoodComponent.get() != nullptr; }
+	bool isFood() const { return mFoodComponent.get() != nullptr; }
 // 	bool isSeed() const { return mSeedComponent.get() != nullptr; }
 // 	bool isCamera() const { return mCameraComponent.get() != nullptr; }
 
-// 	FoodItemComponent* getFood() const { return mFoodComponent.get(); }
+	FoodItemComponent* getFood() const { return mFoodComponent.get(); }
 // 	SeedItemComponent* getSeed() const { return mSeedComponent.get(); }
 // 	CameraItemComponent* getCamera() const { return mCameraComponent.get(); }
 
@@ -539,7 +539,7 @@ protected:
 	float mRenderingAdjScale;
 
 	// Components
-// 	std::unique_ptr<FoodItemComponent> mFoodComponent;
+	std::unique_ptr<FoodItemComponent> mFoodComponent;
 // 	std::unique_ptr<SeedItemComponent> mSeedComponent;
 // 	std::unique_ptr<CameraItemComponent> mCameraComponent;
 

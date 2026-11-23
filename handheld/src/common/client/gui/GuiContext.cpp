@@ -5,6 +5,10 @@
 #include "DeathScreen.h"
 #include "Options.h"
 #include "world/crafting/CraftingRecipes.h"
+#include "world/attribute/AttributeInstance.h"
+#include "world/attribute/SharedAttributes.h"
+#include "world/entity/EntityDamageSource.h"
+#include "world/entity/player/Player.h"
 #include "world/item/Item.h"
 #include "world/level/block/Block.h"
 #include <algorithm>
@@ -69,12 +73,12 @@ bool GuiContext::addItemToInventory(const ItemInstance& item) {
 }
 
 void GuiContext::resetSurvivalStats() {
-	health = 20;
-	hunger = 20;
-	saturation = 5.0f;
-	exhaustion = 0.0f;
-	healTimer = 0.0f;
-	starveTimer = 0.0f;
+	if (localPlayer) {
+		localPlayer->resetPos(true);
+		health = localPlayer->getHealth();
+	} else {
+		health = 20;
+	}
 	hurtFlashTimer = 0.0f;
 }
 
@@ -104,9 +108,14 @@ int GuiContext::applyDamage(int rawDamage, bool ignoreArmor) {
 		}
 	}
 
-	health = std::max(0, health - finalDamage);
+	if (localPlayer) {
+		EntityDamageSource src(EntityDamageCause::Override);
+		localPlayer->hurt(src, finalDamage, true, false);
+		health = localPlayer->getHealth();
+	} else {
+		health = std::max(0, health - finalDamage);
+	}
 	hurtFlashTimer = 0.40f;
-	exhaustion = std::min(40.0f, exhaustion + 0.1f);
 	return finalDamage;
 }
 
@@ -292,13 +301,19 @@ void GuiContext::executeCommand(const std::string& cmdLine) {
 		bedSpawnZ = static_cast<int>(std::floor(sz));
 		addChatMessage("Set spawnpoint to " + std::to_string(bedSpawnX) + ", " + std::to_string(bedSpawnY) + ", " + std::to_string(bedSpawnZ));
 	} else if (cmd == "kill") {
+		if (localPlayer) {
+			localPlayer->serializationSetHealth(0);
+		}
 		health = 0;
 		addChatMessage("Ouch! That looked like it hurt.");
 		setScreen(new DeathScreen());
 	} else if (cmd == "heal") {
-		health = 20;
-		hunger = 20;
-		saturation = 5.0f;
+		if (localPlayer) {
+			localPlayer->resetPos(true);
+			health = localPlayer->getHealth();
+		} else {
+			health = 20;
+		}
 		addChatMessage("Restored health and hunger");
 	} else if (cmd == "summon") {
 		if (args.size() < 2) { addChatMessage("Usage: /summon <pig|cow|sheep|chicken|zombie|skeleton|creeper> [x y z]"); return; }

@@ -8,19 +8,19 @@
 
 //#include "world/entity/EntityPos.h"
 #include "world/level/Level.h"
-//#include "world/level/block/LiquidBlock.h"
+#include "world/level/block/LiquidBlock.h"
 //#include "world/level/block/PortalBlock.h"
 //#include "world/entity/item/ItemEntity.h"
 //#include "world/entity/EntityDefinition.h"
 //#include "world/entity/EntityDefinitionGroup.h"
 //#include "network/packet/AddEntityPacket.h"
-//#include "world/item/ItemInstance.h"
+#include "world/item/ItemInstance.h"
 //#include "util/PerfTimer.h"
 //#include "util/Token.h"
 #include "world/level/BlockSource.h"
-//#include "world/level/material/Material.h"
+#include "world/level/material/Material.h"
 //#include "world/level/chunk/LevelChunk.h"
-//#include "world/entity/player/Player.h"
+#include "world/entity/player/Player.h"
 //#include "world/level/Weather.h"
 //#include "world/entity/LeashFenceKnotEntity.h"
 //#include "network/packet/SetEntityLinkPacket.h"
@@ -32,8 +32,8 @@
 //#include "client/renderer/debug/DebugRenderer.h"
 //#include "network/packet/LevelSoundEventPacket.h"
 //#include "world/level/dimension/Dimension.h"
-//#include "world/entity/EntityDamageSource.h"
-//#include "world/level/block/Block.h"
+#include "world/entity/EntityDamageSource.h"
+#include "world/level/block/Block.h"
 //#include "client/particle/BlockForceFieldParticle.h"
 //#include "world/entity/EntityInteraction.h"
 //#include "world/level/block/ClothBlock.h"
@@ -459,9 +459,9 @@ Entity::~Entity() {
 //	return *getContainerComponent()->mContainer.get();
 //}
 //
-//bool Entity::hasCategory(EntityCategory categories) const {
-//	return (mCategories & categories) == categories;
-//}
+bool Entity::hasCategory(EntityCategory categories) const {
+	return (mCategories & categories) == categories;
+}
 //
 //bool Entity::hasType(EntityType types) const {
 //	EntityType myType = getEntityTypeId();
@@ -1130,27 +1130,30 @@ bool Entity::isInWater() const {
 //}
 //
 ///*public virtual*/
-//bool Entity::isUnderLiquid(MaterialType type) const {
-//
-//	Vec3 headPos = mPos + Vec3(0, getHeadHeight(), 0);
-//
-//	if (isRiding() && mRiding->mBB.contains(headPos)) {
-//		return false;
-//	}
-//
-//	float yp = mPos.y + getHeadHeight();
-//	int xt = Math::floor(mPos.x);
-//	int yt = Math::floor((float)Math::floor(yp));
-//	int zt = Math::floor(mPos.z);
-//	auto& mat = mRegion->getMaterial(xt, yt, zt);
-//	if (mat.isLiquid() && mat.isType(type)) {
-//		float hh = LiquidBlock::getHeightFromData(mRegion->getData(xt, yt, zt)) - 1 / 9.0f;
-//		float h = yt + 1 - hh;
-//		return yp < h;
-//	}
-//
-//	return false;
-//}
+bool Entity::isUnderLiquid(MaterialType type) const {
+	if (!mRegion) {
+		return false;
+	}
+
+	Vec3 headPos = mPos + Vec3(0, getHeadHeight(), 0);
+
+	if (isRiding() && mRiding->mBB.contains(headPos)) {
+		return false;
+	}
+
+	float yp = mPos.y + getHeadHeight();
+	int xt = Math::floor(mPos.x);
+	int yt = Math::floor((float)Math::floor(yp));
+	int zt = Math::floor(mPos.z);
+	auto& mat = mRegion->getMaterial(xt, yt, zt);
+	if (mat.isLiquid() && mat.isType(type)) {
+		float hh = LiquidBlock::getHeightFromData(mRegion->getData(xt, yt, zt)) - 1 / 9.0f;
+		float h = yt + 1 - hh;
+		return yp < h;
+	}
+
+	return false;
+}
 //
 //void Entity::_updateOwnerChunk() {
 //	BlockPos blockPos(mPos);
@@ -1228,30 +1231,30 @@ const Vec3& Entity::getVelocity() const {
 //	}
 //}
 //
-//Vec3 Entity::getAttachPos(EntityLocation location) const {
-//	switch (location)
-//	{
-//	case EntityLocation::Feet:
-//		return getPos() + Vec3{0, -mHeightOffset, 0};
-//
-//	case EntityLocation::Body:
-//	case EntityLocation::WeaponAttachPoint:
-//		return mBB.getCenter();
-//
-//	case EntityLocation::Head:
-//		return getPos() + Vec3{ 0, getHeadHeight() - mHeightOffset, 0 };
-//
-//	case EntityLocation::DropAttachPoint: {
-//		auto offset = Vec3(0.f, getHeadHeight() - 0.2f, 0.15f);
-//		offset.yRot(-mRot.y * Math::DEGRAD);
-//
-//		return getPos() + offset;
-//	}
-//	default:
-//		DEBUG_FAIL("Not handled");
-//		return getPos();
-//	}
-//}
+Vec3 Entity::getAttachPos(EntityLocation location) const {
+	switch (location)
+	{
+	case EntityLocation::Feet:
+		return getPos() + Vec3{0, -mHeightOffset, 0};
+
+	case EntityLocation::Body:
+	case EntityLocation::WeaponAttachPoint:
+		return mBB.getCenter();
+
+	case EntityLocation::Head:
+		return getPos() + Vec3{ 0, getHeadHeight() - mHeightOffset, 0 };
+
+	case EntityLocation::DropAttachPoint: {
+		auto offset = Vec3(0.f, getHeadHeight() - 0.2f, 0.15f);
+		offset.yRot(-mRot.y * Math::DEGRAD);
+
+		return getPos() + offset;
+	}
+	default:
+		DEBUG_FAIL("Not handled");
+		return getPos();
+	}
+}
 //
 //float Entity::getRadius() const {
 //	return Math::max(mBBDim.x, mBBDim.y) * 0.5f;
@@ -1309,23 +1312,17 @@ void Entity::remove() {
 	mRemoved = true;
 }
 
-//void Entity::setSize(float w, float h) {
-//	float scale = mEntityData.getFloat(enum_cast(EntityDataIDs::SCALE));
-//
-//	if (w*scale != mBBDim.x || h*scale != mBBDim.y) {
-//
-//		mBBDim.x = w*scale;
-//		mBBDim.y = h*scale;
-//
-//		float halfWidth = mBBDim.x * 0.5f;
-//		const Vec3& pos = getPos();
-//
-//		mBB.set(pos.x - halfWidth, mBB.min.y, pos.z - halfWidth, pos.x + halfWidth, mBB.min.y + mBBDim.y, pos.z + halfWidth);
-//
-//		mEntityData.set<SynchedEntityData::TypeFloat>(enum_cast(EntityDataIDs::WIDTH), w);
-//		mEntityData.set<SynchedEntityData::TypeFloat>(enum_cast(EntityDataIDs::HEIGHT), h);
-//	}
-//}
+void Entity::setSize(float w, float h) {
+	if (w != mBBDim.x || h != mBBDim.y) {
+		mBBDim.x = w;
+		mBBDim.y = h;
+
+		float halfWidth = mBBDim.x * 0.5f;
+		const Vec3& pos = getPos();
+
+		mBB.set(pos.x - halfWidth, mBB.min.y, pos.z - halfWidth, pos.x + halfWidth, mBB.min.y + mBBDim.y, pos.z + halfWidth);
+	}
+}
 
 void _rotationWrapWithInterpolation(float& rot, float& oRot) {
 	while (rot > 360.f) {
@@ -1404,12 +1401,21 @@ void Entity::setRot(const Vec2& rot) {
 //	}
 //}
 //
-//void Entity::normalTick() {
-//	if (!getLevel().isClientSide()) {
-//		setStatusFlag(EntityFlags::ONFIRE, mOnFire > 0);
-//	}
-//
-//	baseTick();
+void Entity::normalTick() {
+	if (!getLevel().isClientSide()) {
+		setStatusFlag(EntityFlags::ONFIRE, mOnFire > 0);
+	}
+	baseTick();
+}
+
+void Entity::baseTick() {
+	mTickCount++;
+	mWalkDistPrev = mWalkDist;
+	mScalePrev = mScale;
+	if (mInvulnerableTime > 0) {
+		--mInvulnerableTime;
+	}
+}
 //
 //	if (mRailMovementComponent) {
 //		mRailMovementComponent->tick();
@@ -1710,35 +1716,41 @@ void Entity::setRot(const Vec2& rot) {
 //	}
 //}
 //
-//BlockPos Entity::_getBlockOnPos() {
-//	auto box = mBB;
-//	box.max.y = mBB.min.y - 0.2f;
-//	box.min.y = box.max.y - 1;
-//
-//	//search the layer just below the feet
-//	auto y = (int)Math::floor(box.max.y);
-//	for (auto x : range_incl(Math::floor(box.min.x), Math::floor(box.max.x + 1))) {
-//		for (auto z : range_incl(Math::floor(box.min.z), Math::floor(box.max.z + 1))) {
-//			auto onBlock = getRegion().getBlockID({ x,y,z });
-//			if (onBlock != BlockID::AIR) {
-//				return{ x,y,z };
-//			}
-//		}
-//	}
-//
-//	//search the one below too to see if there's fences
-//	y = (int)Math::floor(box.min.y);
-//	for (auto x : range_incl(Math::floor(box.min.x), Math::floor(box.max.x + 1))) {
-//		for (auto z : range_incl(Math::floor(box.min.z), Math::floor(box.max.z + 1))) {
-//			auto under = getRegion().getBlockID({ x,y,z });
-//			if (Block::mFence->mID == under || under.hasProperty(BlockProperty::FenceGate) || Block::mCobblestoneWall->mID == under) {
-//				return{ x,y,z };
-//			}
-//		}
-//	}
-//
-//	return mPos;
-//}
+BlockPos Entity::_getBlockOnPos() {
+	if (!mRegion) {
+		return BlockPos(mPos);
+	}
+	auto box = mBB;
+	box.max.y = mBB.min.y - 0.2f;
+	box.min.y = box.max.y - 1;
+
+	//search the layer just below the feet
+	auto y = (int)Math::floor(box.max.y);
+	for (auto x : range_incl(Math::floor(box.min.x), Math::floor(box.max.x + 1))) {
+		for (auto z : range_incl(Math::floor(box.min.z), Math::floor(box.max.z + 1))) {
+			auto onBlock = getRegion().getBlockID({ x,y,z });
+			if (onBlock != BlockID::AIR) {
+				return{ x,y,z };
+			}
+		}
+	}
+
+	//search the one below too to see if there's fences
+	y = (int)Math::floor(box.min.y);
+	for (auto x : range_incl(Math::floor(box.min.x), Math::floor(box.max.x + 1))) {
+		for (auto z : range_incl(Math::floor(box.min.z), Math::floor(box.max.z + 1))) {
+			auto under = getRegion().getBlockID({ x,y,z });
+			const Block* underBlock = Block::mBlocks[under];
+			if ((Block::mFence && Block::mFence->mID == under) ||
+			    (underBlock && underBlock->hasProperty(BlockProperty::FenceGate)) ||
+			    (Block::mCobblestoneWall && Block::mCobblestoneWall->mID == under)) {
+				return{ x,y,z };
+			}
+		}
+	}
+
+	return BlockPos(mPos);
+}
 //
 //void Entity::_manageRiders(BlockSource& tickingArea) {
 //	while (mRidersToRemove.size()) {
@@ -2102,9 +2114,9 @@ void Entity::setRot(const Vec2& rot) {
 //
 //}
 //
-//float Entity::getHeadHeight() const {
-//	return 0;
-//}
+float Entity::getHeadHeight() const {
+	return 0;
+}
 //
 //float Entity::getCameraOffset() const {
 //	return 0;
@@ -2132,19 +2144,13 @@ void Entity::setRot(const Vec2& rot) {
 //}
 //
 //
-//void Entity::teleportTo(const Vec3& pos, int cause, int entityType) {
-//	// Stop riding and teleport entity by itself.
-//	// Use entityIsBeingDestroyed = true to trigger immediate dismount, otherwise riders'
-//	// position snapping will still happen due to the delay caused by just queuing it.
-//	if (isRiding()) {
-//		stopRiding(true, true);
-//	}
-//
-//	mFallDistance = 0.0f;  //Reset fall distance since we were just teleported.
-//	mPosPrev = mPosPrev2 = pos;
-//	mPosDelta.x = mPosDelta.y = mPosDelta.z = 0.0f;
-//	moveTo(pos, mRot);
-//}
+void Entity::teleportTo(const Vec3& pos, int cause, int entityType) {
+	UNUSED_PARAMETER(cause, entityType);
+	mFallDistance = 0.0f;  //Reset fall distance since we were just teleported.
+	mPosPrev = mPosPrev2 = pos;
+	mPosDelta.x = mPosDelta.y = mPosDelta.z = 0.0f;
+	moveTo(pos, mRot);
+}
 //
 //bool Entity::tryTeleportTo(const Vec3& pos, bool landOnBlock, bool avoidLiquid, int cause, int entityType) {
 //	BlockPos blockPos(pos);
@@ -2271,35 +2277,28 @@ void Entity::playerTouch(Player& player) {
 //	mHurtMarked = true;
 //}
 //
-//bool Entity::hurt(const EntityDamageSource& source, int damage, bool knock /*= true*/, bool ignite /*= false*/) {
-//	if (isInvulnerableTo(source)) {
-//		return false;
-//	}
-//
-//	return _hurt(source, damage, knock, ignite);
-//}
-//
-//bool Entity::_hurt(const EntityDamageSource& source, int damage, bool knock, bool ignite) {
-//	markHurt();
-//	if (mCurrentDescription && mCurrentDescription->mOnHurt) {
-//		VariantParameterList params;
-//		initParams(params);
-//		mCurrentDescription->executeTrigger(*this, *mCurrentDescription->mOnHurt, params);
-//	}
-//	if (getProjectileComponent() != nullptr) {
-//		getProjectileComponent()->hurt(source);
-//	}
-//	return false;
-//}
-//
-//bool Entity::isInvulnerableTo(const EntityDamageSource& source) const {
-//	Player* player = nullptr;
-//	if (source.isEntitySource() && source.getEntity()->hasCategory(EntityCategory::Player)) {
-//		player = static_cast<Player*>(source.getEntity());
-//	}
-//
-//	return mInvulnerable && source.getCause() != EntityDamageCause::Void && (player == nullptr || !player->isCreative());
-//}
+bool Entity::hurt(const EntityDamageSource& source, int damage, bool knock /*= true*/, bool ignite /*= false*/) {
+	if (isInvulnerableTo(source)) {
+		return false;
+	}
+
+	return _hurt(source, damage, knock, ignite);
+}
+
+bool Entity::_hurt(const EntityDamageSource& source, int damage, bool knock, bool ignite) {
+	UNUSED_PARAMETER(source, damage, knock, ignite);
+	mHurtMarked = true;
+	return false;
+}
+
+bool Entity::isInvulnerableTo(const EntityDamageSource& source) const {
+	Player* player = nullptr;
+	if (source.isEntitySource() && source.getEntity() && source.getEntity()->hasCategory(EntityCategory::Player)) {
+		player = static_cast<Player*>(source.getEntity());
+	}
+
+	return mInvulnerable && source.getCause() != EntityDamageCause::Void && (player == nullptr || !player->isCreative());
+}
 //
 //bool Entity::doFireHurt(int amount) {
 //	if (mCurrentDescription && mCurrentDescription->mOnIgnite) {
@@ -2433,8 +2432,9 @@ void Entity::playerTouch(Player& player) {
 //	}
 //}
 //
-//void Entity::feed(int itemId) {
-//}
+void Entity::feed(int itemId) {
+	UNUSED_PARAMETER(itemId);
+}
 //
 //void Entity::spawnEatParticles(const ItemInstance& itemInUse, int count) {
 //	if (itemInUse.getUseAnimation() == UseAnimation::Drink) {
@@ -2976,18 +2976,17 @@ bool Entity::isSneaking() const {
 //	return ie;
 //}
 //
-//bool Entity::getStatusFlag(EntityFlags flag) const {
-//	return mEntityData.getFlag<SynchedEntityData::TypeInt64>(enum_cast(EntityDataIDs::FLAGS), enum_cast(flag));
-//}
-//
-//void Entity::setStatusFlag(EntityFlags flag, bool value) {
-//	if (value) {
-//		mEntityData.setFlag<SynchedEntityData::TypeInt64>(enum_cast(EntityDataIDs::FLAGS), enum_cast(flag));
-//	}
-//	else {
-//		mEntityData.clearFlag<SynchedEntityData::TypeInt64>(enum_cast(EntityDataIDs::FLAGS), enum_cast(flag));
-//	}
-//}
+bool Entity::getStatusFlag(EntityFlags flag) const {
+	return (mStatusFlags & (1ULL << enum_cast(flag))) != 0;
+}
+
+void Entity::setStatusFlag(EntityFlags flag, bool value) {
+	if (value) {
+		mStatusFlags |= (1ULL << enum_cast(flag));
+	} else {
+		mStatusFlags &= ~(1ULL << enum_cast(flag));
+	}
+}
 //
 //bool Entity::isDebugging() const {
 //#ifdef ENABLE_DEBUG_RENDERING
@@ -3189,9 +3188,9 @@ bool Entity::isSilent() {
 //	return false;
 //}
 //
-//bool Entity::isRiding() const {
-//	return mRiding != nullptr;
-//}
+bool Entity::isRiding() const {
+	return mRiding != nullptr;
+}
 //
 //bool Entity::isLeashed() {
 //	return getStatusFlag(EntityFlags::LEASHED);
@@ -3835,9 +3834,9 @@ const Level& Entity::getLevel() const {
 //	}
 //}
 //
-//void Entity::useItem(ItemInstance& instance) const {
-//	instance.remove(1);
-//}
+void Entity::useItem(ItemInstance& instance) const {
+	instance.remove(1);
+}
 //
 //void Entity::getDebugText(std::vector<std::string>& outputInfo) {
 //	outputInfo.push_back("Entity type: " + EntityTypeToString(getEntityTypeId()));

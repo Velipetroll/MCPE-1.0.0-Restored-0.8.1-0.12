@@ -6,7 +6,7 @@
 
 //#include "EntityLink.h"
 //#include "Core/Math/Color.h"
-//#include "world/Direction.h"
+#include "world/Direction.h"
 //#include "world/entity/components/ExplodeComponent.h"
 //#include "world/entity/EntityRendererId.h"
 #include "world/entity/EntityTypes.h"
@@ -18,11 +18,8 @@
 #include "world/level/ChunkPos.h"
 //#include "world/level/material/MaterialType.h"
 #include "world/phys/AABB.h"
-//#include "world/entity/EntityCategory.h"
-//#include "world/item/EquipmentSlot.h"
-#include "world/Direction.h" 
-//#include "EntityLink.h"
-//#include "world/level/material/MaterialType.h"
+#include "world/entity/EntityCategory.h"
+#include "world/level/material/MaterialType.h"
 #include "util/Random.h"
 #include "EntityUniqueID.h"
 
@@ -34,7 +31,8 @@ class Level;
 //class EntityPos;
 //class Material;
 //class ItemEntity;
-//class ItemInstance;
+class ItemInstance;
+class EntityDamageSource;
 //class CompoundTag;
 //class BlockSource;
 //class FishingHook;
@@ -318,8 +316,9 @@ public:
 	ChunkPos mChunkPos;
 	BlockSource* mRegion = nullptr;
 //
-//	// Type
-//	EntityCategory mCategories = EntityCategory::None; // *** Def ***
+	// Type
+	EntityCategory mCategories = EntityCategory::None; // *** Def ***
+	uint64_t mStatusFlags = 0;
 //
 //	// Sync
 //	SynchedEntityData mEntityData;
@@ -399,7 +398,7 @@ public:
 //	std::vector<Entity*> mRidersToRemove;
 //	//Rider IDs list is being added as a hack to easily avoid a crash caused by player being destructed before its mount saves links
 //	std::vector<EntityUniqueID> mRiderIDs;
-//	Entity* mRiding = nullptr;
+	Entity* mRiding = nullptr;
 //	EntityUniqueID mRidingPrevID = {};
 //	bool mInheritRotationWhenRiding = false; // *** Def ***
 //	bool mRidersChanged = false;
@@ -507,7 +506,7 @@ public:
 //
 //	void setPersistent();
 //
-//	bool hasCategory(EntityCategory categories) const;
+	bool hasCategory(EntityCategory categories) const;
 //	bool hasType(EntityType types) const;
 //	bool hasFamily(const std::string& family) const;
 	BlockSource& getRegion() const;
@@ -539,7 +538,7 @@ public:
 //	void moveBBs(const Vec3& pos);
 //	void setLastHitBB(const Vec3& pos, const Vec3& radius);
 //
-//	Vec3 getAttachPos(EntityLocation location) const;
+	Vec3 getAttachPos(EntityLocation location) const;
 //	
 //	float getRadius() const;
 //
@@ -574,7 +573,7 @@ public:
 //
 	void moveTo(const Vec3& pos, const Vec2& rot);
 //	virtual void moveRelative(float xa, float za, float speed);
-//	virtual void teleportTo(const Vec3& pos, int cause = 0, int entityType = enum_cast(EntityType::Undefined));
+	virtual void teleportTo(const Vec3& pos, int cause = 0, int entityType = enum_cast(EntityType::Undefined));
 //	virtual bool tryTeleportTo(const Vec3& pos, bool landOnBlock = true, bool avoidLiquid = true, int cause = 0, int entityType = enum_cast(EntityType::Undefined));
 //
 //	virtual void lerpTo(const Vec3& pos, const Vec2& rot, int steps);
@@ -587,8 +586,8 @@ public:
 //
 //	bool tick(BlockSource& tickingArea);
 //
-//	virtual void normalTick();
-//	virtual void baseTick();
+	virtual void normalTick();
+	virtual void baseTick();
 //
 //	virtual void rideTick();
 //	virtual void positionRider(Entity& rider) const;
@@ -615,13 +614,13 @@ public:
 //	virtual bool isInWaterOrRain();
 //	virtual bool isInLava();
 //	bool isInClouds() const;
-//	virtual bool isUnderLiquid(MaterialType type) const;
+	virtual bool isUnderLiquid(MaterialType type) const;
 //
 //	virtual bool onLadder(bool orVine = true);
 //
 //	virtual void makeStuckInWeb();
 //
-//	virtual float getHeadHeight() const;
+	virtual float getHeadHeight() const;
 //	virtual float getCameraOffset() const;
 //	virtual float getShadowHeightOffs();
 //	virtual float getShadowRadius() const;
@@ -731,9 +730,9 @@ public:
 //
 //	bool isUpsideDown() const;
 //
-//	bool hurt(const EntityDamageSource& source, int damage, bool knock = true, bool ignite = false);
-//	virtual bool isInvulnerableTo(const EntityDamageSource& source) const;
-//
+	bool hurt(const EntityDamageSource& source, int damage, bool knock = true, bool ignite = false);
+	virtual bool isInvulnerableTo(const EntityDamageSource& source) const;
+
 //	virtual void animateHurt();
 //	virtual bool doFireHurt(int amount);
 //	virtual void onLightningHit();
@@ -741,7 +740,7 @@ public:
 //		UNUSED_PARAMETER(bounceStartPos, block);
 //	};
 //
-//	virtual void feed(int itemId);
+	virtual void feed(int itemId);
 //	void spawnEatParticles(const ItemInstance& itemInUse, int count);
 //	void spawnDeathParticles();
 //	void spawnDustParticles();
@@ -811,9 +810,9 @@ virtual EntityType getEntityTypeId() const = 0;
 //	virtual void causeFallDamage(float fallDistance);
 //	virtual void handleFallDistanceOnServer(float fallDistance);
 //
-//	bool getStatusFlag(EntityFlags flag) const;
-//	void setStatusFlag(EntityFlags flag, bool value);
-//
+	bool getStatusFlag(EntityFlags flag) const;
+	void setStatusFlag(EntityFlags flag, bool value);
+
 //	bool isDebugging() const;
 //
 //	void playSound(LevelSoundEvent type, Vec3 const& pos, int blockID = -1);
@@ -821,7 +820,7 @@ virtual EntityType getEntityTypeId() const = 0;
 //
 //	virtual void onSynchedDataUpdate(int dataId);
 //
-//	bool isRiding() const;
+	bool isRiding() const;
 //	bool isRide() const;
 //	virtual bool canAddRider(Entity& rider) const;
 //	bool isRider(Entity& rider) const;
@@ -898,7 +897,7 @@ virtual EntityType getEntityTypeId() const = 0;
 //
 //	virtual void openContainerComponent(Player& player);
 //	
-//	virtual void useItem(ItemInstance& instance) const;
+	virtual void useItem(ItemInstance& instance) const;
 //
 //	virtual bool hasOutputSignal(FacingID dir) const;
 //	virtual int getOutputSignal() const;
@@ -955,7 +954,7 @@ virtual EntityType getEntityTypeId() const = 0;
 //	void setChainedDamageEffects(bool active);
 //	bool getChainedDamageEffects() const;
 //	
-//	virtual void setSize(float w, float h);
+	virtual void setSize(float w, float h);
 //	void setEnforceRiderRotationLimit(bool value);
 //	void setInheritRotationWhenRiding(bool value);
 //
@@ -967,7 +966,7 @@ virtual EntityType getEntityTypeId() const = 0;
 //	virtual void setPos(const EntityPos& pos);
 //	virtual void outOfWorld();
 //
-//	virtual bool _hurt(const EntityDamageSource& source, int damage, bool knock, bool ignite);
+	virtual bool _hurt(const EntityDamageSource& source, int damage, bool knock, bool ignite);
 //	virtual void markHurt();
 //	virtual void lavaHurt();
 //
@@ -995,7 +994,7 @@ virtual EntityType getEntityTypeId() const = 0;
 //	virtual LootTable* getLootTable() const;
 //	virtual LootTable* getDefaultLootTable() const { return nullptr; }
 //	
-//	BlockPos _getBlockOnPos();
+	BlockPos _getBlockOnPos();
 //
 //	EntityRuntimeID mRuntimeID = EntityRuntimeID(0);
 //	Color mHurtColor = Color(1.f, 0, 0, 0.6f);

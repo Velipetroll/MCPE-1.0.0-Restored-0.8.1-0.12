@@ -28,14 +28,17 @@
 //#include "network/PacketSender.h"
 //#include "Events/MinecraftEventing.h"
 #include "world/attribute/Attribute.h"
-//#include "world/attribute/AttributeInstance.h"
-//#include "world/attribute/AttributeMap.h"
-//#include "world/attribute/ExhaustionAttributeDelegate.h"
-//#include "world/attribute/HungerAttributeDelegate.h"
-//#include "world/attribute/SharedAttributes.h"
+#include "world/attribute/AttributeInstance.h"
+#include "world/attribute/AttributeMap.h"
+#include "world/attribute/ExhaustionAttributeDelegate.h"
+#include "world/attribute/HungerAttributeDelegate.h"
+#include "world/attribute/SharedAttributes.h"
+#include "world/food/FoodConstants.h"
+#include "world/item/FoodItemComponent.h"
+#include "world/item/Item.h"
 //#include "world/containers/managers/models/HudContainerManagerModel.h"
-//#include "world/effect/MobEffect.h"
-//#include "world/effect/MobEffectInstance.h"
+#include "world/effect/MobEffect.h"
+#include "world/effect/MobEffectInstance.h"
 //#include "world/entity/animal/Pig.h"
 //#include "world/entity/animal/Horse.h"
 //#include "world/entity/components/BossComponent.h"
@@ -54,13 +57,13 @@
 //#include "world/level/block/entity/SkullBlockEntity.h"
 //#include "world/level/chunk/LevelChunk.h"
 //#include "world/level/chunk/PlayerChunkSource.h"
-//#include "world/level/Level.h"
+#include "world/level/Level.h"
 //#include "world/level/Spawner.h"
-//#include "world/level/material/Material.h"
+#include "world/level/material/Material.h"
 //#include "world/inventory/EnderChestContainer.h"
 //#include "network/packet/EntityEventPacket.h"
 //#include "client/sound/SoundPlayer.h"
-//#include "world/entity/EntityDamageSource.h"
+#include "world/entity/EntityDamageSource.h"
 //#include "world/entity/item/ExperienceOrb.h"
 //#include "certificates/ExtendedCertificate.h"
 
@@ -87,8 +90,16 @@ const Attribute Player::EXHAUSTION = Attribute("minecraft:player.exhaustion", Re
 const Attribute Player::LEVEL = Attribute("minecraft:player.level", RedefinitionMode::KeepCurrent, true);
 const Attribute Player::EXPERIENCE = Attribute("minecraft:player.experience", RedefinitionMode::KeepCurrent, true);
 
-// Player has reference to the level before he is initialized, to prevent massive explosions
-//Player::Player(Level& level, PacketSender& packetSender, GameType playerGameType, const NetworkIdentifier& owner, Unique<SkinInfoData> skin, mce::UUID uuid, Unique<Certificate> certificate)
+Player::Player(Level& level, GameType playerGameType)
+	: Mob(level)
+	, mPlayerGameType(playerGameType) {
+	mCategories |= EntityCategory::Player;
+	registerAttributes();
+	mHeightOffset = DEFAULT_PLAYER_HEIGHT_OFFSET;
+	setPlayerGameType(mPlayerGameType);
+}
+
+Player::~Player() = default;
 //	: Mob(level)
 //	, mPlayerGameType(playerGameType)
 //	, mUserType(0)
@@ -186,9 +197,30 @@ const Attribute Player::EXPERIENCE = Attribute("minecraft:player.experience", Re
 //	return mCertificate.get();
 //}
 //
-//void Player::setFieldOfViewModifier(float modifier) {
-//	mFOVModifier = modifier;
-//}
+void Player::setFieldOfViewModifier(float modifier) {
+	mFOVModifier = modifier;
+}
+
+float Player::getFieldOfViewModifier(bool isVRMode) const {
+	float fov = 0.5f;
+	if (mAbilities.isFlying() && !isVRMode) {
+		fov = 0.55f;
+	}
+
+	float walkSpeed = mAbilities.getWalkingSpeed();
+	float moveSpeed = getAttribute(SharedAttributes::MOVEMENT_SPEED).getCurrentValue();
+	if (walkSpeed > 0.0f) {
+		fov *= (moveSpeed / walkSpeed + 1.0f);
+	}
+
+	if (isUsingItem() && Item::mBow != nullptr && mItemInUse.getItem() == Item::mBow) {
+		float t = static_cast<float>(mItemInUse.getMaxUseDuration() - mItemInUseDuration) * 0.05f;
+		float bowMult = (t > 1.0f) ? 0.85f : (1.0f - 0.15f * t * t);
+		fov *= bowMult;
+	}
+
+	return fov * mFOVModifier;
+}
 //
 //bool Player::isPositionRelevant(DimensionId dimension, const BlockPos& position) {
 //	return false;
@@ -207,25 +239,22 @@ const Attribute Player::EXPERIENCE = Attribute("minecraft:player.experience", Re
 //	}
 //}
 //
-//void Player::actuallyHurt(int dmg, const EntityDamageSource* source /* = nullptr */, bool bypassArmor /* = false */) {
-//	if (isInvulnerableTo(*source)) {
-//		return;
-//	}
-//
-//	// Apply difficulty modifier if damage comes from a mob
-//	if (source->isEntitySource() && source->getDamagingEntity()->hasCategory(EntityCategory::Mob)) {
-//		Difficulty diff = getLevel().getDifficulty();
-//		if (diff == Difficulty::Easy) {
-//			// Even damage values lose less on easy
-//			dmg -= int((float)dmg / 2 - 0.5f);
-//		}
-//		else if (diff == Difficulty::Hard) {
-//			dmg += int((float)dmg / 2);
-//		}
-//	}
-//
-//	Mob::actuallyHurt(dmg, source, bypassArmor);
-//}
+void Player::actuallyHurt(int dmg, const EntityDamageSource* source /* = nullptr */, bool bypassArmor /* = false */) {
+	if (source && isInvulnerableTo(*source)) {
+		return;
+	}
+
+	if (source && source->isEntitySource() && source->getDamagingEntity() && source->getDamagingEntity()->hasCategory(EntityCategory::Mob)) {
+		Difficulty diff = getLevel().getDifficulty();
+		if (diff == Difficulty::Easy) {
+			dmg -= int((float)dmg / 2 - 0.5f);
+		} else if (diff == Difficulty::Hard) {
+			dmg += int((float)dmg / 2);
+		}
+	}
+
+	Mob::actuallyHurt(dmg, source, bypassArmor);
+}
 //
 //void Player::teleportTo(const Vec3& pos, int cause, int sourceEntityType) {
 //	float d = (mPos - pos).length();
@@ -247,21 +276,16 @@ const Attribute Player::EXPERIENCE = Attribute("minecraft:player.experience", Re
 //}
 
 bool Player::isCreative() const {
-// 	return (mPlayerGameType == GameType::Creative) || (mPlayerGameType == GameType::CreativeViewer);
-	return false;
+	return (mPlayerGameType == GameType::Creative) || (mPlayerGameType == GameType::CreativeViewer);
 }
 
-//bool Player::isSurvival() const {
-//	return (mPlayerGameType == GameType::Survival) || (mPlayerGameType == GameType::SurvivalViewer);
-//}
-//
-//bool Player::isViewer() const {
-//	return (mPlayerGameType == GameType::SurvivalViewer) || (mPlayerGameType == GameType::CreativeViewer);
-//}
-//
-//float Player::getSpeed() const {
-//	return getAttribute(SharedAttributes::MOVEMENT_SPEED).getCurrentValue();
-//}
+bool Player::isSurvival() const {
+	return (mPlayerGameType == GameType::Survival) || (mPlayerGameType == GameType::SurvivalViewer);
+}
+
+float Player::getSpeed() const {
+	return getAttribute(SharedAttributes::MOVEMENT_SPEED).getCurrentValue();
+}
 //
 //Vec3 Player::getCapePos(float a) {
 //	return Vec3::lerp(mCapePosO, mCapePos, a);
@@ -523,8 +547,19 @@ bool Player::isCreative() const {
 //	}
 //}
 //
-//void Player::normalTick() {
-//	_tickCooldowns();
+void Player::normalTick() {
+	if (isUsingItem()) {
+		tickItemInUse();
+	}
+
+	mNoPhysics = mAbilities.mNoclip;
+
+	const Vec3 exhaustionBasePos = getPos();
+
+	Mob::normalTick();
+
+	_applyExhaustion(getPos() - exhaustionBasePos);
+}
 //	bool shouldSleep = mEntityData.getFlag<PlayerFlagIDType>(enum_cast(EntityDataIDs::PLAYER_FLAGS), PLAYER_SLEEP_FLAG);
 //	if (shouldSleep != isSleeping()) {
 //		if (isSleeping()) {
@@ -660,9 +695,207 @@ bool Player::isCreative() const {
 ////
 //// Use items
 ////
-//bool Player::isUsingItem() const {
-//	return !mItemInUse.isNull();
-//}
+bool Player::isUsingItem() const {
+	return !mItemInUse.isNull();
+}
+
+ItemInstance* Player::getItemInUse() {
+	return &mItemInUse;
+}
+
+void Player::startUsingItem(ItemInstance instance, int duration) {
+	if (instance == mItemInUse) {
+		return;
+	}
+	mItemInUse = instance;
+	mItemInUseDuration = duration;
+	if (!getLevel().isClientSide()) {
+		setStatusFlag(EntityFlags::USINGITEM, true);
+	}
+}
+
+void Player::stopUsingItem() {
+	mItemInUse.setNull();
+	mItemInUseDuration = 0;
+	if (!getLevel().isClientSide()) {
+		setStatusFlag(EntityFlags::USINGITEM, false);
+	}
+}
+
+void Player::releaseUsingItem() {
+	if (!mItemInUse.isNull()) {
+		mItemInUse.releaseUsing(this, mItemInUseDuration);
+	}
+	stopUsingItem();
+}
+
+void Player::feed(int itemId) {
+	UNUSED_PARAMETER(itemId);
+}
+
+void Player::completeUsingItem() {
+	if (!mItemInUse.isNull()) {
+		feed(mItemInUse.getItem()->getId());
+		mItemInUse.useTimeDepleted(&getLevel(), this);
+		if (mOnCompleteUsingItem) {
+			mOnCompleteUsingItem(mItemInUse);
+		}
+		stopUsingItem();
+	}
+}
+
+void Player::checkMovementStats(const Vec3& d) {
+	_applyExhaustion(d);
+}
+
+void Player::useItem(ItemInstance& instance) const {
+	if (!mAbilities.mInstabuild) {
+		instance.remove(1);
+	}
+}
+
+int Player::getItemUseDuration() {
+	return mItemInUseDuration;
+}
+
+int Player::getTicksUsingItem() {
+	if (isUsingItem()) {
+		return mItemInUse.getMaxUseDuration() - mItemInUseDuration;
+	}
+	return 0;
+}
+
+void Player::tickItemInUse() {
+	if (!isUsingItem()) {
+		return;
+	}
+	if (--mItemInUseDuration <= 0) {
+		completeUsingItem();
+	}
+}
+
+const float SPRINT_FLYING_MODIFIER = 2.0f;
+
+void Player::travel(float xa, float ya) {
+	if (mAbilities.isFlying()) {
+		float ydo = mPosDelta.y;
+		float ofs = mFlyingSpeed;
+		mFlyingSpeed = mAbilities.getFlyingSpeed() * (isSprinting() ? SPRINT_FLYING_MODIFIER : 1.0f);
+		Mob::travel(xa, ya);
+		mPosDelta.y = ydo * 0.6f;
+		mFlyingSpeed = ofs;
+		mFallDistance = 0;
+	} else {
+		Mob::travel(xa, ya);
+	}
+}
+
+void Player::_applyExhaustion(const Vec3& d) {
+	if (getLevel().isClientSide() || mRiding) {
+		return;
+	}
+
+	const int totalDistance = Math::round(d.length() * 100.0f);
+	const int horizontalDistance = Math::round(Math::sqrt(d.x * d.x + d.z * d.z) * 100.0f);
+
+	if (isUnderLiquid(MaterialType::Water)) {
+		if (totalDistance > 0) {
+			causeFoodExhaustion(FoodConstants::EXHAUSTION_SWIM * totalDistance * .01f);
+		}
+	} else if (isInWater()) {
+		if (horizontalDistance > 0) {
+			causeFoodExhaustion(FoodConstants::EXHAUSTION_SWIM * horizontalDistance * .01f);
+		}
+	} else if (mOnGround) {
+		if (horizontalDistance > 0) {
+			if (isSprinting()) {
+				causeFoodExhaustion(FoodConstants::EXHAUSTION_SPRINT * horizontalDistance * .01f);
+			} else {
+				causeFoodExhaustion(FoodConstants::EXHAUSTION_WALK * horizontalDistance * .01f);
+			}
+		}
+	}
+}
+
+void Player::handleJumpEffects() {
+	if (getLevel().isClientSide()) {
+		return;
+	}
+
+	if (isSprinting()) {
+		causeFoodExhaustion(FoodConstants::EXHAUSTION_SPRINT_JUMP);
+	} else {
+		causeFoodExhaustion(FoodConstants::EXHAUSTION_JUMP);
+	}
+}
+
+void Player::jumpFromGround() {
+	Mob::jumpFromGround();
+	if (!getLevel().isClientSide()) {
+		handleJumpEffects();
+	}
+}
+
+void Player::resetPos(bool clearMore) {
+	mPosDelta.x = mPosDelta.y = mPosDelta.z = 0;
+	mRot.x = 0;
+
+	if (!mPlayerIsSleeping) {
+		mHeightOffset = DEFAULT_PLAYER_HEIGHT_OFFSET;
+		setSize(0.6f, 1.8f);
+	}
+
+	mImmobile = false;
+
+	if (clearMore) {
+		removeAllEffects();
+
+		getMutableAttribute(SharedAttributes::HEALTH)->resetToMaxValue();
+		getMutableAttribute(Player::HUNGER)->resetToDefaultValue();
+		getMutableAttribute(Player::EXHAUSTION)->resetToDefaultValue();
+		getMutableAttribute(Player::SATURATION)->resetToDefaultValue();
+
+		setStatusFlag(EntityFlags::GLIDING, false);
+		setSprinting(false);
+		stopUsingItem();
+
+		mScore = 0;
+		mOnFire = 0;
+		mDeathTime = 0;
+		mDead = false;
+		mPlayerIsSleeping = false;
+		mFallDistance = 0.f;
+	}
+}
+
+void Player::aiStep() {
+	mOBob = mBob;
+
+	auto speed = getMutableAttribute(SharedAttributes::MOVEMENT_SPEED);
+	if (!getLevel().isClientSide()) {
+		speed->setDefaultValue(mAbilities.getWalkingSpeed(), enum_cast(AttributeOperands::OPERAND_CURRENT));
+	}
+	mFlyingSpeed = DEFAULT_FLY_SPEED;
+	if (isSprinting()) {
+		mFlyingSpeed += DEFAULT_FLY_SPEED * 0.3f;
+	}
+
+	setSpeed(speed->getCurrentValue());
+
+	float tBob = (float)Math::sqrt(mPosDelta.x * mPosDelta.x + mPosDelta.z * mPosDelta.z);
+	float tTilt = (float)Math::atan(-mPosDelta.y * 0.2f) * 15.f;
+	if (tBob > 0.1f) {
+		tBob = 0.1f;
+	}
+	if (!mOnGround || getHealth() <= 0) {
+		tBob = 0;
+	}
+	if (mOnGround || getHealth() <= 0) {
+		tTilt = 0;
+	}
+	mBob += (tBob - mBob) * 0.4f;
+	mTilt += (tTilt - mTilt) * 0.8f;
+}
 //
 //ItemInstance* Player::getItemInUse() {
 //	return &mItemInUse;
@@ -971,31 +1204,14 @@ bool Player::isCreative() const {
 //	return mScore;
 //}
 //
-//void Player::die(const EntityDamageSource& source) {
-//	Mob::die(source);
-//
-//	if(isRiding()) {
-//		stopRiding(true, false);
-//	}
-//
-//	getLevel().onPlayerDeath(*this, source);
-//
-//	this->setSize(0.2f, 0.2f);
-//	setPos(mPos);
-//	mPosDelta.y = 0.1f;
-//
-//	mInventoryProxy->dropAll(getLevel().isClientSide());
-//	mInventoryProxy->clearInventory();
-//	sendInventory();
-//
-//	if (source.isEntitySource()) {
-//		mPosDelta.x = -(float) Math::cos((mHurtDir + mRot.y) * Math::DEGRAD) * 0.1f;
-//		mPosDelta.z = -(float) Math::sin((mHurtDir + mRot.y) * Math::DEGRAD) * 0.1f;
-//	}
-//	else {
-//		mPosDelta.x = mPosDelta.z = 0;
-//	}
-//}
+void Player::die(const EntityDamageSource& source) {
+	Mob::die(source);
+	this->setSize(0.2f, 0.2f);
+	setPos(mPos);
+	mPosDelta.y = 0.1f;
+	setSprinting(false);
+	stopUsingItem();
+}
 //
 //void Player::awardKillScore(Entity& victim, int score) {
 //	mScore += score;
@@ -1363,14 +1579,60 @@ bool Player::isCreative() const {
 //	mHeightOffset = DEFAULT_PLAYER_HEIGHT_OFFSET;
 //}
 //
-//bool Player::isHurt() {
-//	return getHealth() > 0 && getHealth() < getMaxHealth();
-//}
-//
-//bool Player::isHungry() const {
-//	auto& hunger = getAttribute(Player::HUNGER);
-//	return hunger.getCurrentValue() < hunger.getDefaultValue(enum_cast(AttributeOperands::OPERAND_CURRENT));
-//}
+bool Player::isHurt() {
+	return getHealth() > 0 && getHealth() < getMaxHealth();
+}
+
+bool Player::isHungry() const {
+	auto& hunger = getAttribute(Player::HUNGER);
+	return hunger.getCurrentValue() < hunger.getDefaultValue(enum_cast(AttributeOperands::OPERAND_CURRENT));
+}
+
+bool Player::_hurt(const EntityDamageSource& source, int damage, bool knock, bool ignite) {
+	if (mAbilities.mInvulnerable) {
+		return false;
+	}
+	if (getHealth() <= 0 || damage == 0) {
+		return false;
+	}
+	return Mob::_hurt(source, damage, knock, ignite);
+}
+
+void Player::attack(Entity& entity) {
+	int dmg = (int)getMutableAttribute(SharedAttributes::ATTACK_DAMAGE)->getCurrentValue();
+	if (dmg == 1) {
+		dmg = 2;
+	}
+
+	int knockbackBonus = 0;
+	if (isSprinting()) {
+		knockbackBonus += 1;
+	}
+
+	if (dmg > 0) {
+		EntityDamageByEntitySource source(*this, EntityDamageCause::EntityAttack);
+		if (entity.hurt(source, dmg) && entity.hasCategory(EntityCategory::Mob)) {
+			causeFoodExhaustion(FoodConstants::EXHAUSTION_ATTACK);
+			if (knockbackBonus > 0) {
+				mPosDelta.x *= 0.6f;
+				mPosDelta.z *= 0.6f;
+				setSprinting(false);
+			}
+		}
+	}
+}
+
+void Player::applySprintAttackEffects(bool landedHit) {
+	if (!landedHit) {
+		return;
+	}
+	causeFoodExhaustion(FoodConstants::EXHAUSTION_ATTACK);
+	if (isSprinting()) {
+		mPosDelta.x *= 0.6f;
+		mPosDelta.z *= 0.6f;
+		setSprinting(false);
+	}
+}
 //
 //bool Player::_hurt(const EntityDamageSource& source, int damage, bool knock, bool ignite) {
 //	if (mAbilities.mInvulnerable) {	//Creative players should not be able to be killed by void in creative mode
@@ -1912,9 +2174,9 @@ bool Player::isCreative() const {
 //	return false;
 //}
 //
-//void Player::setSpeed(float _speed) {
-//	mSpeed = _speed;
-//}
+void Player::setSpeed(float _speed) {
+	mSpeed = _speed;
+}
 //
 //bool Player::hasResource(int id) {
 //	return mInventoryProxy->hasResource(id);
@@ -2183,22 +2445,22 @@ ItemInstance* Player::getSelectedItem() const {
 //	return *mSkin;
 //}
 //
-//void Player::registerAttributes() {
-//	mAttributes->registerAttribute(SharedAttributes::ATTACK_DAMAGE).setRange(2.0f, 2.0f, 2.0f);
-//	mAttributes->registerAttribute(SharedAttributes::HEALTH).setRange(0.0f, 20.0f, 20.0f);
-//	auto& hunger = mAttributes->registerAttribute(Player::HUNGER);
-//	auto& exhaustion = mAttributes->registerAttribute(Player::EXHAUSTION);
-//	mAttributes->registerAttribute(Player::SATURATION).setRange(0.0f, FoodConstants::START_SATURATION, static_cast<float>(FoodConstants::MAX_FOOD));
-//	mAttributes->registerAttribute(Player::LEVEL).setDefaultValue(static_cast<float>(PLAYER_MAX_LEVEL), enum_cast(AttributeOperands::OPERAND_MAX));
-//	mAttributes->registerAttribute(Player::EXPERIENCE).setDefaultValue(1.0f, enum_cast(AttributeOperands::OPERAND_MAX));
-//
-//	hunger.setRange(0.0f, static_cast<float>(FoodConstants::MAX_FOOD), static_cast<float>(FoodConstants::MAX_FOOD));	// Let's not data drive this for now
-//	hunger.setDelegate(make_shared<HungerAttributeDelegate>(hunger, this));
-//
-//	exhaustion.setDefaultValue(static_cast<float>(FoodConstants::MAX_EXHAUSTION) + 1.0f, enum_cast(AttributeOperands::OPERAND_MAX));
-//	exhaustion.setDelegate(make_shared<ExhaustionAttributeDelegate>(exhaustion));
-//	exhaustion.registerListener(hunger);
-//}
+void Player::registerAttributes() {
+	mAttributes->registerAttribute(SharedAttributes::ATTACK_DAMAGE).setRange(2.0f, 2.0f, 2.0f);
+	mAttributes->registerAttribute(SharedAttributes::HEALTH).setRange(0.0f, 20.0f, 20.0f);
+	auto& hunger = mAttributes->registerAttribute(Player::HUNGER);
+	auto& exhaustion = mAttributes->registerAttribute(Player::EXHAUSTION);
+	mAttributes->registerAttribute(Player::SATURATION).setRange(0.0f, FoodConstants::START_SATURATION, static_cast<float>(FoodConstants::MAX_FOOD));
+	mAttributes->registerAttribute(Player::LEVEL).setDefaultValue(static_cast<float>(PLAYER_MAX_LEVEL), enum_cast(AttributeOperands::OPERAND_MAX));
+	mAttributes->registerAttribute(Player::EXPERIENCE).setDefaultValue(1.0f, enum_cast(AttributeOperands::OPERAND_MAX));
+
+	hunger.setRange(0.0f, static_cast<float>(FoodConstants::MAX_FOOD), static_cast<float>(FoodConstants::MAX_FOOD));
+	hunger.setDelegate(make_shared<HungerAttributeDelegate>(hunger, this));
+
+	exhaustion.setDefaultValue(static_cast<float>(FoodConstants::MAX_EXHAUSTION) + 1.0f, enum_cast(AttributeOperands::OPERAND_MAX));
+	exhaustion.setDelegate(make_shared<ExhaustionAttributeDelegate>(exhaustion));
+	exhaustion.registerListener(hunger);
+}
 //
 //int Player::getPortalCooldown() const {
 //	return SharedConstants::TicksPerSecond / 2;
@@ -2208,94 +2470,49 @@ ItemInstance* Player::getSelectedItem() const {
 //	return mAbilities.mInvulnerable ? 0 : SharedConstants::TicksPerSecond* 4;
 //}
 //
-//void Player::setPlayerGameType(GameType gameType) {
-//	const GameType oldGameType = mPlayerGameType;
-//	mPlayerGameType = gameType;
-//	//this is the rudimentary gamemode state machine -- it's terrible, and needs to be a fully connected graph with
-//	//independent states and entry/exit methods
-//	if ((getPlayerGameType() == GameType::CreativeViewer) ||
-//		(getPlayerGameType() == GameType::SurvivalViewer)) {
-//		//reset the SurvivalViewer position, if we didn't used to be in an SurvivalViewer-type mode
-//		if ((oldGameType != GameType::CreativeViewer) && (oldGameType != GameType::SurvivalViewer)) {
-//			mSurvivalViewerPosition = getInterpolatedPosition(1.0f);
-//			LOGI("SET SurvivalViewer position: %.1f,%.1f,%.1f\n", mSurvivalViewerPosition.x, mSurvivalViewerPosition.y, mSurvivalViewerPosition.z);
-//		}
-//
-//		mAbilities.mFlying = true;
-//		mAbilities.mMayfly = true;
-//		mAbilities.mInstabuild = true;
-//		mAbilities.mInvulnerable = true;
-//		mAbilities.mNoclip = true;
-//		setInvisible(true);
-//		//TODO: set Viewer abilities
-//	}
-//	else if (isCreative()) {
-//		if ((oldGameType == GameType::CreativeViewer) || (oldGameType == GameType::SurvivalViewer)) {
-//			setTeleportDestination(mSurvivalViewerPosition);
-//			teleportTo(mSurvivalViewerPosition);
-//			Vec3 debugPt = getInterpolatedPosition(1.0f);
-//			LOGI("Teleport to SurvivalViewer position: %.1f,%.1f,%.1f -- from %.1f,%.1f,%.1f\n",
-//				mSurvivalViewerPosition.x, mSurvivalViewerPosition.y, mSurvivalViewerPosition.z,
-//				debugPt.x, debugPt.y, debugPt.z);
-//			mAbilities.mFlying = false;
-//			setInvisible(false);
-//		}
-//
-//		mAbilities.mMayfly = true;
-//		mAbilities.mInstabuild = true;
-//		mAbilities.mInvulnerable = true;
-//		mAbilities.mNoclip = false;
-//		//TODO: unset Viewer abilities
-//	}
-//	else if (isSurvival()) {
-//		if ((oldGameType == GameType::CreativeViewer) || (oldGameType == GameType::SurvivalViewer)) {
-//			setTeleportDestination(mSurvivalViewerPosition);
-//			teleportTo(mSurvivalViewerPosition);
-//			Vec3 debugPt = getInterpolatedPosition(1.0f);
-//			LOGI("Teleport to SurvivalViewer position: %.1f,%.1f,%.1f -- from %.1f,%.1f,%.1f\n",
-//				mSurvivalViewerPosition.x, mSurvivalViewerPosition.y, mSurvivalViewerPosition.z,
-//				debugPt.x, debugPt.y, debugPt.z);
-//			setInvisible(false);
-//		}
-//
-//		mAbilities.mFlying = false;
-//		mAbilities.mMayfly = false;
-//		mAbilities.mInstabuild = false;
-//		mAbilities.mInvulnerable = false;
-//		mAbilities.mNoclip = false;
-//		//TODO: unset Viewer abilities
-//	}
-//	else{
-//		DEBUG_FAIL("SetPlayerGameType: Unknown Game Type");
-//	}
-//}
-//
-//void Player::eat(const ItemInstance& instance) {
-//
-//	Item * item = instance.getItem();
-//	FoodItemComponent * food = item->getFood();
-//	DEBUG_ASSERT(item->getFood(), "Can't eat items that are *not* food buddy!");
-//
-//	// check for IronBelly achievement (starving & eating rotten flesh)
-//	if ((getAttribute(Player::HUNGER).getCurrentValue() == 0)
-//		&& (Item::mRotten_flesh->getId() == item->getId())) {
-//		MinecraftEventing::fireEventAwardAchievement(this, MinecraftEventing::AchievementIds::IronBelly);
-//	}
-//
-//	eat(food->getNutrition(), food->getSaturationModifier());
-//	
-//	MinecraftEventing::fireEventItemUsed(this, instance, MinecraftEventing::UseMethod::Eat);
-//}
-//
-//void Player::eat(int hungerValue, float saturationModifier) {
-//	auto hunger = getMutableAttribute(Player::HUNGER);
-//	auto saturation = getMutableAttribute(Player::SATURATION);
-//
-//	hunger->addBuff(InstantaneousAttributeBuff(static_cast<float>(hungerValue)));
-//	// Max out saturation at hunger's current value
-//	saturation->setMaxValue(hunger->getCurrentValue());
-//	saturation->addBuff(InstantaneousAttributeBuff(hungerValue * saturationModifier * 2.0f));
-//}
+void Player::setPlayerGameType(GameType gameType) {
+	mPlayerGameType = gameType;
+	if ((getPlayerGameType() == GameType::CreativeViewer) ||
+	    (getPlayerGameType() == GameType::SurvivalViewer)) {
+		mAbilities.mFlying = true;
+		mAbilities.mMayfly = true;
+		mAbilities.mInstabuild = true;
+		mAbilities.mInvulnerable = true;
+		mAbilities.mNoclip = true;
+	} else if (isCreative()) {
+		mAbilities.mMayfly = true;
+		mAbilities.mInstabuild = true;
+		mAbilities.mInvulnerable = true;
+		mAbilities.mNoclip = false;
+	} else if (isSurvival()) {
+		mAbilities.mFlying = false;
+		mAbilities.mMayfly = false;
+		mAbilities.mInstabuild = false;
+		mAbilities.mInvulnerable = false;
+		mAbilities.mNoclip = false;
+	}
+}
+
+void Player::eat(const ItemInstance& instance) {
+	Item* item = instance.getItem();
+	FoodItemComponent* food = item ? item->getFood() : nullptr;
+	DEBUG_ASSERT(food, "Can't eat items that are *not* food buddy!");
+	if (!food) {
+		return;
+	}
+
+	eat(food->getNutrition(), food->getSaturationModifier());
+}
+
+void Player::eat(int hungerValue, float saturationModifier) {
+	auto hunger = getMutableAttribute(Player::HUNGER);
+	auto saturation = getMutableAttribute(Player::SATURATION);
+
+	hunger->addBuff(InstantaneousAttributeBuff(static_cast<float>(hungerValue)));
+	// Max out saturation at hunger's current value
+	saturation->setMaxValue(hunger->getCurrentValue());
+	saturation->addBuff(InstantaneousAttributeBuff(hungerValue * saturationModifier * 2.0f));
+}
 //
 //void Player::_crit(Entity& entity) {
 //	if (!getLevel().isClientSide()) {
@@ -2303,14 +2520,14 @@ ItemInstance* Player::getSelectedItem() const {
 //	}
 //}
 //
-//void Player::causeFoodExhaustion(float exhaustionAmount) {
-//	// Only update on server
-//	if (getLevel().isClientSide() || isCreative()) {
-//		return;
-//	}
-//
-//	getMutableAttribute(Player::EXHAUSTION)->addBuff(InstantaneousAttributeBuff(exhaustionAmount));
-//}
+void Player::causeFoodExhaustion(float exhaustionAmount) {
+	// Only update on server
+	if (getLevel().isClientSide() || isCreative()) {
+		return;
+	}
+
+	getMutableAttribute(Player::EXHAUSTION)->addBuff(InstantaneousAttributeBuff(exhaustionAmount));
+}
 //
 //int Player::getExperienceReward(void) const {
 //	return std::min(getPlayerLevel() * 7, 100);

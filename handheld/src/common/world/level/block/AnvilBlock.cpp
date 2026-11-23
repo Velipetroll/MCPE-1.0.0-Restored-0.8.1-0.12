@@ -7,6 +7,7 @@
 #include "world/level/block/AnvilBlock.h"
 #include "world/level/material/Material.h"
 #include "world/Facing.h"
+#include "world/Direction.h"
 #include "world/entity/Mob.h"
 #include "world/item/ItemInstance.h"
 #include "world/level/BlockSource.h"

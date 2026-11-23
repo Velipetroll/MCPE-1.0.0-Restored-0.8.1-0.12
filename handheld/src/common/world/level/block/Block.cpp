@@ -22,7 +22,7 @@
 #include "world/item/ItemCategory.h"
 #include "util/WeighedRandom.h"
 #include "world/level/biome/Biome.h"
-// #include "world/food/FoodConstants.h"
+#include "world/food/FoodConstants.h"
 #include "world/Facing.h"
 #include "world/level/LevelConstants.h"
 // #include "world/redstone/circuit/CircuitSystem.h"
@@ -1129,30 +1129,10 @@ void Block::entityInside(BlockSource& region, const BlockPos& pos, Entity& entit
 }
 
 void Block::playerDestroy(Player* player, const BlockPos& pos, int data) const {
-// 	ItemInstance* item = player->getSelectedItem();
-// 	int bonusLootLevel = 0;
-// 	bool spawned = false;
-// 
-// 	// if item has an enchant that might effect the resource drop
-// 	if (item && item->isEnchanted()) {
-// 
-// 		// if the item is enchanted with silk touch, this will take precedence over other resource bonus enchants
-// 		if (canBeSilkTouched() && EnchantUtils::hasEnchant(Enchant::Type::MINING_SILKTOUCH, *item)) {
-// 			popResource(player->getRegion(), pos, getSilkTouchItemInstance(data));
-// 			spawned = true;
-// 		} else {
-// 			// only consider a loot enchant if silk touch wasn't already present
-// 			bonusLootLevel = EnchantUtils::getEnchantLevel(Enchant::Type::MINING_LOOT, *item);
-// 		}
-// 	}
-// 
-// 	// only if silk touch didn't already take effect
-// 	if (!spawned) {
-// 		spawnResources(player->getRegion(), pos, data, 1.0f, bonusLootLevel);
-// 	}
-// 
-// 	player->causeFoodExhaustion(FoodConstants::EXHAUSTION_MINE);
-// 	//player.awardStat(Stats.blockMined[id], 1);
+	UNUSED_PARAMETER(pos, data);
+	if (player) {
+		player->causeFoodExhaustion(FoodConstants::EXHAUSTION_MINE);
+	}
 }
 
 ItemInstance Block::getSilkTouchItemInstance(DataID data) const {

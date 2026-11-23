@@ -7,7 +7,7 @@
 #include "CakeBlock.h"
 #include "world/entity/player/Player.h"
 #include "world/level/material/Material.h"
-// #include "world/food/FoodConstants.h"
+#include "world/food/FoodConstants.h"
 #include "world/level/BlockSource.h"
 #include "world/Facing.h"
 #include "world/level/Level.h"
@@ -23,14 +23,17 @@ CakeBlock::CakeBlock(const std::string& nameId, int id) :
 
 bool CakeBlock::use(Player& player, const BlockPos& pos) const {
 	auto& region = player.getRegion();
-	auto cake = region.getBlockAndData(pos);
-	int bites = getBlockState(BlockState::BiteCounter).get<int>(cake.data);
-	bites += 1;
-	if (bites > MAX_BITES) {
-		region.removeBlock(pos.x, pos.y, pos.z);
-	} else {
-		getBlockState(BlockState::BiteCounter).set(cake.data, bites);
-		region.setBlockAndData(pos, cake, Block::UPDATE_ALL, &player);
+	if (!player.mAbilities.mInstabuild && player.isHungry()) {
+		player.eat(2, FoodConstants::FOOD_SATURATION_POOR);
+		auto cake = region.getBlockAndData(pos);
+		int bites = getBlockState(BlockState::BiteCounter).get<int>(cake.data);
+		bites += 1;
+		if (bites > MAX_BITES) {
+			region.removeBlock(pos.x, pos.y, pos.z);
+		} else {
+			getBlockState(BlockState::BiteCounter).set(cake.data, bites);
+			region.setBlockAndData(pos, cake, Block::UPDATE_ALL, &player);
+		}
 	}
 	return true;
 }

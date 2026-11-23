@@ -5,7 +5,12 @@
 #include "PauseScreen.h"
 #include "Options.h"
 #include "Font.h"
+#include "util/Random.h"
+#include "world/attribute/AttributeInstance.h"
 #include "world/crafting/CraftingRecipes.h"
+#include "world/effect/MobEffect.h"
+#include "world/entity/player/Player.h"
+#include "world/food/FoodConstants.h"
 #include <glad/glad.h>
 
 static bool s_useTouchUI = true;
@@ -13,11 +18,21 @@ static bool s_useTouchUI = true;
 void Gui::render(float partialTicks, int guiW, int guiH, Options* options, Font* font, GuiContext* ctx) {
 	if (options && options->hideGUI) return;
 	s_useTouchUI = (!options || options->useTouchUI);
+	bool showSurvivalHud = true;
 	if (ctx) {
 		ctx->ensureInventoryInitialized();
 		selectedSlot = ctx->selectedHotbarSlot;
-		health = ctx->health;
-		hunger = ctx->hunger;
+		if (ctx->localPlayer) {
+			health = ctx->localPlayer->getHealth();
+			maxHealth = ctx->localPlayer->getMaxHealth();
+			hunger = (int)ctx->localPlayer->getAttribute(Player::HUNGER).getCurrentValue();
+			showSurvivalHud = !ctx->localPlayer->isCreative();
+		} else {
+			health = ctx->health;
+			maxHealth = 20;
+			hunger = FoodConstants::MAX_FOOD;
+			showSurvivalHud = !ctx->isCreative;
+		}
 		armor = getTotalArmorDefense(ctx->armorSlots);
 	}
 
@@ -26,9 +41,9 @@ void Gui::render(float partialTicks, int guiW, int guiH, Options* options, Font*
 
 	renderCrosshair(guiW, guiH);
 	renderHotbar(guiW, guiH, font, ctx);
-	if (!ctx || !ctx->isCreative) {
-		renderHearts(guiW, guiH);
-		renderHunger(guiW, guiH);
+	if (showSurvivalHud) {
+		renderHearts(guiW, guiH, ctx);
+		renderHunger(guiW, guiH, ctx);
 		if (armor > 0) {
 			renderArmor(guiW, guiH);
 		}
@@ -179,7 +194,8 @@ void Gui::renderHotbar(int guiW, int guiH, Font* font, GuiContext* ctx) {
 	}
 }
 
-void Gui::renderHearts(int guiW, int guiH) {
+void Gui::renderHearts(int guiW, int guiH, GuiContext* ctx) {
+	(void)ctx;
 	const int numSlots = s_useTouchUI ? 10 : 9;
 	int startX = guiW / 2 - 10 * numSlots;
 	int y = guiH - 32;
@@ -202,25 +218,45 @@ void Gui::renderHearts(int guiW, int guiH) {
 	}
 }
 
-void Gui::renderHunger(int guiW, int guiH) {
+void Gui::renderHunger(int guiW, int guiH, GuiContext* ctx) {
+	Player* player = ctx ? ctx->localPlayer : nullptr;
+	if (player && player->isCreative()) {
+		return;
+	}
+
+	int hungerVal = player ? (int)player->getAttribute(Player::HUNGER).getCurrentValue() : hunger;
+	int satVal = player ? (int)player->getAttribute(Player::SATURATION).getCurrentValue() : (int)FoodConstants::START_SATURATION;
+	bool hasHungerEffect = player && MobEffect::HUNGER && player->hasEffect(*MobEffect::HUNGER);
+	int tickCount = ctx ? ctx->hudTickCount : 0;
+
 	const int numSlots = s_useTouchUI ? 10 : 9;
 	int rightEdge = guiW / 2 + 10 * numSlots + 2;
-	int y = guiH - 32;
+	int baseY = guiH - 32;
+	const int NUM_ICONS = FoodConstants::MAX_FOOD / 2;
+
+	int bgU = hasHungerEffect ? 133 : 16;
+	int fullU = (hasHungerEffect ? 52 : 16) + 36;
+	int halfU = (hasHungerEffect ? 52 : 16) + 45;
+	Random rand;
+	int shakeMod = std::max(0, hungerVal) * 3 + 1;
+	bool doShake = (satVal <= 0) && ((tickCount % shakeMod) == 0);
 
 	if (bindTexture("textures/gui/icons.png")) {
-		for (int i = 0; i < 10; ++i) {
+		for (int i = 0; i < NUM_ICONS; ++i) {
 			int fx = rightEdge - i * 8 - 9;
-			blit(fx, y, 16, 27, 9, 9, 256, 256); // empty drumstick
-			if (i * 2 + 1 < hunger) {
-				blit(fx, y, 52, 27, 9, 9, 256, 256); // full drumstick
-			} else if (i * 2 + 1 == hunger) {
-				blit(fx, y, 61, 27, 9, 9, 256, 256); // half drumstick
+			int y = doShake ? (baseY - 1 + (rand.nextUnsignedInt() & 1)) : baseY;
+			blit(fx, y, bgU, 27, 9, 9, 256, 256);
+			int threshold = i * 2 + 1;
+			if (threshold < hungerVal) {
+				blit(fx, y, fullU, 27, 9, 9, 256, 256);
+			} else if (threshold == hungerVal) {
+				blit(fx, y, halfU, 27, 9, 9, 256, 256);
 			}
 		}
 	} else {
-		for (int i = 0; i < 10; ++i) {
+		for (int i = 0; i < NUM_ICONS; ++i) {
 			int fx = rightEdge - i * 9 - 8;
-			fill(fx, y, fx + 7, y + 7, (i * 2 < hunger) ? 0xFFD27D2D : 0xFF333333);
+			fill(fx, baseY, fx + 7, baseY + 7, (i * 2 < hungerVal) ? 0xFFD27D2D : 0xFF333333);
 		}
 	}
 }

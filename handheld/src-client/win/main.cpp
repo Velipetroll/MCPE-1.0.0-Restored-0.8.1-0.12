@@ -867,15 +867,17 @@ public:
 
 	virtual bool load(const ResourceLocation& resourceLocation, std::string& resourceStream)
 	{
-		if (resourceLocation.mFileSystem == ResourceFileSystem::UserPackage)
-		{
-			std::string fullpath = "./resource_packs/vanilla/" + resourceLocation.mPath;
+		std::string fullpath;
+		if (resourceLocation.mFileSystem == ResourceFileSystem::UserPackage) {
+			fullpath = "./resource_packs/vanilla/" + resourceLocation.mPath;
+		} else if (resourceLocation.mFileSystem == ResourceFileSystem::ServerPackage) {
+			fullpath = "./behavior_packs/vanilla/" + resourceLocation.mPath;
+		}
+		if (!fullpath.empty()) {
 			std::ifstream readfile(fullpath);
-			if (readfile.is_open())
-			{
+			if (readfile.is_open()) {
 				std::stringstream buffer;
 				buffer << readfile.rdbuf();
-
 				resourceStream = buffer.str();
 				return true;
 			}
@@ -897,6 +899,8 @@ public:
 	}
 };
 
+#include "world/effect/MobEffect.h"
+#include "world/item/Item.h"
 extern mce::TextureGroup texgroup;
 
 extern bool gBenchChunksMode;
@@ -921,9 +925,13 @@ int main(int argc, char** argv)
 	LOGI("Minecraft restoration is running\n");
 
 	Resource::registerLoader(ResourceFileSystem::UserPackage, make_unique<UserPackageResourceLoader>());
+	Resource::registerLoader(ResourceFileSystem::ServerPackage, make_unique<UserPackageResourceLoader>());
 
+	MobEffect::initEffects();
 	Material::initMaterials();
 	Block::initBlocks();
+	Item::registerItems();
+	Item::initServerData();
 	Biome::initBiomes();
 
 

@@ -11,7 +11,7 @@
 #include "nbt/CompoundTag.h"
 #include "world/item/Item.h"
 // #include "world/item/enchanting/ItemEnchants.h"
-// #include "world/item/UseAnim.h"
+#include "world/item/UseAnim.h"
 // #include "world/item/MapItem.h"
 #include "EntityUniqueID.h"
 #include "Core/Debug/Log.h"

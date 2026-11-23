@@ -1,5 +1,9 @@
 #include "WorldPersistence.h"
+#include "GuiContext.h"
+#include "world/attribute/AttributeInstance.h"
 #include "world/crafting/CraftingRecipes.h"
+#include "world/entity/player/Player.h"
+#include "world/food/FoodConstants.h"
 #include <json/json.h>
 #include <algorithm>
 #include <cctype>
@@ -360,11 +364,6 @@ void applyMetadataToContext(const WorldMetadata& meta, GuiContext& ctx) {
 	ctx.activeWorldSeed = meta.seed;
 	ctx.isCreative = meta.isCreative;
 	ctx.health = (meta.health > 0) ? meta.health : 20;
-	ctx.hunger = (meta.health > 0) ? meta.hunger : 20;
-	ctx.saturation = (meta.health > 0) ? meta.saturation : 5.0f;
-	ctx.exhaustion = 0.0f;
-	ctx.healTimer = 0.0f;
-	ctx.starveTimer = 0.0f;
 	ctx.hurtFlashTimer = 0.0f;
 	ctx.sleepCompleteRequested = false;
 	ctx.statusBannerText.clear();
@@ -403,10 +402,10 @@ void applyMetadataToContext(const WorldMetadata& meta, GuiContext& ctx) {
 void captureMetadataFromContext(const GuiContext& ctx, WorldMetadata& outMeta) {
 	outMeta.name = ctx.activeWorldName;
 	outMeta.seed = ctx.activeWorldSeed;
-	outMeta.isCreative = ctx.isCreative;
-	outMeta.health = ctx.health;
-	outMeta.hunger = ctx.hunger;
-	outMeta.saturation = ctx.saturation;
+	outMeta.isCreative = ctx.localPlayer ? ctx.localPlayer->isCreative() : ctx.isCreative;
+	outMeta.health = ctx.localPlayer ? ctx.localPlayer->getHealth() : ctx.health;
+	outMeta.hunger = ctx.localPlayer ? (int)ctx.localPlayer->getAttribute(Player::HUNGER).getCurrentValue() : 20;
+	outMeta.saturation = ctx.localPlayer ? ctx.localPlayer->getAttribute(Player::SATURATION).getCurrentValue() : FoodConstants::START_SATURATION;
 	outMeta.selectedHotbarSlot = ctx.selectedHotbarSlot;
 	outMeta.worldTime = ctx.worldTime;
 	outMeta.hasBedSpawn = ctx.hasBedSpawn;

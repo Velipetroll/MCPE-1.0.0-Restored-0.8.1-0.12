@@ -329,9 +329,9 @@ float ItemInstance::getDestroySpeed(const Block* block) {
 }
 
 ItemInstance& ItemInstance::use(Player& player) {
-// 	if (!player.isItemInCooldown(mItem->getCooldownType())) {
-// 		return mItem->use(*this, player);
-// 	}
+	if (mItem) {
+		return mItem->use(*this, player);
+	}
 	return *this;
 }
 

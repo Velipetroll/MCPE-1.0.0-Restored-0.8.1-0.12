@@ -9,6 +9,7 @@
 
 class Font;
 class Options;
+class Player;
 class Screen;
 
 enum class GameState {
@@ -77,11 +78,8 @@ struct GuiContext {
 	bool inventoryInitialized = false;
 	bool isCreative = false;
 	int health = 20;
-	int hunger = 20;
-	float saturation = 5.0f;
-	float exhaustion = 0.0f;
-	float healTimer = 0.0f;
-	float starveTimer = 0.0f;
+	Player* localPlayer = nullptr;
+	int hudTickCount = 0;
 	float hurtFlashTimer = 0.0f;
 	bool respawnRequested = false;
 	bool sleepCompleteRequested = false;
