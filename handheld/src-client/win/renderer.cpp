@@ -954,6 +954,18 @@ public:
 			if (glinput.KeyDown(GLFW_KEY_D)) moveStrafe += 1.0f;
 		}
 
+		// MoveInputHandler::_updateXY() (0x011229e0): normalize non-zero digital input vector before sneak/item/sprint checks
+		if (moveStrafe != 0.0f || moveForward != 0.0f) {
+			float len = std::sqrt(moveStrafe * moveStrafe + moveForward * moveForward);
+			if (len >= 0.0001f) {
+				moveStrafe /= len;
+				moveForward /= len;
+			} else {
+				moveStrafe = 0.0f;
+				moveForward = 0.0f;
+			}
+		}
+
 		// MoveInputHandler::tick(): sneaking multiplies strafe & forward by 0.3f when not flying
 		if (sneaking && !(mPlayer && mPlayer->mAbilities.isFlying())) {
 			moveStrafe *= 0.3f;
@@ -3531,12 +3543,31 @@ void renderFirstPersonHand(const Camera& c, const ItemInstance& held, float aspe
 		}
 	} else {
 		bool isPullingBow = (Item::mBow && held.getItem() == Item::mBow && gBowPulling && gBowPullTime > 0.0f);
-		if (!isPullingBow) {
+		bool isEatingOrDrinking = (c.mPlayer && c.mPlayer->isUsingItem() &&
+		                           (held.getUseAnimation() == UseAnimation::Eat || held.getUseAnimation() == UseAnimation::Drink));
+		if (isEatingOrDrinking) {
+			// Exact 1:1 MCPE 1.0.2.1 ItemInHandRenderer::render() (0x01255d78..0x01255f94)
+			float f = static_cast<float>(c.mPlayer->getItemUseDuration()) - c.mAlpha + 1.0f;
+			int maxDur = std::max(1, held.getMaxUseDuration());
+			float ratio = std::max(0.0f, std::min(1.0f, f / static_cast<float>(maxDur)));
+			float r3 = ratio * ratio * ratio;
+			float r9 = r3 * r3 * r3;
+			float r27 = r9 * r9 * r9;
+			float t = 1.0f - r27;
+			float bob = 0.0f;
+			if (1.0f - ratio > 0.2f) {
+				bob = std::abs(std::cos(f * 0.25f * 3.14159265f) * 0.1f);
+			}
+			glTranslatef(t * 0.6f, bob - t * 0.5f, 0.0f);
+			glRotatef(t * 90.0f, 0.0f, 1.0f, 0.0f);
+			glRotatef(t * 10.0f, 1.0f, 0.0f, 0.0f);
+			glRotatef(t * 30.0f, 0.0f, 0.0f, 1.0f);
+		} else if (!isPullingBow) {
 			glTranslatef(-swSqrtSin * 0.40f, swDoubleSin * 0.20f, -swSin * 0.20f);
 		}
 		glTranslatef(0.56f, -0.52f, -0.72f);
 		glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
-		if (!isPullingBow) {
+		if (!isPullingBow && !isEatingOrDrinking) {
 			glRotatef(-swSqSin * 20.0f, 0.0f, 1.0f, 0.0f);
 			glRotatef(-swSqrtSin * 20.0f, 0.0f, 0.0f, 1.0f);
 			glRotatef(-swSqrtSin * 80.0f, 1.0f, 0.0f, 0.0f);
